@@ -1,0 +1,221 @@
+{
+  "upgrade_name": "Wave 6.2 — Voice Upload Fix + User Tag Messaging + Friend Request System",
+  "goal": "Fix the failing voice upload flow, implement driver lookup by tag format (name#number), and introduce a full friend request system with real-time updates — without breaking existing auth, validation, socket, or database architecture.",
+  "global_constraints": {
+    "must_not_break": [
+      "Existing authentication (Auth.js v5)",
+      "Existing socket contracts",
+      "Existing Zod validation structure",
+      "Existing voice message persistence logic",
+      "Existing database tables"
+    ],
+    "must_follow": [
+      "Next.js App Router",
+      "Drizzle ORM",
+      "PostgreSQL",
+      "Zod safeParse only",
+      "Socket.io typed events",
+      "Tailwind + shadcn/ui",
+      "TypeScript strict mode"
+    ]
+  },
+  "agents": [
+    {
+      "agent_name": "VoiceUploadDebugAgent",
+      "priority": 1,
+      "responsibility": "Diagnose and fix the failed audio upload issue end-to-end without breaking security or validation.",
+      "tasks": [
+        {
+          "id": "W6.2-A1-T1",
+          "title": "Audit upload route",
+          "actions": [
+            "Inspect POST /api/upload/audio route",
+            "Verify multipart parsing works in Next.js App Router",
+            "Ensure request.formData() is used correctly",
+            "Ensure file size validation (10MB) is enforced safely",
+            "Ensure MIME type validation uses server-side file.type",
+            "Ensure UUID filename generation is correct",
+            "Ensure file is written to /public/uploads safely",
+            "Return descriptive errorResponse instead of generic failure"
+          ]
+        },
+        {
+          "id": "W6.2-A1-T2",
+          "title": "Improve error transparency",
+          "actions": [
+            "Return structured { error, details? } on failure",
+            "Log server-side error safely (no sensitive data)",
+            "Ensure client displays meaningful toast error"
+          ]
+        },
+        {
+          "id": "W6.2-A1-T3",
+          "title": "Client-side fix",
+          "actions": [
+            "Verify useVoiceRecorder produces valid Blob",
+            "Ensure FormData.append('file', blob, filename) is correct",
+            "Ensure correct Content-Type not manually overridden",
+            "Display upload failure reason in UI"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "Audio uploads successfully",
+        "File appears in /public/uploads",
+        "API returns valid audioUrl",
+        "No generic 'failed to upload audio' message remains"
+      ]
+    },
+    {
+      "agent_name": "UserTagIdentityAgent",
+      "priority": 2,
+      "responsibility": "Introduce driver identity tag system using format name#number for user lookup and messaging.",
+      "database_changes": {
+        "users_table_additions": [
+          {
+            "column": "tag",
+            "type": "varchar(20)",
+            "constraints": ["unique", "not null"]
+          },
+          {
+            "column": "tag_number",
+            "type": "integer",
+            "constraints": ["not null"]
+          }
+        ]
+      },
+      "tasks": [
+        {
+          "id": "W6.2-A2-T1",
+          "title": "Generate unique tag on registration",
+          "actions": [
+            "On user registration, generate tag format: name#random4digits",
+            "Ensure uniqueness via DB check or retry loop",
+            "Persist tag and tag_number",
+            "Expose tag in safe API responses (never password_hash)"
+          ]
+        },
+        {
+          "id": "W6.2-A2-T2",
+          "title": "Tag lookup endpoint",
+          "actions": [
+            "Create GET /api/users/by-tag?tag=name#1234",
+            "Validate input with Zod",
+            "Return safe user info (id, name, tag)",
+            "Return 404 if not found"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "Each user has unique tag",
+        "User can search another driver using name#number",
+        "No duplicate tags allowed"
+      ]
+    },
+    {
+      "agent_name": "FriendRequestAgent",
+      "priority": 3,
+      "responsibility": "Implement a friend request system with DB persistence, API routes, and real-time socket notifications.",
+      "database_changes": {
+        "new_table": "friend_requests",
+        "columns": [
+          "id uuid pk",
+          "sender_id uuid fk -> users",
+          "receiver_id uuid fk -> users",
+          "status enum('pending','accepted','rejected')",
+          "created_at timestamp default now()"
+        ],
+        "constraints": [
+          "unique(sender_id, receiver_id)"
+        ]
+      },
+      "tasks": [
+        {
+          "id": "W6.2-A3-T1",
+          "title": "Friend request API routes",
+          "actions": [
+            "POST /api/friends/request (send request)",
+            "PATCH /api/friends/[id]/accept",
+            "PATCH /api/friends/[id]/reject",
+            "GET /api/friends/list (accepted friends)",
+            "GET /api/friends/requests (pending requests)"
+          ],
+          "requirements": [
+            "Auth enforced",
+            "Ownership checks enforced",
+            "Cannot send request to self",
+            "Cannot duplicate existing request",
+            "Cannot request if already friends"
+          ]
+        },
+        {
+          "id": "W6.2-A3-T2",
+          "title": "Socket integration",
+          "actions": [
+            "Emit friend_request_received event",
+            "Emit friend_request_accepted event",
+            "Update client UI in real time"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "User can send friend request via tag search",
+        "Receiver gets real-time notification",
+        "Receiver can accept/reject",
+        "Friends list shows accepted users"
+      ]
+    },
+    {
+      "agent_name": "UIEnhancementAgent",
+      "priority": 4,
+      "responsibility": "Integrate tag messaging and friend system into UI.",
+      "tasks": [
+        {
+          "id": "W6.2-A4-T1",
+          "title": "Search by tag UI",
+          "actions": [
+            "Add input field on Messages page: 'Enter driver tag (name#1234)'",
+            "Call GET /api/users/by-tag",
+            "Show result card with Send Friend Request button"
+          ]
+        },
+        {
+          "id": "W6.2-A4-T2",
+          "title": "Friend system UI",
+          "actions": [
+            "Create Friends page",
+            "Show pending requests",
+            "Add Accept / Reject buttons",
+            "Show accepted friends list"
+          ]
+        },
+        {
+          "id": "W6.2-A4-T3",
+          "title": "Restrict direct messaging",
+          "actions": [
+            "Allow sending voice message only if users are friends",
+            "Display warning if not friends"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "User can search by tag",
+        "Friend request workflow works fully",
+        "Messaging limited to friends if enforced",
+        "No UI console errors"
+      ]
+    }
+  ],
+  "integration_checkpoint": {
+    "must_pass": [
+      "Audio upload works reliably",
+      "Users have unique tag identity",
+      "Friend request system works end-to-end",
+      "Real-time notifications work",
+      "Voice messages can be sent using tag-based lookup",
+      "No TypeScript errors",
+      "No runtime errors"
+    ]
+  },
+  "stop_condition": "Voice upload fixed, tag-based lookup functional, friend system fully working with real-time updates and no regressions."
+}
