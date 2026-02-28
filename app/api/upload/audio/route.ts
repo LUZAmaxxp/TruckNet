@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth-helpers";
 import { successResponse, errorResponse } from "@/lib/api";
+import { env } from "@/lib/env";
 import { randomUUID } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
@@ -53,7 +54,8 @@ export async function POST(req: NextRequest) {
     return errorResponse("File exceeds the 10 MB size limit", 413);
   }
 
-  const mimeType = file.type || "audio/webm";
+  // Strip codec parameters (e.g. "audio/webm;codecs=opus" → "audio/webm")
+  const mimeType = (file.type || "audio/webm").split(";")[0].trim();
   if (!ALLOWED_MIME_TYPES.has(mimeType)) {
     return errorResponse(
       `Unsupported audio MIME type: "${mimeType}". Allowed: ${Array.from(ALLOWED_MIME_TYPES).join(", ")}`,
@@ -79,5 +81,9 @@ export async function POST(req: NextRequest) {
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(join(uploadsDir, filename), buffer);
 
-  return successResponse({ audioUrl: `/uploads/${filename}` }, 201);
+  // Build absolute URL — required so audioUrl passes z.string().url() validation
+  const base = env.NEXTAUTH_URL.replace(/\/$/, "");
+  const audioUrl = `${base}/uploads/${filename}`;
+
+  return successResponse({ audioUrl }, 201);
 }

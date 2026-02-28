@@ -3,9 +3,12 @@ import {
   pgEnum,
   uuid,
   text,
+  varchar,
+  integer,
   timestamp,
   doublePrecision,
   index,
+  unique,
 } from "drizzle-orm/pg-core";
 import { type InferSelectModel, type InferInsertModel } from "drizzle-orm";
 
@@ -23,6 +26,12 @@ export const stressSignalStatusEnum = pgEnum("stress_signal_status", [
   "resolved",
 ]);
 
+export const friendRequestStatusEnum = pgEnum("friend_request_status", [
+  "pending",
+  "accepted",
+  "rejected",
+]);
+
 // ---------------------------------------------------------------------------
 // users
 // ---------------------------------------------------------------------------
@@ -32,6 +41,9 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  tag: varchar("tag", { length: 20 }).notNull().unique(),
+  tagNumber: integer("tag_number").notNull(),
+  profileImageUrl: varchar("profile_image_url", { length: 255 }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -107,6 +119,33 @@ export const stressSignals = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// friend_requests
+// ---------------------------------------------------------------------------
+
+export const friendRequests = pgTable(
+  "friend_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    senderId: uuid("sender_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    receiverId: uuid("receiver_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: friendRequestStatusEnum("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    uniquePair: unique("friend_requests_sender_receiver_unique").on(
+      table.senderId,
+      table.receiverId
+    ),
+  })
+);
+
+// ---------------------------------------------------------------------------
 // Inferred TypeScript types
 // ---------------------------------------------------------------------------
 
@@ -121,3 +160,6 @@ export type NewVoiceMessage = InferInsertModel<typeof voiceMessages>;
 
 export type StressSignal = InferSelectModel<typeof stressSignals>;
 export type NewStressSignal = InferInsertModel<typeof stressSignals>;
+
+export type FriendRequest = InferSelectModel<typeof friendRequests>;
+export type NewFriendRequest = InferInsertModel<typeof friendRequests>;

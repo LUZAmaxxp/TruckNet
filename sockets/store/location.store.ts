@@ -16,6 +16,8 @@ export interface DriverLocationEntry {
   longitude: number;
   socketId: string;
   updatedAt: Date;
+  name: string | null;
+  profileImageUrl: string | null;
 }
 
 const store = new Map<string, DriverLocationEntry>();

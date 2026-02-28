@@ -1,0 +1,115 @@
+{
+  "fix_name": "Critical UUID Handling Fix — Tag to UUID Resolution",
+  "problem_summary": "Tag string (e.g. name#1234) is being passed directly into UUID DB fields (receiver_id, sender_id), causing Postgres error 22P02 invalid input syntax for uuid.",
+  "root_cause": "API routes expect UUID but frontend now sends tag string.",
+  "execution_mode": "parallel_multi_agent",
+  "agents": [
+    {
+      "agent_name": "Agent_A_APIValidationFix",
+      "responsibility": "Fix API routes to resolve tag → UUID before DB operations.",
+      "tasks": [
+        {
+          "id": "A-T1",
+          "title": "Fix POST /api/friends/request",
+          "actions": [
+            "Change request body schema to accept { tag: string } instead of receiverId",
+            "Validate tag format using Zod regex: /^[a-zA-Z0-9_]+#[0-9]{4}$/",
+            "Query users table WHERE tag = inputTag",
+            "If not found → return 404",
+            "Extract foundUser.id (UUID)",
+            "Use foundUser.id as receiver_id in DB insert",
+            "Never pass tag string into UUID column"
+          ]
+        },
+        {
+          "id": "A-T2",
+          "title": "Fix POST /api/voice-messages",
+          "actions": [
+            "If request body contains tag instead of receiverId:",
+            "Resolve tag to user.id first",
+            "Reject if user not found",
+            "Insert using UUID only",
+            "Ensure VoiceMessageSchema expects UUID after resolution"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "No tag string ever reaches DB UUID column",
+        "Friend request works using tag input",
+        "Voice message works using tag input"
+      ]
+    },
+    {
+      "agent_name": "Agent_B_ZodSchemaCorrection",
+      "responsibility": "Ensure schemas reflect correct input expectations.",
+      "tasks": [
+        {
+          "id": "B-T1",
+          "title": "Create TagInputSchema",
+          "actions": [
+            "Define z.string().regex(/^[a-zA-Z0-9_]+#[0-9]{4}$/)",
+            "Use safeParse only",
+            "Return descriptive 400 on invalid format"
+          ]
+        },
+        {
+          "id": "B-T2",
+          "title": "Separate ExternalInputSchema vs InternalDBSchema",
+          "actions": [
+            "External API accepts tag",
+            "Internal DB logic only uses UUID",
+            "Never allow UUID field to receive raw request input"
+          ]
+        }
+      ]
+    },
+    {
+      "agent_name": "Agent_C_UIAdjustment",
+      "responsibility": "Ensure frontend sends correct payload structure.",
+      "tasks": [
+        {
+          "id": "C-T1",
+          "title": "Update friend request frontend",
+          "actions": [
+            "Send { tag: 'name#1234' } instead of receiverId",
+            "Handle 404 user not found error gracefully",
+            "Display toast on invalid tag"
+          ]
+        },
+        {
+          "id": "C-T2",
+          "title": "Update voice message send logic",
+          "actions": [
+            "If sending by tag, call API with tag field",
+            "Do not assume UUID in frontend"
+          ]
+        }
+      ]
+    },
+    {
+      "agent_name": "Agent_D_DefensiveGuardAgent",
+      "responsibility": "Prevent similar UUID mistakes in future.",
+      "tasks": [
+        {
+          "id": "D-T1",
+          "title": "Add UUID validation guard",
+          "actions": [
+            "Before any DB insert/update with UUID fields:",
+            "Assert typeof id === string",
+            "Assert id matches UUID regex",
+            "If invalid → throw 400 before DB layer"
+          ]
+        }
+      ]
+    }
+  ],
+  "integration_tests_required": [
+    "Send friend request using tag → success",
+    "Send friend request with invalid tag → 400",
+    "Send friend request with non-existent tag → 404",
+    "Send voice message using tag → success",
+    "No Postgres 22P02 errors occur",
+    "TypeScript strict passes"
+  ],
+  "stop_condition": "Tag-to-UUID resolution implemented, no UUID syntax errors, friend request and voice messaging fully operational."
+}

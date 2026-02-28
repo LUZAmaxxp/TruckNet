@@ -11,8 +11,12 @@ import {
   setDriverLocation,
   removeDriverLocation,
   getAllDriverLocations,
+  getDriverLocation,
 } from "@/sockets/store/location.store";
 import { haversineDistanceKm } from "@/lib/haversine";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type TSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -27,7 +31,7 @@ type TSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEve
  * emit `nearby_driver_update` to all affected connected drivers.
  */
 export function registerLocationHandler(io: IO, socket: TSocket): void {
-  socket.on("update_location", (payload: unknown) => {
+  socket.on("update_location", async (payload: unknown) => {
     const result = validateSocketEvent(LocationUpdateSchema, payload);
 
     if (!result.ok) {
@@ -41,12 +45,38 @@ export function registerLocationHandler(io: IO, socket: TSocket): void {
     const { latitude, longitude } = result.data;
     const userId = socket.data.userId;
 
-    // Update in-memory store with fresh location + socket reference
+    // Resolve user's display name and avatar — cached in the store after first lookup
+    const existing = getDriverLocation(userId);
+    let name: string | null = existing?.name ?? null;
+    let profileImageUrl: string | null = existing?.profileImageUrl ?? null;
+
+    if (name === null) {
+      // First time we see this driver — fetch from DB once and cache
+      try {
+        const row = await db
+          .select({ name: users.name, profileImageUrl: users.profileImageUrl })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1)
+          .then((r) => r[0] ?? null);
+
+        if (row) {
+          name = row.name ?? null;
+          profileImageUrl = row.profileImageUrl ?? null;
+        }
+      } catch {
+        // Non-fatal — driver will show as "Driver <id>" on first update
+      }
+    }
+
+    // Update in-memory store with fresh location + socket reference + enriched profile data
     setDriverLocation(userId, {
       latitude,
       longitude,
       socketId: socket.id,
       updatedAt: new Date(),
+      name,
+      profileImageUrl,
     });
 
     // Compute nearby drivers from in-memory store (50 km radius, stale >5 min excluded)
@@ -67,6 +97,11 @@ export function registerLocationHandler(io: IO, socket: TSocket): void {
         latitude: d.latitude,
         longitude: d.longitude,
         updatedAt: d.updatedAt,
+        name: d.name ?? undefined,
+        profileImageUrl: d.profileImageUrl,
+        distanceKm: parseFloat(
+          haversineDistanceKm(latitude, longitude, d.latitude, d.longitude).toFixed(2)
+        ),
       }));
 
     // Emit to the updating driver: their current nearby list
@@ -95,6 +130,16 @@ export function registerLocationHandler(io: IO, socket: TSocket): void {
           latitude: d.latitude,
           longitude: d.longitude,
           updatedAt: d.updatedAt,
+          name: d.name ?? undefined,
+          profileImageUrl: d.profileImageUrl,
+          distanceKm: parseFloat(
+            haversineDistanceKm(
+              nearbyDriver.latitude,
+              nearbyDriver.longitude,
+              d.latitude,
+              d.longitude
+            ).toFixed(2)
+          ),
         }));
 
       io.to(nearbyDriver.socketId).emit("nearby_driver_update", listForNearby);

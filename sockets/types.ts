@@ -22,6 +22,9 @@ export interface NearbyDriverEntry {
   latitude: number;
   longitude: number;
   updatedAt: Date;
+  profileImageUrl?: string | null;
+  name?: string;
+  distanceKm?: number;
 }
 
 export interface VoiceMessageAlert {
@@ -40,10 +43,26 @@ export interface StressSignalAlert {
   createdAt: Date;
 }
 
+export interface FriendRequestAlert {
+  requestId: string;
+  fromUserId: string;
+  fromUserName: string;
+  fromUserTag: string;
+}
+
+export interface FriendRequestAcceptedAlert {
+  requestId: string;
+  friendId: string;
+  friendName: string;
+  friendTag: string;
+}
+
 export interface ServerToClientEvents {
   nearby_driver_update: (drivers: NearbyDriverEntry[]) => void;
   voice_message_received: (message: VoiceMessageAlert) => void;
   stress_signal_alert: (signal: StressSignalAlert) => void;
+  friend_request_received: (payload: FriendRequestAlert) => void;
+  friend_request_accepted: (payload: FriendRequestAcceptedAlert) => void;
   error: (payload: { error: string; details?: ZodIssue[] }) => void;
 }
 

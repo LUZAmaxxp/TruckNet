@@ -1,0 +1,289 @@
+{
+  "project": {
+    "name": "TruckConnect UI Enhancement",
+    "environment": "Next.js 14 App Router",
+    "ui_stack": ["Tailwind CSS", "shadcn/ui", "Framer Motion", "Leaflet", "Sonner"],
+    "primary_context": "Mobile-first real-time driver communication platform",
+    "design_goal": "Ultra-clear, high-contrast, low-latency real-time interface"
+  },
+
+  "ui_principles": [
+    "Map-first interface",
+    "Emergency visibility priority",
+    "Minimal cognitive load",
+    "Large tap targets",
+    "Socket-driven micro feedback",
+    "Zero UI blocking during real-time updates"
+  ],
+
+  "global_theme_system": {
+    "modes": ["dark_default", "light_optional", "high_contrast"],
+    "color_tokens": {
+      "primary": "Deep Blue",
+      "accent": "Amber",
+      "danger": "Signal Red",
+      "success": "Green",
+      "neutral_bg": "Dark Slate"
+    },
+    "ui_density": "Comfortable spacing for touch devices",
+    "font_strategy": "High legibility, semi-bold headings"
+  },
+
+  "main_agent": {
+    "role": "Real-Time UX Architect",
+    "responsibilities": [
+      "Ensure real-time responsiveness",
+      "Coordinate all UI sub-agents",
+      "Prevent re-render storms from socket updates",
+      "Maintain performance under 10k concurrent users",
+      "Preserve backend contract compliance"
+    ]
+  },
+
+  "sub_agents": [
+
+    {
+      "id": "app-shell-agent",
+      "role": "Application Layout Engineer",
+      "responsibilities": [
+        "Create global AppShell with protected layout",
+        "Mobile bottom navigation",
+        "Desktop sidebar layout",
+        "Sticky emergency action access",
+        "Connection status badge (top-right)"
+      ],
+      "components_to_create": [
+        "AppShell",
+        "BottomNav",
+        "SidebarNav",
+        "LiveConnectionBadge"
+      ]
+    },
+
+    {
+      "id": "dashboard-agent",
+      "role": "Real-Time Dashboard UI Engineer",
+      "responsibilities": [
+        "Live nearby drivers panel",
+        "Socket-based auto-refresh animations",
+        "Smooth driver entry/exit transitions",
+        "Distance badge visualization",
+        "Stale driver fading effect"
+      ],
+      "framer_features": [
+        "AnimatePresence for driver list",
+        "Layout transitions for distance updates",
+        "Fade-out for stale drivers"
+      ]
+    },
+
+    {
+      "id": "map-ui-agent",
+      "role": "Leaflet Map Experience Engineer",
+      "responsibilities": [
+        "Custom marker icons (avatar circle)",
+        "Pulsing blue self marker",
+        "Stress signal red pulse marker",
+        "Marker clustering",
+        "Smooth re-centering animation",
+        "Bottom driver detail overlay"
+      ],
+      "performance_rules": [
+        "Do not re-render entire map on location update",
+        "Memoize markers",
+        "Use stable keys per driverId"
+      ],
+      "components": [
+        "DriverMarker",
+        "StressMarker",
+        "SelectedDriverOverlay",
+        "MapContainerWrapper"
+      ]
+    },
+
+    {
+      "id": "voice-ui-agent",
+      "role": "Voice Messaging UI Specialist",
+      "responsibilities": [
+        "Recording button with animated state",
+        "Waveform visualizer",
+        "Send animation feedback",
+        "Delivered vs listened badge",
+        "Audio bubble UI"
+      ],
+      "animation_strategy": [
+        "Recording pulse",
+        "Slide-in incoming message",
+        "Morph delivered → listened state"
+      ],
+      "components": [
+        "RecordButton",
+        "WaveformBar",
+        "VoiceMessageBubble",
+        "VoiceInboxList"
+      ]
+    },
+
+    {
+      "id": "stress-agent",
+      "role": "Emergency UX Specialist",
+      "responsibilities": [
+        "Large floating emergency button",
+        "Long-press activation",
+        "Confirmation modal",
+        "Countdown expiration timer",
+        "Full-width active alert banner",
+        "Resolve action UI"
+      ],
+      "animation_rules": [
+        "Subtle red flash on activation",
+        "Breathing red glow while active",
+        "Non-intrusive alert animation"
+      ],
+      "priority": "Highest UI visibility layer"
+    },
+
+    {
+      "id": "friends-ui-agent",
+      "role": "Social Interaction UI Engineer",
+      "responsibilities": [
+        "Friend request cards",
+        "Accept / Reject animated buttons",
+        "Real-time request toast",
+        "Friends list with avatar & tag",
+        "Search by tag input UI"
+      ],
+      "shadcn_usage": [
+        "Card",
+        "Input",
+        "Button",
+        "Badge",
+        "Dialog"
+      ],
+      "animations": [
+        "Request received slide-in",
+        "Accept success highlight",
+        "Reject fade-out"
+      ]
+    },
+
+    {
+      "id": "profile-ui-agent",
+      "role": "Driver Profile UX Engineer",
+      "responsibilities": [
+        "Avatar upload UI",
+        "Editable name form",
+        "Tag display copy-to-clipboard",
+        "Live preview avatar before upload"
+      ],
+      "components": [
+        "AvatarUploader",
+        "EditableProfileCard",
+        "TagBadge"
+      ]
+    },
+
+    {
+      "id": "socket-feedback-agent",
+      "role": "Real-Time Feedback Layer Engineer",
+      "responsibilities": [
+        "Integrate Sonner toast for all socket alerts",
+        "Stacked toast system",
+        "Connection lost UI",
+        "Reconnecting animation"
+      ],
+      "events_handled": [
+        "voice_message_received",
+        "stress_signal_alert",
+        "friend_request_received",
+        "friend_request_accepted"
+      ]
+    },
+
+    {
+      "id": "animation-layer-agent",
+      "role": "Framer Motion Optimization Engineer",
+      "responsibilities": [
+        "Create motion presets",
+        "Page transitions",
+        "Shared layout transitions",
+        "Prevent layout shifts",
+        "Keep animation under 300ms for responsiveness"
+      ],
+      "global_rules": [
+        "Never block user interaction",
+        "Use will-change carefully",
+        "Avoid heavy box-shadows"
+      ]
+    },
+
+    {
+      "id": "performance-agent",
+      "role": "Frontend Performance Architect",
+      "responsibilities": [
+        "Dynamic imports for map & heavy components",
+        "Lazy load profile avatars",
+        "Memoize socket listeners",
+        "Avoid global state overuse",
+        "Split code per route"
+      ],
+      "targets": {
+        "lighthouse_score": "90+",
+        "max_ui_latency_ms": 100,
+        "socket_update_render_scope": "Component-level only"
+      }
+    },
+
+    {
+      "id": "accessibility-agent",
+      "role": "Driver Accessibility Engineer",
+      "responsibilities": [
+        "Large tap targets",
+        "High contrast mode",
+        "ARIA labels for emergency button",
+        "Keyboard navigation for desktop"
+      ]
+    }
+  ],
+
+  "execution_phases": [
+    {
+      "phase": 1,
+      "name": "Design System & AppShell",
+      "agents": ["app-shell-agent"]
+    },
+    {
+      "phase": 2,
+      "name": "Core Real-Time UI",
+      "agents": ["dashboard-agent", "map-ui-agent"]
+    },
+    {
+      "phase": 3,
+      "name": "Communication Features",
+      "agents": ["voice-ui-agent", "friends-ui-agent"]
+    },
+    {
+      "phase": 4,
+      "name": "Emergency Layer",
+      "agents": ["stress-agent"]
+    },
+    {
+      "phase": 5,
+      "name": "Real-Time Feedback & Animation",
+      "agents": ["socket-feedback-agent", "animation-layer-agent"]
+    },
+    {
+      "phase": 6,
+      "name": "Optimization & Accessibility",
+      "agents": ["performance-agent", "accessibility-agent"]
+    }
+  ],
+
+  "ui_constraints": {
+    "map_should_not_unmount_on_state_change": true,
+    "socket_updates_should_not_trigger_full_page_render": true,
+    "emergency_button_always_visible": true,
+    "mobile_first_design": true,
+    "real_time_visual_feedback_mandatory": true
+  }
+}

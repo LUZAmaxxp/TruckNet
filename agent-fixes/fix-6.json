@@ -1,0 +1,76 @@
+{
+  "fix_name": "Fix Selected Driver Card Not Rendering After Map Click",
+  "problem_summary": "Clicking a driver marker does not show the Send Voice Message UI. Selected driver state is not triggering conditional render.",
+  "execution_mode": "ui_state_render_fix",
+  "agents": [
+    {
+      "agent_name": "Agent_A_MapClickAudit",
+      "responsibility": "Ensure marker click correctly sets selectedDriver.",
+      "tasks": [
+        {
+          "id": "A-T1",
+          "title": "Verify marker click handler",
+          "actions": [
+            "Locate onClick for map markers",
+            "Ensure onClick={() => setSelectedDriver(driver)}",
+            "Add console.log(driver) to confirm click fires",
+            "Confirm driver contains id (UUID)"
+          ]
+        }
+      ]
+    },
+    {
+      "agent_name": "Agent_B_StateStructureFix",
+      "responsibility": "Ensure selectedDriver state is correctly typed and initialized.",
+      "tasks": [
+        {
+          "id": "B-T1",
+          "title": "Fix state declaration",
+          "actions": [
+            "Ensure useState<Driver | null>(null)",
+            "Do not initialize as empty object {}",
+            "Do not initialize as undefined"
+          ]
+        }
+      ]
+    },
+    {
+      "agent_name": "Agent_C_ConditionalRenderFix",
+      "responsibility": "Fix rendering condition of DriverCard.",
+      "tasks": [
+        {
+          "id": "C-T1",
+          "title": "Correct conditional rendering",
+          "actions": [
+            "Replace {selectedDriver && (...)} with {selectedDriver !== null && (...)}",
+            "Do not check selectedDriver.id in condition",
+            "Ensure DriverCard receives full driver object"
+          ]
+        }
+      ]
+    },
+    {
+      "agent_name": "Agent_D_ButtonVisibilityGuard",
+      "responsibility": "Ensure Send Voice Message button appears only when driver is selected.",
+      "tasks": [
+        {
+          "id": "D-T1",
+          "title": "Render send button properly",
+          "actions": [
+            "Inside DriverCard, ensure button renders unconditionally",
+            "Do not hide button behind selectedDriver.id condition",
+            "Disable button only if id missing"
+          ]
+        }
+      ]
+    }
+  ],
+  "verification_steps": [
+    "Open two accounts",
+    "Click marker of other driver",
+    "Driver card appears",
+    "Send Voice Message button visible",
+    "Console shows valid selectedDriver object"
+  ],
+  "stop_condition": "Clicking driver marker reliably shows driver card with Send Voice Message button."
+}

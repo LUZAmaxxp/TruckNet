@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, MapPin, Navigation, Users } from "lucide-react";
+import { Loader2, MapPin, Navigation, Users, Wifi, WifiOff } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useSocket } from "@/hooks/useSocket";
 import { DriverCard } from "@/components/drivers/DriverCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +17,7 @@ const LOCATION_BROADCAST_INTERVAL_MS = 20_000; // 20 seconds
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { on, emit } = useSocket();
+  const { on, emit, onConnect, isConnected } = useSocket();
 
   const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriverEntry[]>([]);
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -60,6 +61,12 @@ export default function DashboardPage() {
       { enableHighAccuracy: true, timeout: 10000 }
     );
   }, [broadcastLocation]);
+
+  // Re-emit location immediately whenever the socket (re)connects
+  useEffect(() => {
+    const unsub = onConnect(updateLocation);
+    return unsub;
+  }, [onConnect, updateLocation]);
 
   // Initial location fetch + periodic interval
   useEffect(() => {
@@ -107,10 +114,21 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold">Dashboard</h1>
           <p className="text-muted-foreground text-sm">Real-time driver network overview</p>
         </div>
-        <Button onClick={updateLocation} variant="outline" size="sm">
-          <Navigation className="h-4 w-4 mr-2" />
-          Refresh Location
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Socket connection indicator */}
+          <span className="flex items-center gap-1.5 text-xs font-medium">
+            {isConnected
+              ? <Wifi className="h-3.5 w-3.5 text-green-500" />
+              : <WifiOff className="h-3.5 w-3.5 text-amber-500 animate-pulse" />}
+            <span className={isConnected ? "text-green-600 dark:text-green-400" : "text-amber-500"}>
+              {isConnected ? "Live" : "Reconnecting…"}
+            </span>
+          </span>
+          <Button onClick={updateLocation} variant="outline" size="sm">
+            <Navigation className="h-4 w-4 mr-2" />
+            Refresh Location
+          </Button>
+        </div>
       </div>
 
       {/* Location status */}
@@ -155,20 +173,36 @@ export default function DashboardPage() {
         </div>
 
         {nearbyDrivers.length === 0 ? (
-          <Card>
-            <CardContent className="py-8 text-center text-muted-foreground text-sm">
-              No drivers within 50 km. Position is broadcasting every 20 seconds.
-            </CardContent>
-          </Card>
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground text-sm">
+                No drivers within 50 km. Position is broadcasting every 20 seconds.
+              </CardContent>
+            </Card>
+          </motion.div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {nearbyDrivers.map((driver) => (
-              <DriverCard
-                key={driver.userId}
-                driver={driver}
-                onSendMessage={(id) => router.push(`/messages?to=${id}`)}
-              />
-            ))}
+            <AnimatePresence mode="popLayout">
+              {nearbyDrivers.map((driver) => (
+                <motion.div
+                  key={driver.userId}
+                  layout
+                  initial={{ opacity: 0, scale: 0.95, y: 12 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.92, y: -8 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                >
+                  <DriverCard
+                    driver={driver}
+                    onSendMessage={(id) => router.push(`/messages?to=${id}`)}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         )}
       </div>

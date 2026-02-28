@@ -1,0 +1,186 @@
+{
+  "upgrade_name": "Wave 6.3 — Parallel Multi-Agent Profile + Avatar System",
+  "execution_mode": "parallel_multi_agent",
+  "goal": "Implement user profile page, tag display, avatar upload, navbar avatar integration, and map avatar markers using simultaneous multi-agent execution with strict task ownership boundaries.",
+  "parallel_execution": true,
+  "orchestration_rules": {
+    "agents_run_simultaneously": true,
+    "no_agent_may_modify_files_owned_by_another_agent": true,
+    "shared_contracts_must_be_respected": true,
+    "integration_happens_only_after_all_agents_complete": true
+  },
+  "global_constraints": {
+    "must_not_break": [
+      "Authentication system",
+      "Friend request system",
+      "Voice messaging system",
+      "Socket events",
+      "Map real-time updates"
+    ],
+    "must_follow": [
+      "Next.js App Router",
+      "Drizzle ORM",
+      "PostgreSQL",
+      "Zod safeParse validation",
+      "Socket.io typed events",
+      "Tailwind + shadcn/ui",
+      "TypeScript strict mode"
+    ]
+  },
+  "agents": [
+    {
+      "agent_name": "Agent_A_ProfileDatabase",
+      "runs_in_parallel_with": [
+        "Agent_B_ProfileAPI",
+        "Agent_C_ProfileUI",
+        "Agent_D_MapAvatarIntegration"
+      ],
+      "exclusive_file_ownership": [
+        "/db/schema.ts",
+        "/db/migrations/*"
+      ],
+      "responsibility": "Extend database schema safely.",
+      "tasks": [
+        {
+          "id": "A-T1",
+          "title": "Add profile_image_url column",
+          "actions": [
+            "Add nullable profile_image_url varchar(255) to users table",
+            "Generate Drizzle migration",
+            "Export updated User types",
+            "Do not modify unrelated tables"
+          ]
+        }
+      ],
+      "deliverable": "Migration applied and TypeScript types updated"
+    },
+    {
+      "agent_name": "Agent_B_ProfileAPI",
+      "runs_in_parallel_with": [
+        "Agent_A_ProfileDatabase",
+        "Agent_C_ProfileUI",
+        "Agent_D_MapAvatarIntegration"
+      ],
+      "exclusive_file_ownership": [
+        "/app/api/profile/*",
+        "/app/api/profile/upload-avatar/route.ts"
+      ],
+      "responsibility": "Build secure profile API endpoints.",
+      "depends_on_contract": [
+        "profile_image_url column exists"
+      ],
+      "tasks": [
+        {
+          "id": "B-T1",
+          "title": "GET /api/profile",
+          "actions": [
+            "Require authentication",
+            "Return id, name, email, tag, profile_image_url",
+            "Never return password_hash"
+          ]
+        },
+        {
+          "id": "B-T2",
+          "title": "POST /api/profile/upload-avatar",
+          "actions": [
+            "Accept multipart form",
+            "Validate image MIME type",
+            "Enforce 5MB size limit",
+            "Generate UUID filename",
+            "Save in /public/avatars",
+            "Update users.profile_image_url",
+            "Return updated URL"
+          ]
+        }
+      ],
+      "deliverable": "Profile endpoints functional and secure"
+    },
+    {
+      "agent_name": "Agent_C_ProfileUI",
+      "runs_in_parallel_with": [
+        "Agent_A_ProfileDatabase",
+        "Agent_B_ProfileAPI",
+        "Agent_D_MapAvatarIntegration"
+      ],
+      "exclusive_file_ownership": [
+        "/app/(protected)/profile/page.tsx",
+        "/components/profile/*",
+        "/components/layout/Navbar.tsx"
+      ],
+      "responsibility": "Build profile page and navbar avatar UI.",
+      "tasks": [
+        {
+          "id": "C-T1",
+          "title": "Profile page",
+          "actions": [
+            "Create /profile page",
+            "Fetch GET /api/profile",
+            "Display tag formatted as name#number",
+            "Show avatar or fallback initials",
+            "Add upload input with preview",
+            "Show toast success/error"
+          ]
+        },
+        {
+          "id": "C-T2",
+          "title": "Navbar avatar",
+          "actions": [
+            "Display profile_image_url in navbar",
+            "Fallback to initials if absent",
+            "Click navigates to /profile"
+          ]
+        }
+      ],
+      "deliverable": "User can view tag and upload avatar; navbar updates immediately"
+    },
+    {
+      "agent_name": "Agent_D_MapAvatarIntegration",
+      "runs_in_parallel_with": [
+        "Agent_A_ProfileDatabase",
+        "Agent_B_ProfileAPI",
+        "Agent_C_ProfileUI"
+      ],
+      "exclusive_file_ownership": [
+        "/components/map/DriverMap.tsx"
+      ],
+      "responsibility": "Integrate avatar markers into map.",
+      "depends_on_contract": [
+        "profile_image_url available via existing nearby driver payload"
+      ],
+      "tasks": [
+        {
+          "id": "D-T1",
+          "title": "Avatar markers",
+          "actions": [
+            "Modify marker rendering logic",
+            "If profile_image_url exists, use circular avatar marker",
+            "Fallback to default icon",
+            "Optimize marker size (32px circle)",
+            "Ensure no performance degradation"
+          ]
+        }
+      ],
+      "deliverable": "Map shows user avatars as markers"
+    }
+  ],
+  "synchronization_phase": {
+    "after_all_agents_complete": [
+      "Run TypeScript strict check",
+      "Run lint",
+      "Run build",
+      "Manual test: profile upload + navbar update + map marker update"
+    ]
+  },
+  "integration_checkpoint": {
+    "must_pass": [
+      "Profile page accessible",
+      "Tag displayed correctly",
+      "Avatar upload works",
+      "Navbar updates avatar immediately",
+      "Map markers show avatars",
+      "No TypeScript errors",
+      "No runtime errors"
+    ]
+  },
+  "stop_condition": "All four agents complete successfully, integration tests pass, and UI reflects avatar changes in real time."
+}

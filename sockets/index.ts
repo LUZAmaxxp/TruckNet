@@ -11,6 +11,7 @@ import { applySocketRateLimits } from "@/sockets/middleware/rate-limit.middlewar
 import { registerLocationHandler } from "@/sockets/handlers/location.handler";
 import { registerVoiceHandler } from "@/sockets/handlers/voice.handler";
 import { registerStressHandler } from "@/sockets/handlers/stress.handler";
+import { registerFriendHandler } from "@/sockets/handlers/friend.handler";
 
 export type TypedSocketServer = SocketServer<
   ClientToServerEvents,
@@ -64,6 +65,7 @@ export function initSocketServer(
     registerLocationHandler(io!, socket);
     registerVoiceHandler(io!, socket);
     registerStressHandler(io!, socket);
+    registerFriendHandler(io!, socket);
   });
 
   return io;

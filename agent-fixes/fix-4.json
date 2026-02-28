@@ -1,0 +1,57 @@
+{
+  "fix_name": "Unify Nearby Source of Truth (Socket over API)",
+  "problem_summary": "Dashboard Nearby component shows empty even though location broadcasts are working. Likely using API-based nearby query instead of real-time socket store.",
+  "execution_mode": "targeted_real_time_fix",
+  "agents": [
+    {
+      "agent_name": "Agent_A_DashboardDataSourceFix",
+      "responsibility": "Ensure dashboard uses socket-driven nearby state instead of API polling.",
+      "tasks": [
+        {
+          "id": "A-T1",
+          "title": "Remove GET /api/drivers/nearby dependency from dashboard",
+          "actions": [
+            "Locate dashboard Nearby component",
+            "Remove initial fetch to /api/drivers/nearby",
+            "Use socket subscription nearby_driver_update as sole data source",
+            "Initialize state as empty array",
+            "Update state only from socket event"
+          ]
+        },
+        {
+          "id": "A-T2",
+          "title": "Ensure emission happens on connection",
+          "actions": [
+            "After socket connects and geolocation resolves, emit update_location immediately",
+            "Do not wait 20 seconds for first emission"
+          ]
+        }
+      ]
+    },
+    {
+      "agent_name": "Agent_B_ServerConsistencyAudit",
+      "responsibility": "Ensure location.handler emits to both sender and nearby drivers.",
+      "tasks": [
+        {
+          "id": "B-T1",
+          "title": "Confirm emission logic",
+          "actions": [
+            "Ensure after updating store, server recalculates nearby drivers",
+            "Emit nearby_driver_update to current socket",
+            "Emit to other nearby sockets",
+            "Do not rely on DB query"
+          ]
+        }
+      ]
+    }
+  ],
+  "verification_steps": [
+    "Open two browsers",
+    "Login as different users",
+    "Allow geolocation",
+    "Both emit update_location immediately",
+    "Both receive nearby_driver_update",
+    "Dashboard shows other driver instantly"
+  ],
+  "stop_condition": "Nearby drivers appear in dashboard instantly using socket-based real-time state."
+}

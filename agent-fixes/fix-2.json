@@ -1,0 +1,66 @@
+{
+  "fix_name": "Fix VoiceMessageSchema audioUrl Validation Failure",
+  "problem_summary": "Zod validation fails because audioUrl is a relative path (e.g., /uploads/file.webm) but schema requires a full valid URL via z.string().url().",
+  "execution_mode": "targeted_patch",
+  "agents": [
+    {
+      "agent_name": "Agent_A_UploadRouteFix",
+      "responsibility": "Return absolute URL instead of relative path.",
+      "tasks": [
+        {
+          "id": "A-T1",
+          "title": "Modify POST /api/upload/audio response",
+          "actions": [
+            "Import env from '@/lib/env'",
+            "After generating filename, build full URL:",
+            "const absoluteUrl = `${env.NEXTAUTH_URL}/uploads/${filename}`",
+            "Return { audioUrl: absoluteUrl } instead of relative path",
+            "Ensure no double slashes occur"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "Upload route returns full absolute URL",
+        "Example: http://localhost:3000/uploads/uuid.webm"
+      ]
+    },
+    {
+      "agent_name": "Agent_B_SchemaIntegrityCheck",
+      "responsibility": "Ensure VoiceMessageSchema remains strict.",
+      "tasks": [
+        {
+          "id": "B-T1",
+          "title": "Verify VoiceMessageSchema",
+          "actions": [
+            "Keep audioUrl as z.string().url()",
+            "Do NOT loosen validation",
+            "Confirm durationSeconds <= 60 still enforced"
+          ]
+        }
+      ]
+    },
+    {
+      "agent_name": "Agent_C_ClientFlowValidation",
+      "responsibility": "Ensure client uses returned absolute URL.",
+      "tasks": [
+        {
+          "id": "C-T1",
+          "title": "Check message send flow",
+          "actions": [
+            "Confirm upload returns audioUrl",
+            "Confirm POST /api/voice-messages sends that exact audioUrl",
+            "Do not manipulate URL on client"
+          ]
+        }
+      ]
+    }
+  ],
+  "integration_tests_required": [
+    "Upload audio → returns full URL",
+    "POST /api/voice-messages succeeds",
+    "No Zod validation error",
+    "Voice message stored in DB",
+    "Receiver receives real-time notification"
+  ],
+  "stop_condition": "audioUrl passes Zod validation and voice messaging works end-to-end."
+}

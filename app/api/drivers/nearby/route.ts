@@ -32,6 +32,7 @@ export async function GET(_req: NextRequest) {
     .select({
       id: users.id,
       name: users.name,
+      profileImageUrl: users.profileImageUrl,
       latitude: driverLocations.latitude,
       longitude: driverLocations.longitude,
       updatedAt: driverLocations.updatedAt,
@@ -53,6 +54,7 @@ export async function GET(_req: NextRequest) {
     .map((l) => ({
       id: l.id,
       name: l.name,
+      profileImageUrl: l.profileImageUrl,
       latitude: l.latitude,
       longitude: l.longitude,
       distanceKm: haversineDistanceKm(

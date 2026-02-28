@@ -45,7 +45,8 @@ export default function MapPage() {
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
+  /** Full driver object persisted on click — survives socket-driven drivers list replacements. */
+  const [selectedDriver, setSelectedDriver] = useState<DriverWithMeta | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -116,9 +117,25 @@ export default function MapPage() {
   }, [broadcastAndFetch]);
 
   // ---------------------------------------------------------------------------
-  // Derived: selected driver info
+  // Keep selectedDriver in sync: if the driver list refreshes with an updated
+  // entry for the currently-selected driver, merge the latest coords/distance.
   // ---------------------------------------------------------------------------
-  const selectedDriver = drivers.find((d) => d.userId === selectedDriverId) ?? null;
+  useEffect(() => {
+    if (!selectedDriver) return;
+    const fresh = drivers.find((d) => d.userId === selectedDriver.userId);
+    if (fresh) setSelectedDriver(fresh);
+    // intentionally omit selectedDriver from deps — we only want to run on drivers change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drivers]);
+
+  // Stable callback — wrapped in useCallback so react-leaflet Marker eventHandlers
+  // don't re-register on every socket-driven driver-list re-render.
+  const handleSelectDriver = useCallback((driver: DriverWithMeta) => {
+    console.log("[MapPage] marker clicked — selectedDriver:", driver);
+    setSelectedDriver((prev) =>
+      prev?.userId === driver.userId ? null : driver
+    );
+  }, []);
 
   const distanceLabel =
     selectedDriver?.distanceKm != null
@@ -167,14 +184,13 @@ export default function MapPage() {
         <DriverMap
           currentDriver={myLocation}
           nearbyDrivers={drivers}
-          selectedDriverId={selectedDriverId}
-          onSelectDriver={(id) =>
-            setSelectedDriverId((prev) => (prev === id ? null : id))
-          }
+          selectedDriverId={selectedDriver?.userId ?? null}
+          onSelectDriver={handleSelectDriver}
+          onSendMessage={(id) => router.push(`/messages?to=${id}`)}
         />
 
         {/* Selected driver overlay card */}
-        {selectedDriver && (
+        {selectedDriver !== null && (
           <Card className="absolute bottom-3 left-3 right-3 z-[1000] shadow-xl border-0 bg-background/95 backdrop-blur-sm sm:left-auto sm:right-3 sm:w-80">
             <CardContent className="pt-4 pb-3 px-4">
               <div className="flex items-start justify-between gap-2 mb-2">
@@ -193,7 +209,7 @@ export default function MapPage() {
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 shrink-0"
-                  onClick={() => setSelectedDriverId(null)}
+                  onClick={() => setSelectedDriver(null)}
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -207,6 +223,7 @@ export default function MapPage() {
               <Button
                 className="w-full"
                 size="sm"
+                disabled={!selectedDriver.userId}
                 onClick={() =>
                   router.push(`/messages?to=${selectedDriver.userId}`)
                 }

@@ -1,11 +1,38 @@
 import { type NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { validateOrThrow } from "@/lib/validate";
 import { UserRegisterSchema } from "@/schemas/user.schema";
 
 const BCRYPT_SALT_ROUNDS = 12;
+
+/** Generate a slug from a name: lowercase, strip non-alphanum, max 12 chars */
+function nameSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 12) || "driver";
+}
+
+/** Generate a unique `slug#XXXX` tag, retrying up to maxAttempts times */
+async function generateUniqueTag(name: string, maxAttempts = 10): Promise<{ tag: string; tagNumber: number }> {
+  const slug = nameSlug(name);
+  for (let i = 0; i < maxAttempts; i++) {
+    const num = Math.floor(1000 + Math.random() * 9000);
+    const candidate = `${slug}#${num}`;
+    const existing = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.tag, candidate))
+      .limit(1);
+    if (existing.length === 0) {
+      return { tag: candidate, tagNumber: num };
+    }
+  }
+  throw new Error("Could not generate a unique tag — please retry.");
+}
 
 /**
  * POST /api/auth/register
@@ -22,6 +49,7 @@ export async function POST(req: NextRequest) {
     const data = await validateOrThrow(UserRegisterSchema, body);
 
     const passwordHash = await bcrypt.hash(data.password, BCRYPT_SALT_ROUNDS);
+    const { tag, tagNumber } = await generateUniqueTag(data.name);
 
     const [newUser] = await db
       .insert(users)
@@ -29,11 +57,14 @@ export async function POST(req: NextRequest) {
         name: data.name,
         email: data.email,
         passwordHash,
+        tag,
+        tagNumber,
       })
       .returning({
         id: users.id,
         name: users.name,
         email: users.email,
+        tag: users.tag,
         createdAt: users.createdAt,
       });
 

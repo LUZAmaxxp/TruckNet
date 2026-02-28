@@ -4,7 +4,8 @@ import { Suspense } from "react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { RefreshCw, Send, Loader2 } from "lucide-react";
+import { RefreshCw, Send, Loader2, Search, UserCheck } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useSocket } from "@/hooks/useSocket";
 import { RecordButton } from "@/components/voice/RecordButton";
 import { VoiceMessageItem, type VoiceMessageData } from "@/components/voice/VoiceMessageItem";
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 
 function MessagesContent() {
   const searchParams = useSearchParams();
@@ -23,6 +25,9 @@ function MessagesContent() {
   const [inbox, setInbox] = useState<VoiceMessageData[]>([]);
   const [loadingInbox, setLoadingInbox] = useState(true);
   const [receiverId, setReceiverId] = useState(preselectedReceiver);
+  const [tagSearch, setTagSearch] = useState("");
+  const [tagSearchResult, setTagSearchResult] = useState<{ id: string; name: string; tag: string } | null>(null);
+  const [searchingTag, setSearchingTag] = useState(false);
   const [pendingBlob, setPendingBlob] = useState<{ blob: Blob; durationSeconds: number } | null>(null);
   const [sending, setSending] = useState(false);
   const sentBlobRef = useRef<Blob | null>(null);
@@ -69,6 +74,28 @@ function MessagesContent() {
     setPendingBlob({ blob, durationSeconds });
   }
 
+  // Search user by tag (e.g. "john#1234")
+  async function handleTagSearch() {
+    if (!tagSearch.trim()) return;
+    setSearchingTag(true);
+    setTagSearchResult(null);
+    try {
+      const res = await fetch(`/api/users/by-tag?tag=${encodeURIComponent(tagSearch.trim())}`);
+      if (!res.ok) {
+        toast.error("User not found with that tag.");
+        return;
+      }
+      const user = (await res.json()) as { id: string; name: string; tag: string };
+      setTagSearchResult(user);
+      setReceiverId(user.id);
+      toast.success(`Found: ${user.name} (${user.tag})`);
+    } catch {
+      toast.error("Failed to search by tag.");
+    } finally {
+      setSearchingTag(false);
+    }
+  }
+
   // Send flow: upload audio → post message
   async function handleSend() {
     if (!pendingBlob) {
@@ -100,14 +127,17 @@ function MessagesContent() {
       const { audioUrl } = (await uploadRes.json()) as { audioUrl: string };
 
       // 2. Create voice message record
+      // Send tag if input is tag format; otherwise send UUID
+      const trimmedReceiver = receiverId.trim();
+      const isTagFormat = /^[a-zA-Z0-9_]+#[0-9]{4}$/.test(trimmedReceiver);
+      const msgPayload = isTagFormat
+        ? { tag: trimmedReceiver, audioUrl, durationSeconds: pendingBlob.durationSeconds }
+        : { receiverId: trimmedReceiver, audioUrl, durationSeconds: pendingBlob.durationSeconds };
+
       const msgRes = await fetch("/api/voice-messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          receiverId: receiverId.trim(),
-          audioUrl,
-          durationSeconds: pendingBlob.durationSeconds,
-        }),
+        body: JSON.stringify(msgPayload),
       });
 
       if (!msgRes.ok) {
@@ -142,16 +172,48 @@ function MessagesContent() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Send a Voice Message</CardTitle>
-          <CardDescription>Record up to 60 seconds and send to a driver by their User ID.</CardDescription>
+          <CardDescription>Record up to 60 seconds. Search by tag above, or type a tag (e.g. john#1234) or User ID directly.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Tag search */}
+          <div className="space-y-1">
+            <Label htmlFor="tagSearch">Search by Driver Tag</Label>
+            <div className="flex gap-2">
+              <Input
+                id="tagSearch"
+                placeholder="e.g. john#1234"
+                value={tagSearch}
+                onChange={(e) => setTagSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void handleTagSearch(); }}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleTagSearch()}
+                disabled={searchingTag || !tagSearch.trim()}
+              >
+                {searchingTag ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              </Button>
+            </div>
+            {tagSearchResult && (
+              <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                <UserCheck className="h-4 w-4 text-green-500" />
+                <span>{tagSearchResult.name}</span>
+                <Badge variant="secondary">{tagSearchResult.tag}</Badge>
+              </div>
+            )}
+          </div>
+
+          <Separator />
+
           <div className="space-y-1">
             <Label htmlFor="receiverId">Receiver User ID</Label>
             <Input
               id="receiverId"
               placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
               value={receiverId}
-              onChange={(e) => setReceiverId(e.target.value)}
+              onChange={(e) => { setReceiverId(e.target.value); setTagSearchResult(null); }}
             />
           </div>
 
@@ -160,11 +222,18 @@ function MessagesContent() {
               onRecordingComplete={handleRecordingComplete}
               disabled={sending}
             />
-            {pendingBlob && (
-              <p className="text-sm text-muted-foreground">
-                Recording ready ({pendingBlob.durationSeconds}s) — tap Send
-              </p>
-            )}
+            <AnimatePresence>
+              {pendingBlob && (
+                <motion.p
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  className="text-sm text-muted-foreground"
+                >
+                  Recording ready ({pendingBlob.durationSeconds}s) — tap Send
+                </motion.p>
+              )}
+            </AnimatePresence>
           </div>
 
           <Button
@@ -205,11 +274,20 @@ function MessagesContent() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-2">
-            {inbox.map((msg) => (
-              <VoiceMessageItem key={msg.id} message={msg} onListened={handleListened} />
+          <AnimatePresence mode="popLayout">
+            {inbox.map((msg, i) => (
+              <motion.div
+                key={msg.id}
+                layout
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.2, delay: i * 0.04 }}
+              >
+                <VoiceMessageItem message={msg} onListened={handleListened} />
+              </motion.div>
             ))}
-          </div>
+          </AnimatePresence>
         )}
       </div>
     </div>

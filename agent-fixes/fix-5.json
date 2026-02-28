@@ -1,0 +1,88 @@
+{
+  "fix_name": "Fix Undefined receiverId When Sending Voice Message From Map Selection",
+  "problem_summary": "Clicking a driver on the map does not correctly propagate selected user ID, causing receiverId to be undefined when sending voice message.",
+  "execution_mode": "targeted_ui_state_fix",
+  "agents": [
+    {
+      "agent_name": "Agent_A_MapSelectionFix",
+      "responsibility": "Ensure selected driver state contains full driver object including UUID.",
+      "tasks": [
+        {
+          "id": "A-T1",
+          "title": "Fix selected driver state structure",
+          "actions": [
+            "Locate map page state for selectedDriver",
+            "Ensure setSelectedDriver(driver) stores full object, not only id",
+            "Confirm driver object contains id (UUID) field",
+            "If object uses userId instead of id, normalize naming"
+          ]
+        },
+        {
+          "id": "A-T2",
+          "title": "Fix marker click handler",
+          "actions": [
+            "Ensure onClick marker passes full driver object",
+            "Avoid passing partial data",
+            "Console.log selectedDriver after click to verify structure"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "selectedDriver is full object with valid UUID"
+      ]
+    },
+    {
+      "agent_name": "Agent_B_SendVoiceActionFix",
+      "responsibility": "Ensure send button uses selectedDriver safely.",
+      "tasks": [
+        {
+          "id": "B-T1",
+          "title": "Guard against undefined",
+          "actions": [
+            "Before sending, check if selectedDriver?.id exists",
+            "Disable send button if no driver selected",
+            "Show toast if no driver selected"
+          ]
+        },
+        {
+          "id": "B-T2",
+          "title": "Use correct field",
+          "actions": [
+            "If driver object uses userId, update send logic to use selectedDriver.userId",
+            "Ensure receiverId is UUID before API call",
+            "Add temporary console.log to verify UUID is string"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "receiverId is valid UUID when sending message"
+      ]
+    },
+    {
+      "agent_name": "Agent_C_TypeSafetyHardening",
+      "responsibility": "Prevent future undefined errors.",
+      "tasks": [
+        {
+          "id": "C-T1",
+          "title": "Type selectedDriver properly",
+          "actions": [
+            "Define SelectedDriver type with required id: string",
+            "Initialize state as SelectedDriver | null",
+            "Use strict null checks"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "TypeScript prevents undefined receiverId"
+      ]
+    }
+  ],
+  "integration_test": [
+    "Open two users",
+    "Select driver on map",
+    "Click Send Voice Message",
+    "Console shows valid UUID",
+    "Voice message API succeeds"
+  ],
+  "stop_condition": "receiverId is always valid UUID and no undefined errors occur."
+}

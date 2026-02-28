@@ -1,0 +1,131 @@
+{
+  "fix_name": "Fix Nearby Drivers Not Appearing in Dashboard",
+  "severity": "critical_user_blocker",
+  "execution_mode": "parallel_multi_agent_debug_and_fix",
+  "goal": "Ensure nearby drivers appear correctly in the dashboard Nearby component using real-time socket updates and consistent geolocation logic.",
+  "agents": [
+    {
+      "agent_name": "Agent_A_LocationEmissionAudit",
+      "responsibility": "Verify the current user's location is emitted correctly.",
+      "tasks": [
+        {
+          "id": "A-T1",
+          "title": "Verify browser geolocation",
+          "actions": [
+            "Inspect dashboard/map page",
+            "Ensure navigator.geolocation.getCurrentPosition is called",
+            "Confirm latitude/longitude are valid numbers (not 0,0)",
+            "Add temporary console.log for emitted coords"
+          ]
+        },
+        {
+          "id": "A-T2",
+          "title": "Verify socket emission",
+          "actions": [
+            "Ensure update_location is emitted after geolocation resolves",
+            "Ensure payload matches LocationUpdateSchema exactly",
+            "Ensure emission happens at least once on mount"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "update_location emits with valid lat/lng from dashboard"
+      ]
+    },
+    {
+      "agent_name": "Agent_B_SocketStoreVerification",
+      "responsibility": "Ensure driver locations are stored correctly on the server.",
+      "tasks": [
+        {
+          "id": "B-T1",
+          "title": "Inspect location.handler.ts",
+          "actions": [
+            "Confirm setDriverLocation(userId, lat, lng, socketId) is called",
+            "Confirm socket.data.userId is used as key",
+            "Confirm updatedAt timestamp is set"
+          ]
+        },
+        {
+          "id": "B-T2",
+          "title": "Stale filtering audit",
+          "actions": [
+            "Check stale cutoff logic (> 5 minutes)",
+            "Ensure updatedAt is compared using Date.now() consistently",
+            "Confirm units are milliseconds vs seconds"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "In-memory store contains multiple active drivers"
+      ]
+    },
+    {
+      "agent_name": "Agent_C_NearbyCalculationFix",
+      "responsibility": "Fix distance filtering logic if it excludes valid drivers.",
+      "tasks": [
+        {
+          "id": "C-T1",
+          "title": "Audit Haversine usage",
+          "actions": [
+            "Ensure lat/lng order is correct (lat, lon)",
+            "Ensure distance <= 50 km comparison",
+            "Add temporary logging of calculated distances"
+          ]
+        },
+        {
+          "id": "C-T2",
+          "title": "Ensure self is excluded",
+          "actions": [
+            "Exclude current userId explicitly",
+            "Ensure this exclusion does not break array logic"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "Nearby drivers array contains expected users within range"
+      ]
+    },
+    {
+      "agent_name": "Agent_D_UI_SubscriptionFix",
+      "responsibility": "Ensure dashboard Nearby component receives and renders data.",
+      "tasks": [
+        {
+          "id": "D-T1",
+          "title": "Socket subscription audit",
+          "actions": [
+            "Ensure useSocket subscribes to nearby_driver_update",
+            "Ensure listener is registered once",
+            "Ensure cleanup on unmount"
+          ]
+        },
+        {
+          "id": "D-T2",
+          "title": "State wiring",
+          "actions": [
+            "Ensure dashboard Nearby component uses socket-driven state",
+            "Ensure state is not overridden by empty API fetch",
+            "Ensure map and dashboard share same nearbyDrivers source"
+          ]
+        }
+      ],
+      "definition_of_done": [
+        "Dashboard updates immediately when socket event arrives"
+      ]
+    }
+  ],
+  "integration_verification": [
+    "Open two browsers (User A and User B)",
+    "Both allow geolocation",
+    "Both emit update_location",
+    "Server logs show both users in store",
+    "Both receive nearby_driver_update",
+    "Dashboard Nearby component renders other driver"
+  ],
+  "anti_regression_rules": [
+    "Do not hardcode coordinates",
+    "Do not bypass socket layer",
+    "Do not add polling to fix real-time issues",
+    "Do not duplicate nearby logic between map and dashboard"
+  ],
+  "stop_condition": "Nearby drivers appear reliably in dashboard and update in real time when drivers move."
+}

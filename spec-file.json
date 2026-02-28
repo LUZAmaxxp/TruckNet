@@ -2,21 +2,23 @@
   "project": {
     "name": "TruckConnect",
     "type": "Real-Time Web Communication Platform",
-    "description": "A real-time interpersonal communication system for truck drivers enabling geolocation-based discovery, voice messaging, and emergency stress signaling."
+    "description": "A real-time interpersonal communication system for truck drivers enabling geolocation-based discovery, voice messaging, emergency stress signaling, friend requests, and driver profiles with avatars."
   },
 
   "tech_stack": {
     "frontend": [
-      "Next.js (App Router)",
+      "Next.js 14 (App Router)",
       "Tailwind CSS",
       "shadcn/ui",
       "Socket.io Client",
-      "MediaRecorder API"
+      "MediaRecorder API",
+      "Leaflet / react-leaflet (interactive map)",
+      "Sonner (toast notifications)"
     ],
     "backend": [
       "Next.js Route Handlers",
-      "Auth.js",
-      "Socket.io Server",
+      "Auth.js v5 (Credentials provider, JWT sessions)",
+      "Socket.io Server (custom server.ts, standalone port)",
       "Drizzle ORM",
       "PostgreSQL",
       "Zod"
@@ -28,33 +30,47 @@
     "purpose": [
       "Validate API inputs",
       "Validate socket events",
-      "Validate environment variables",
-      "Enforce database-safe payloads"
+      "Validate environment variables at startup",
+      "Enforce database-safe payloads",
+      "Type inference via z.infer<>"
     ],
 
     "schemas": {
 
       "UserRegisterSchema": {
+        "file": "schemas/user.schema.ts",
         "zod": "z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(8) })"
       },
 
       "UserLoginSchema": {
+        "file": "schemas/user.schema.ts",
         "zod": "z.object({ email: z.string().email(), password: z.string().min(8) })"
       },
 
       "LocationUpdateSchema": {
+        "file": "schemas/location.schema.ts",
         "zod": "z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) })"
       },
 
       "VoiceMessageSchema": {
-        "zod": "z.object({ receiverId: z.string().uuid(), audioUrl: z.string().url(), durationSeconds: z.number().max(60) })"
+        "file": "schemas/voice.schema.ts",
+        "zod": "z.object({ receiverId: z.string().uuid(), audioUrl: z.string().url(), durationSeconds: z.number().max(60) })",
+        "note": "API route also accepts { tag, audioUrl, durationSeconds } and resolves tag to UUID before validation"
       },
 
       "StressSignalSchema": {
+        "file": "schemas/stress.schema.ts",
         "zod": "z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) })"
       },
 
+      "TagInputSchema": {
+        "file": "schemas/tag.schema.ts",
+        "zod": "z.string().regex(/^[a-zA-Z0-9_]+#[0-9]{4}$/)",
+        "note": "Validates driver tag format e.g. john#1234. Used in user lookup and voice message send."
+      },
+
       "EnvSchema": {
+        "file": "schemas/env.schema.ts",
         "zod": "z.object({ DATABASE_URL: z.string().url(), NEXTAUTH_SECRET: z.string().min(10), NEXTAUTH_URL: z.string().url(), SOCKET_PORT: z.string() })"
       }
     }
@@ -63,103 +79,247 @@
   "roles": [
     {
       "name": "Driver",
-      "permissions": "Full access"
+      "permissions": "Full access to all features"
     }
   ],
 
   "features": {
 
+    "authentication": {
+      "provider": "Auth.js v5 Credentials",
+      "session_strategy": "JWT",
+      "registration": "POST /api/auth/register — hashes password with bcrypt, auto-assigns unique tag (name#XXXX)",
+      "socket_auth": "GET /api/auth/socket-token — issues raw JWT for socket handshake"
+    },
+
+    "user_profile": {
+      "fields": ["name", "email", "tag (e.g. john#1234)", "profileImageUrl"],
+      "api_get": "GET /api/profile",
+      "api_update": "PATCH /api/profile (name)",
+      "avatar_upload": "POST /api/profile/upload-avatar — multipart, stores file, updates profileImageUrl",
+      "tag_lookup": "GET /api/users/by-tag?tag=name%231234 — resolves tag to user UUID"
+    },
+
     "nearby_drivers": {
       "radius_km_default": 50,
-      "distance_calculation": "Haversine formula or PostGIS",
-      "requires_validation": "LocationUpdateSchema"
+      "stale_threshold_minutes": 5,
+      "distance_calculation": "Haversine formula (lib/haversine.ts)",
+      "real_time_source": "In-memory location store (sockets/store/location.store.ts)",
+      "http_source": "GET /api/drivers/nearby — enriched with name, profileImageUrl, distanceKm",
+      "location_persist": "POST /api/drivers/location — upserts to driver_locations table",
+      "broadcast_interval_seconds": 20,
+      "socket_payload_fields": ["userId", "latitude", "longitude", "updatedAt", "name", "profileImageUrl", "distanceKm"]
+    },
+
+    "map": {
+      "library": "Leaflet + react-leaflet",
+      "tile_provider": "OpenStreetMap",
+      "features": [
+        "Current user marker (blue pulsing dot)",
+        "Nearby driver markers (grey dot or avatar circle, orange when selected)",
+        "Click marker → Leaflet popup with driver name, distance, Send Voice Message button",
+        "Selected driver overlay card (bottom of screen) with Send Voice Message button",
+        "Auto-recenters on first geolocation fix",
+        "Refreshes every 20 seconds via WebSocket + HTTP"
+      ]
     },
 
     "voice_messaging": {
       "max_duration_seconds": 60,
-      "validation_schema": "VoiceMessageSchema",
+      "recording": "MediaRecorder API via RecordButton component",
+      "upload": "POST /api/upload/audio — multipart upload, returns absolute audioUrl",
+      "send": "POST /api/voice-messages — accepts { receiverId, audioUrl, durationSeconds } or { tag, audioUrl, durationSeconds }",
+      "inbox": "GET /api/voice-messages — returns received messages with sender info",
+      "mark_listened": "PATCH /api/voice-messages/[id]/status",
+      "real_time_notify": "socket event voice_message_received emitted to receiver",
       "status_enum": ["delivered", "listened"]
     },
 
     "stress_signal": {
+      "description": "Emergency alert broadcast to all nearby drivers within 50 km",
+      "send": "POST /api/stress-signals",
+      "list_active": "GET /api/stress-signals/active",
+      "resolve": "PATCH /api/stress-signals/[id]/resolve",
       "expiration_minutes": 30,
-      "validation_schema": "StressSignalSchema",
+      "real_time_notify": "socket event stress_signal_alert emitted to nearby drivers",
       "status_enum": ["active", "resolved"]
+    },
+
+    "friend_requests": {
+      "description": "Send, accept, reject, and list friend connections between drivers",
+      "send": "POST /api/friends/request — accepts { receiverId } or { tag }",
+      "list": "GET /api/friends/list — returns accepted friends and pending incoming requests",
+      "accept": "PATCH /api/friends/[id]/accept",
+      "reject": "PATCH /api/friends/[id]/reject",
+      "real_time_notify": [
+        "socket event friend_request_received emitted to receiver on send",
+        "socket event friend_request_accepted emitted to original sender on accept"
+      ],
+      "status_enum": ["pending", "accepted", "rejected"]
     }
   },
 
   "real_time_architecture": {
-    "technology": "Socket.io",
-    "client_events": {
-      "update_location": "LocationUpdateSchema",
-      "send_voice_message": "VoiceMessageSchema",
-      "send_stress_signal": "StressSignalSchema"
+    "technology": "Socket.io v4",
+    "server": "Standalone custom server (server.ts) on SOCKET_PORT",
+    "auth_middleware": "JWT decoded via Auth.js decode(), userId injected into socket.data",
+    "in_memory_store": {
+      "file": "sockets/store/location.store.ts",
+      "fields": ["userId", "latitude", "longitude", "socketId", "updatedAt", "name", "profileImageUrl"],
+      "note": "name and profileImageUrl fetched from DB once per connection and cached"
     },
-    "server_events": [
-      "nearby_driver_update",
-      "voice_message_received",
-      "stress_signal_alert"
+
+    "client_events": {
+      "update_location": "LocationUpdateSchema — updates store, recomputes nearby, emits nearby_driver_update",
+      "send_voice_message": "VoiceMessageSchema — persists to DB, emits voice_message_received to receiver",
+      "send_stress_signal": "StressSignalSchema — persists to DB, emits stress_signal_alert to nearby drivers"
+    },
+
+    "server_events": {
+      "nearby_driver_update": "NearbyDriverEntry[] — includes name, profileImageUrl, distanceKm",
+      "voice_message_received": "VoiceMessageAlert — id, senderId, audioUrl, durationSeconds, createdAt",
+      "stress_signal_alert": "StressSignalAlert — id, userId, latitude, longitude, createdAt",
+      "friend_request_received": "FriendRequestAlert — requestId, fromUserId, fromUserName, fromUserTag",
+      "friend_request_accepted": "FriendRequestAcceptedAlert — requestId, friendId, friendName, friendTag",
+      "error": "{ error: string, details?: ZodIssue[] }"
+    },
+
+    "client_hook": {
+      "file": "hooks/useSocket.ts",
+      "features": [
+        "Async JWT fetch before io() connection",
+        "Emit queue — buffers emit() calls made during JWT fetch window, flushed once socket is created",
+        "onConnect(cb) — fires callback on every connect/reconnect, immediately if already connected",
+        "Typed on() / emit() wrappers",
+        "Auto-reconnect with exponential backoff"
+      ]
+    }
+  },
+
+  "api_routes": {
+    "auth": [
+      "POST /api/auth/register",
+      "GET|POST /api/auth/[...nextauth]",
+      "GET /api/auth/socket-token"
+    ],
+    "profile": [
+      "GET /api/profile",
+      "PATCH /api/profile",
+      "POST /api/profile/upload-avatar"
+    ],
+    "users": [
+      "GET /api/users/me",
+      "GET /api/users/by-tag?tag=name%231234"
+    ],
+    "drivers": [
+      "POST /api/drivers/location",
+      "GET /api/drivers/nearby"
+    ],
+    "voice_messages": [
+      "POST /api/voice-messages",
+      "GET /api/voice-messages",
+      "PATCH /api/voice-messages/[id]/status"
+    ],
+    "upload": [
+      "POST /api/upload/audio"
+    ],
+    "stress_signals": [
+      "POST /api/stress-signals",
+      "GET /api/stress-signals/active",
+      "PATCH /api/stress-signals/[id]/resolve"
+    ],
+    "friends": [
+      "POST /api/friends/request",
+      "GET /api/friends/list",
+      "PATCH /api/friends/[id]/accept",
+      "PATCH /api/friends/[id]/reject"
+    ]
+  },
+
+  "pages": {
+    "public": [
+      "/login",
+      "/register"
+    ],
+    "protected": [
+      "/dashboard — location broadcast, nearby drivers list, real-time alerts",
+      "/map — Leaflet interactive map with driver markers and click-to-message",
+      "/messages — voice message inbox and send (by UUID or tag#XXXX)",
+      "/friends — friend requests, pending list, accepted friends",
+      "/profile — view/edit name, upload avatar, view tag",
+      "/stress — send emergency signal, view and resolve active signals"
     ]
   },
 
   "database_schema": {
 
     "users": {
-      "id": "uuid (pk)",
-      "name": "text",
-      "email": "text unique",
-      "password_hash": "text",
-      "created_at": "timestamp"
+      "id": "uuid (pk, default random)",
+      "name": "text not null",
+      "email": "text unique not null",
+      "password_hash": "text not null",
+      "tag": "varchar(20) unique not null — auto-assigned e.g. john#1234",
+      "tag_number": "integer not null — the 4-digit suffix",
+      "profile_image_url": "varchar(255) nullable",
+      "created_at": "timestamp with timezone"
     },
 
     "driver_locations": {
-      "id": "uuid",
-      "user_id": "uuid fk users.id",
-      "latitude": "float",
-      "longitude": "float",
-      "updated_at": "timestamp"
+      "id": "uuid (pk)",
+      "user_id": "uuid fk users.id (cascade delete)",
+      "latitude": "double precision",
+      "longitude": "double precision",
+      "updated_at": "timestamp with timezone",
+      "indexes": ["user_id", "updated_at"]
     },
 
     "voice_messages": {
-      "id": "uuid",
-      "sender_id": "uuid fk users.id",
-      "receiver_id": "uuid fk users.id",
+      "id": "uuid (pk)",
+      "sender_id": "uuid fk users.id (cascade delete)",
+      "receiver_id": "uuid fk users.id (cascade delete)",
       "audio_url": "text",
-      "created_at": "timestamp",
-      "status": "enum(delivered, listened)"
+      "duration_seconds": "double precision",
+      "created_at": "timestamp with timezone",
+      "status": "enum(delivered, listened) default delivered"
     },
 
     "stress_signals": {
-      "id": "uuid",
-      "user_id": "uuid fk users.id",
-      "latitude": "float",
-      "longitude": "float",
-      "created_at": "timestamp",
-      "status": "enum(active, resolved)"
+      "id": "uuid (pk)",
+      "user_id": "uuid fk users.id (cascade delete)",
+      "latitude": "double precision",
+      "longitude": "double precision",
+      "created_at": "timestamp with timezone",
+      "status": "enum(active, resolved) default active",
+      "indexes": ["(status, created_at)"]
+    },
+
+    "friend_requests": {
+      "id": "uuid (pk)",
+      "sender_id": "uuid fk users.id (cascade delete)",
+      "receiver_id": "uuid fk users.id (cascade delete)",
+      "status": "enum(pending, accepted, rejected) default pending",
+      "created_at": "timestamp with timezone",
+      "constraints": ["unique(sender_id, receiver_id)"]
     }
   },
 
   "security_requirements": [
-    "All API routes validated with Zod",
+    "All API routes protected by Auth.js session check",
+    "All API inputs validated with Zod before processing",
     "All socket events validated with Zod before processing",
-    "Rate limiting on stress signal and voice message",
-    "HTTPS only",
-    "Server-side session validation"
+    "Socket connections authenticated via JWT (Auth.js socket-token endpoint)",
+    "Passwords hashed with bcrypt",
+    "HTTPS only in production",
+    "Environment variables validated at startup via EnvSchema"
   ],
 
   "non_functional_requirements": {
     "concurrent_users_target": 10000,
     "max_latency_ms": 500,
-    "scalable_socket_architecture": true
-  },
-
-  "ai_agent_requirements": {
-    "must_generate": [
-      "Zod validation layer",
-      "Type inference from Zod schemas",
-      "Strict input parsing (safeParse)",
-      "Environment variable validation at startup"
-    ],
-    "code_standard": "Production-ready with strict typing"
+    "location_broadcast_interval_seconds": 20,
+    "nearby_radius_km": 50,
+    "stale_location_threshold_minutes": 5,
+    "scalable_socket_architecture": true,
+    "redis_adapter_ready": true
   }
 }

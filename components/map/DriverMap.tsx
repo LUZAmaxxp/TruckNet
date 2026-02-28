@@ -1,7 +1,7 @@
 "use client";
 
 import "leaflet/dist/leaflet.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo, memo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import type { NearbyDriverEntry } from "@/sockets/types";
@@ -35,22 +35,33 @@ function makeCurrentIcon() {
   });
 }
 
-function makeDriverIcon(selected: boolean) {
+function makeDriverIcon(selected: boolean, avatarUrl?: string | null) {
   const bg = selected ? "#f97316" : "#64748b";
-  return L.divIcon({
-    html: `
-      <div style="
+  const html = avatarUrl
+    ? `<div style="
+        width:32px;height:32px;
+        border-radius:50%;
+        overflow:hidden;
+        border:2.5px solid ${selected ? '#f97316' : '#fff'};
+        box-shadow:0 2px 6px rgba(0,0,0,0.4);
+      ">
+        <img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;" alt="" />
+      </div>`
+    : `<div style="
         width:18px;height:18px;
         background:${bg};
         border:2.5px solid #fff;
         border-radius:50%;
         box-shadow:0 2px 6px rgba(0,0,0,0.4);
         transition:background 0.2s;
-      "></div>
-    `,
+      "></div>`;
+  const size: [number, number] = avatarUrl ? [32, 32] : [18, 18];
+  const anchor: [number, number] = avatarUrl ? [16, 16] : [9, 9];
+  return L.divIcon({
+    html,
     className: "",
-    iconSize: [18, 18],
-    iconAnchor: [9, 9],
+    iconSize: size,
+    iconAnchor: anchor,
     popupAnchor: [0, -12],
   });
 }
@@ -82,23 +93,30 @@ function Recenter({ lat, lng }: RecenterProps) {
 // Public API
 // ---------------------------------------------------------------------------
 
+export type DriverMapEntry = NearbyDriverEntry & { distanceKm?: number; name?: string };
+
 export interface DriverMapProps {
   currentDriver: { lat: number; lng: number } | null;
-  nearbyDrivers: (NearbyDriverEntry & { distanceKm?: number; name?: string })[];
+  nearbyDrivers: DriverMapEntry[];
   selectedDriverId: string | null;
-  onSelectDriver: (driverId: string) => void;
+  onSelectDriver: (driver: DriverMapEntry) => void;
+  onSendMessage: (driverId: string) => void;
 }
 
-export function DriverMap({
+export const DriverMap = memo(function DriverMap({
   currentDriver,
   nearbyDrivers,
   selectedDriverId,
   onSelectDriver,
+  onSendMessage,
 }: DriverMapProps) {
   // Default center: geographic centroid if no location yet
   const center: [number, number] = currentDriver
     ? [currentDriver.lat, currentDriver.lng]
     : [20, 0];
+
+  // Memoize current-user icon so it isn't recreated on every render
+  const currentIcon = useMemo(() => makeCurrentIcon(), []);
 
   return (
     <MapContainer
@@ -118,7 +136,7 @@ export function DriverMap({
 
       {/* Current user marker */}
       {currentDriver && (
-        <Marker position={[currentDriver.lat, currentDriver.lng]} icon={makeCurrentIcon()}>
+        <Marker position={[currentDriver.lat, currentDriver.lng]} icon={currentIcon}>
           <Popup>
             <span className="font-semibold text-blue-600">📍 You</span>
             <br />
@@ -144,17 +162,44 @@ export function DriverMap({
           <Marker
             key={driver.userId}
             position={[driver.latitude, driver.longitude]}
-            icon={makeDriverIcon(isSelected)}
-            eventHandlers={{ click: () => onSelectDriver(driver.userId) }}
+            icon={makeDriverIcon(isSelected, driver.profileImageUrl)}
+            eventHandlers={{ click: () => onSelectDriver(driver) }}
           >
-            <Popup>
-              <span className="font-semibold">{label}</span>
-              <br />
-              <span className="text-xs text-gray-500">{distLabel}</span>
+            <Popup minWidth={200}>
+              <div style={{ fontFamily: "inherit" }}>
+                <p style={{ fontWeight: 600, marginBottom: 2 }}>{label}</p>
+                <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+                  {distLabel}
+                </p>
+                <button
+                  onClick={() => onSendMessage(driver.userId)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    width: "100%",
+                    padding: "7px 12px",
+                    background: "#3b82f6",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  Send Voice Message
+                </button>
+              </div>
             </Popup>
           </Marker>
         );
       })}
     </MapContainer>
   );
-}
+});
+
+DriverMap.displayName = "DriverMap";
