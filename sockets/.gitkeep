@@ -1,0 +1,2 @@
+# This directory contains Socket.io server, handlers, middleware and in-memory stores.
+# Populated by RealTimeSocketAgent in Wave 3.

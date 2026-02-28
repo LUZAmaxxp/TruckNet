@@ -1,0 +1,3 @@
+# This directory contains custom React hooks.
+# e.g., useVoiceRecorder.ts, useSocket.ts
+# Populated by VoiceMessagingAgent and UISystemAgent.

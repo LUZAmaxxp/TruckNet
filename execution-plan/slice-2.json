@@ -1,0 +1,179 @@
+{
+  "project_name": "TruckConnect",
+  "wave_id": 2,
+  "wave_name": "Database + Authentication",
+  "parallel_execution": false,
+  "goal": "Establish persistence (PostgreSQL + Drizzle) and secure authentication (Auth.js) so all later features have identity + storage.",
+  "agents": [
+    {
+      "agent_name": "DatabaseSchemaAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "ProjectArchitectureSetupAgent: /lib/env.ts with validated DATABASE_URL, /db directory exists"
+      ],
+      "tasks": [
+        {
+          "id": "W2-A1-T1",
+          "title": "Implement Drizzle schema + enums + constraints",
+          "steps": [
+            "Create /db/schema.ts with tables: users, driver_locations, voice_messages, stress_signals",
+            "Add PostgreSQL enums: voice_message_status (delivered, listened), stress_signal_status (active, resolved)",
+            "Add foreign keys per spec",
+            "Add indexes per spec (driver_locations.user_id, driver_locations.updated_at, stress_signals.status+created_at)"
+          ],
+          "outputs": [
+            "/db/schema.ts"
+          ],
+          "verification": [
+            "TypeScript compiles with strict mode",
+            "Schema exports are importable by other modules"
+          ]
+        },
+        {
+          "id": "W2-A1-T2",
+          "title": "Configure Drizzle connection + migrations",
+          "steps": [
+            "Create /db/index.ts with Drizzle client using DATABASE_URL from /lib/env.ts",
+            "Create drizzle.config.ts",
+            "Add package.json scripts: db:generate, db:migrate (drizzle-kit generate/push/migrate as chosen)",
+            "Generate migrations and commit /db/migrations"
+          ],
+          "outputs": [
+            "/db/index.ts",
+            "drizzle.config.ts",
+            "/db/migrations/*",
+            "package.json scripts for db tooling"
+          ],
+          "verification": [
+            "npm run db:migrate succeeds against a running PostgreSQL",
+            "Tables + enums exist in DB"
+          ]
+        },
+        {
+          "id": "W2-A1-T3",
+          "title": "Export inferred types",
+          "steps": [
+            "Export InferSelectModel and InferInsertModel types for each table where useful",
+            "Ensure types align with later Zod constraints"
+          ],
+          "outputs": [
+            "Exported Drizzle inferred TypeScript types from /db/schema.ts"
+          ],
+          "verification": [
+            "TypeScript compilation passes and other files can import types"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "List of tables/enums and columns",
+          "Migration commands and expected output",
+          "Example connection usage snippet with Drizzle client"
+        ]
+      }
+    },
+    {
+      "agent_name": "AuthenticationAgent",
+      "priority": 2,
+      "depends_on_outputs_from": [
+        "DatabaseSchemaAgent: users table + Drizzle client",
+        "ZodValidationAgent: UserRegisterSchema, UserLoginSchema, validateOrThrow",
+        "ProjectArchitectureSetupAgent: NEXTAUTH_SECRET, NEXTAUTH_URL validated in /lib/env.ts"
+      ],
+      "tasks": [
+        {
+          "id": "W2-A2-T1",
+          "title": "Implement Auth.js (NextAuth v5) credentials auth",
+          "steps": [
+            "Create /auth.ts with Credentials provider",
+            "Implement authorize() using UserLoginSchema validation and bcrypt compare",
+            "Use JWT session strategy; include user.id and user.email in token/session",
+            "Add TS module augmentation so session.user.id is typed"
+          ],
+          "outputs": [
+            "/auth.ts",
+            "TypeScript session augmentation (e.g., /types/next-auth.d.ts)"
+          ],
+          "verification": [
+            "TypeScript session includes user.id without casting",
+            "Invalid credentials return 401"
+          ]
+        },
+        {
+          "id": "W2-A2-T2",
+          "title": "Add Auth.js route handler",
+          "steps": [
+            "Create /app/api/auth/[...nextauth]/route.ts using Auth.js handler export",
+            "Confirm callback URLs align with NEXTAUTH_URL"
+          ],
+          "outputs": [
+            "/app/api/auth/[...nextauth]/route.ts"
+          ],
+          "verification": [
+            "Login endpoints respond and set session cookie"
+          ]
+        },
+        {
+          "id": "W2-A2-T3",
+          "title": "Implement registration endpoint",
+          "steps": [
+            "Create /app/api/auth/register/route.ts",
+            "Validate body via validateOrThrow(UserRegisterSchema, body)",
+            "Hash password with bcrypt (salt rounds 12)",
+            "Insert user into DB with unique email constraint handling (return 409 on conflict)",
+            "Return 201 with safe payload (no password_hash)"
+          ],
+          "outputs": [
+            "/app/api/auth/register/route.ts"
+          ],
+          "verification": [
+            "POST /api/auth/register returns 201 and creates user",
+            "Duplicate email returns 409",
+            "password_hash never returned"
+          ]
+        },
+        {
+          "id": "W2-A2-T4",
+          "title": "Protect routes with middleware + server helpers",
+          "steps": [
+            "Create middleware.ts to protect /app/(protected) routes",
+            "Create /lib/auth-helpers.ts with getServerSession wrapper and requireAuth()",
+            "Ensure server-side handlers can use requireAuth() consistently"
+          ],
+          "outputs": [
+            "middleware.ts",
+            "/lib/auth-helpers.ts"
+          ],
+          "verification": [
+            "Unauthenticated access to /(protected) redirects to /login or returns 401 (as designed)",
+            "Authenticated access works"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "How to register a user (curl example)",
+          "How to log in and verify session",
+          "List of protected route patterns and expected behavior"
+        ]
+      }
+    }
+  ],
+  "integration_checkpoint": {
+    "name": "Checkpoint B — DB + Auth Gate",
+    "must_pass": [
+      "npm run db:migrate succeeds",
+      "POST /api/auth/register creates user with bcrypt hash",
+      "Login succeeds and session contains user.id",
+      "Protected routes under /(protected) are blocked when unauthenticated"
+    ],
+    "commands": [
+      "npm run db:migrate",
+      "npm run dev"
+    ],
+    "manual_verification": [
+      "Register a user, then sign in, then visit a protected page route and confirm access"
+    ]
+  },
+  "stop_condition_to_advance": "All checkpoint conditions pass; DB tables exist; Auth session works; protected routes are enforced."
+}

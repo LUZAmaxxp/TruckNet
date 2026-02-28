@@ -1,0 +1,245 @@
+{
+  "project_name": "TruckConnect",
+  "wave_id": 5,
+  "wave_name": "Core Features (Geolocation + Voice + Stress)",
+  "parallel_execution": true,
+  "goal": "Implement the core business features fully via API + sockets (UI not required yet).",
+  "agents": [
+    {
+      "agent_name": "GeolocationAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "DatabaseSchemaAgent: driver_locations table + Drizzle client",
+        "ZodValidationAgent: LocationUpdateSchema, validateOrThrow",
+        "RealTimeSocketAgent: location store + location.handler.ts stub wired",
+        "AuthenticationAgent: requireAuth"
+      ],
+      "tasks": [
+        {
+          "id": "W5-A1-T1",
+          "title": "Implement Haversine utility",
+          "steps": [
+            "Create /lib/haversine.ts as pure TS function returning distanceKm",
+            "Add unit-test-ready structure (no side effects)"
+          ],
+          "outputs": [
+            "/lib/haversine.ts"
+          ],
+          "verification": [
+            "Known coordinate pair tests can pass (later in QA wave)"
+          ]
+        },
+        {
+          "id": "W5-A1-T2",
+          "title": "Implement location persistence API",
+          "steps": [
+            "Create POST /app/api/drivers/location/route.ts",
+            "Require auth via requireAuth or withAuth",
+            "Validate body with LocationUpdateSchema via validateOrThrow",
+            "Upsert into driver_locations for session.user.id",
+            "Return 200 successResponse"
+          ],
+          "outputs": [
+            "/app/api/drivers/location/route.ts"
+          ],
+          "verification": [
+            "Authenticated POST updates DB row for user"
+          ]
+        },
+        {
+          "id": "W5-A1-T3",
+          "title": "Implement nearby drivers API",
+          "steps": [
+            "Create GET /app/api/drivers/nearby/route.ts",
+            "Require auth",
+            "Validate incoming lat/lng (query or from stored location) using LocationUpdateSchema",
+            "Compute nearby drivers within 50km using Haversine",
+            "Exclude stale drivers updated_at older than 5 minutes",
+            "Return only { id, name, latitude, longitude, distanceKm }"
+          ],
+          "outputs": [
+            "/app/api/drivers/nearby/route.ts"
+          ],
+          "verification": [
+            "Returns filtered nearby drivers with correct radius and staleness filtering"
+          ]
+        },
+        {
+          "id": "W5-A1-T4",
+          "title": "Complete update_location socket handler",
+          "steps": [
+            "Implement /sockets/handlers/location.handler.ts",
+            "Validate payload with LocationUpdateSchema using validateSocketEvent",
+            "Update in-memory store entry for socket.data.userId",
+            "Compute nearby connected drivers (50km, exclude stale >5 min) using store + haversine",
+            "Emit nearby_driver_update to affected clients"
+          ],
+          "outputs": [
+            "/sockets/handlers/location.handler.ts completed"
+          ],
+          "verification": [
+            "Two authenticated socket clients receive nearby_driver_update changes after location updates"
+          ]
+        }
+      ]
+    },
+    {
+      "agent_name": "VoiceMessagingAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "DatabaseSchemaAgent: voice_messages table + Drizzle client",
+        "ZodValidationAgent: VoiceMessageSchema, validateOrThrow, validateSocketEvent",
+        "RealTimeSocketAgent: voice.handler.ts stub wired + location store provides socketId lookup",
+        "AuthenticationAgent: requireAuth",
+        "SecurityRateLimitingAgent: limits already in place for routes/events"
+      ],
+      "tasks": [
+        {
+          "id": "W5-A2-T1",
+          "title": "Implement MediaRecorder hook",
+          "steps": [
+            "Create /hooks/useVoiceRecorder.ts",
+            "Expose start(), stop(), isRecording, audioBlob, durationSeconds",
+            "Auto-stop at 60 seconds via timer",
+            "Handle permission errors gracefully"
+          ],
+          "outputs": [
+            "/hooks/useVoiceRecorder.ts"
+          ],
+          "verification": [
+            "Hook records and returns a Blob; auto-stops at 60s"
+          ]
+        },
+        {
+          "id": "W5-A2-T2",
+          "title": "Implement audio upload API (local storage for now)",
+          "steps": [
+            "Create POST /app/api/upload/audio/route.ts",
+            "Require auth",
+            "Accept multipart/form-data audio blob",
+            "Store file with UUID filename under /public/uploads",
+            "Return { audioUrl }",
+            "Enforce max file size (10MB) and audio MIME type"
+          ],
+          "outputs": [
+            "/app/api/upload/audio/route.ts",
+            "/public/uploads (directory ensured)"
+          ],
+          "verification": [
+            "Returns an accessible audioUrl that can be fetched"
+          ]
+        },
+        {
+          "id": "W5-A2-T3",
+          "title": "Implement voice message API endpoints",
+          "steps": [
+            "Create /app/api/voice-messages/route.ts",
+            "POST: validate body via validateOrThrow(VoiceMessageSchema), insert row with status='delivered'",
+            "GET: return inbox for receiver_id=session.user.id, ordered desc",
+            "Create /app/api/voice-messages/[id]/status/route.ts",
+            "PATCH: enforce receiver ownership, set status='listened'"
+          ],
+          "outputs": [
+            "/app/api/voice-messages/route.ts",
+            "/app/api/voice-messages/[id]/status/route.ts"
+          ],
+          "verification": [
+            "Receiver can fetch inbox",
+            "Non-receiver cannot update listened status (403)"
+          ]
+        },
+        {
+          "id": "W5-A2-T4",
+          "title": "Complete send_voice_message socket handler",
+          "steps": [
+            "Implement /sockets/handlers/voice.handler.ts",
+            "Validate payload with VoiceMessageSchema via validateSocketEvent",
+            "Insert voice message row",
+            "Lookup receiver socketId from in-memory store",
+            "Emit voice_message_received to receiver with message metadata"
+          ],
+          "outputs": [
+            "/sockets/handlers/voice.handler.ts completed"
+          ],
+          "verification": [
+            "Receiver gets real-time voice_message_received event within 500ms"
+          ]
+        }
+      ]
+    },
+    {
+      "agent_name": "StressSignalAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "DatabaseSchemaAgent: stress_signals table + Drizzle client",
+        "ZodValidationAgent: StressSignalSchema, validateOrThrow, validateSocketEvent",
+        "RealTimeSocketAgent: stress.handler.ts stub wired + location store",
+        "AuthenticationAgent: requireAuth",
+        "GeolocationAgent: /lib/haversine.ts"
+      ],
+      "tasks": [
+        {
+          "id": "W5-A3-T1",
+          "title": "Implement stress signal APIs",
+          "steps": [
+            "Create POST /app/api/stress-signals/route.ts (auth + validate StressSignalSchema + insert status='active')",
+            "Create GET /app/api/stress-signals/active/route.ts (auth + radius filter 50km + exclude older than 30 minutes + status='active')",
+            "Create PATCH /app/api/stress-signals/[id]/resolve/route.ts (auth + creator ownership + set status='resolved')"
+          ],
+          "outputs": [
+            "/app/api/stress-signals/route.ts",
+            "/app/api/stress-signals/active/route.ts",
+            "/app/api/stress-signals/[id]/resolve/route.ts"
+          ],
+          "verification": [
+            "POST returns 201, GET returns only active recent nearby, PATCH enforces ownership"
+          ]
+        },
+        {
+          "id": "W5-A3-T2",
+          "title": "Implement expiry utility",
+          "steps": [
+            "Create /lib/stress-signal-expiry.ts",
+            "Provide a function that resolves stale active signals older than 30 minutes",
+            "Keep it callable from cron later or on-read"
+          ],
+          "outputs": [
+            "/lib/stress-signal-expiry.ts"
+          ],
+          "verification": [
+            "Utility can be invoked and updates rows as expected (unit testable)"
+          ]
+        },
+        {
+          "id": "W5-A3-T3",
+          "title": "Complete send_stress_signal socket handler",
+          "steps": [
+            "Implement /sockets/handlers/stress.handler.ts",
+            "Validate payload with StressSignalSchema",
+            "Insert stress signal row status='active'",
+            "Compute nearby connected drivers using in-memory store + haversine",
+            "Emit stress_signal_alert to nearby drivers within 500ms"
+          ],
+          "outputs": [
+            "/sockets/handlers/stress.handler.ts completed"
+          ],
+          "verification": [
+            "Nearby connected users receive stress_signal_alert within 500ms"
+          ]
+        }
+      ]
+    }
+  ],
+  "integration_checkpoint": {
+    "name": "Checkpoint E — Feature Gate (No UI Required)",
+    "must_pass": [
+      "Location update API persists and socket nearby_driver_update works between two users",
+      "Voice upload returns audioUrl; voice message persists; receiver gets socket notification; listened status enforces ownership",
+      "Stress signal persists; nearby receivers get real-time alert; active list filters by radius and 30-minute window; resolve works with ownership"
+    ],
+    "manual_verification": [
+      "Use two browser sessions or two socket.io-client scripts with different users to validate end-to-end events"
+    ]
+  },
+  "stop_condition_to_advance": "All three features function end-to-end via API + sockets with correct validation, auth, rate limits, and latency targets."
+}

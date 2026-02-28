@@ -1,0 +1,4 @@
+# This directory contains reusable server-side middleware helpers (not Next.js middleware.ts).
+# e.g., rate limit logic, auth guards reusable across route handlers.
+# The root-level middleware.ts is the Next.js Edge middleware file.
+# Populated by SecurityRateLimitingAgent and AuthenticationAgent.

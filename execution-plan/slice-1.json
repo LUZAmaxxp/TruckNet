@@ -1,0 +1,167 @@
+{
+  "project_name": "TruckConnect",
+  "wave_id": 1,
+  "wave_name": "Foundation Setup",
+  "parallel_execution": true,
+  "goal": "Bootstrap the codebase foundation and validation layer so all later agents share consistent structure, env validation, and Zod schemas.",
+  "agents": [
+    {
+      "agent_name": "ProjectArchitectureSetupAgent",
+      "priority": 1,
+      "tasks": [
+        {
+          "id": "W1-A1-T1",
+          "title": "Initialize Next.js App Router + TS strict project",
+          "steps": [
+            "Create Next.js 14+ project using App Router",
+            "Enable TypeScript strict mode",
+            "Set up path aliases in tsconfig.json",
+            "Create folder scaffold: /app, /components, /components/ui, /lib, /db, /schemas, /sockets, /hooks, /middleware"
+          ],
+          "outputs": [
+            "Initialized Next.js project",
+            "tsconfig.json with strict: true and path aliases",
+            "Folder structure scaffold"
+          ],
+          "verification": [
+            "npm run dev starts successfully",
+            "TypeScript compilation succeeds with strict mode"
+          ]
+        },
+        {
+          "id": "W1-A1-T2",
+          "title": "Configure Tailwind CSS and shadcn/ui",
+          "steps": [
+            "Install and configure Tailwind CSS (tailwind.config.ts + globals.css)",
+            "Initialize shadcn/ui (components.json)",
+            "Add base shadcn/ui Button component to verify setup"
+          ],
+          "outputs": [
+            "tailwind.config.ts",
+            "app/globals.css configured for Tailwind",
+            "components.json (shadcn/ui)",
+            "components/ui/button.tsx"
+          ],
+          "verification": [
+            "A simple page renders a shadcn/ui Button without errors"
+          ]
+        },
+        {
+          "id": "W1-A1-T3",
+          "title": "Configure linting + formatting",
+          "steps": [
+            "Configure ESLint for Next.js + TypeScript",
+            "Configure Prettier and ensure it does not conflict with ESLint",
+            "Add scripts for lint/format if needed"
+          ],
+          "outputs": [
+            ".eslintrc.json (or eslint.config.*)",
+            "prettier.config.js (or .prettierrc)",
+            "package.json scripts for lint/format"
+          ],
+          "verification": [
+            "npm run lint passes",
+            "Formatting works consistently across TS/TSX files"
+          ]
+        },
+        {
+          "id": "W1-A1-T4",
+          "title": "Add EnvSchema validation bootstrap",
+          "steps": [
+            "Create /schemas/env.schema.ts with EnvSchema",
+            "Create /lib/env.ts that parses process.env using EnvSchema.safeParse",
+            "Fail fast (throw) on invalid env with descriptive Zod errors",
+            "Create .env.local template and ensure .env.local is in .gitignore"
+          ],
+          "outputs": [
+            "/schemas/env.schema.ts",
+            "/lib/env.ts",
+            ".env.local.template (or documented template)",
+            ".gitignore includes .env.local"
+          ],
+          "verification": [
+            "App crashes on startup if env vars are missing/malformed",
+            "App boots normally when env vars are correct"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "List of created/modified files",
+          "How to run dev server",
+          "How env validation fails/succeeds"
+        ]
+      }
+    },
+    {
+      "agent_name": "ZodValidationAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "ProjectArchitectureSetupAgent: /schemas directory exists and TS path aliases configured"
+      ],
+      "tasks": [
+        {
+          "id": "W1-A2-T1",
+          "title": "Implement Zod schemas",
+          "steps": [
+            "Create /schemas/user.schema.ts with UserRegisterSchema and UserLoginSchema + inferred types",
+            "Create /schemas/location.schema.ts with LocationUpdateSchema + inferred type",
+            "Create /schemas/voice.schema.ts with VoiceMessageSchema + inferred type",
+            "Create /schemas/stress.schema.ts with StressSignalSchema + inferred type",
+            "Ensure schemas match spec constraints exactly"
+          ],
+          "outputs": [
+            "/schemas/user.schema.ts",
+            "/schemas/location.schema.ts",
+            "/schemas/voice.schema.ts",
+            "/schemas/stress.schema.ts"
+          ],
+          "verification": [
+            "TypeScript compile succeeds",
+            "Schemas accept valid payloads and reject invalid payloads"
+          ]
+        },
+        {
+          "id": "W1-A2-T2",
+          "title": "Create validation utilities for API and sockets",
+          "steps": [
+            "Create /lib/validate.ts",
+            "Implement validateOrThrow(schema, data): uses safeParse, returns typed data or throws a standardized 400 NextResponse with ZodIssue[]",
+            "Implement validateSocketEvent(schema, data): uses safeParse and returns a discriminated union Result type",
+            "Do not use zod.parse() anywhere"
+          ],
+          "outputs": [
+            "/lib/validate.ts"
+          ],
+          "verification": [
+            "validateOrThrow returns typed output on valid input",
+            "validateOrThrow returns 400 error response shape on invalid input",
+            "validateSocketEvent returns ok/error union without throwing"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "Schema file list and exported names",
+          "Example valid/invalid payloads for each schema",
+          "How validateOrThrow and validateSocketEvent are intended to be used"
+        ]
+      }
+    }
+  ],
+  "integration_checkpoint": {
+    "name": "Checkpoint A — Foundation Gate",
+    "must_pass": [
+      "npm run dev succeeds",
+      "EnvSchema fails fast on missing/malformed env vars",
+      "All Zod schemas compile and export inferred types",
+      "/lib/validate.ts exists and is importable",
+      "shadcn/ui Button renders without runtime error"
+    ],
+    "commands": [
+      "npm run dev",
+      "npm run lint"
+    ]
+  },
+  "stop_condition_to_advance": "All integration checkpoint conditions pass with no TypeScript or runtime errors."
+}

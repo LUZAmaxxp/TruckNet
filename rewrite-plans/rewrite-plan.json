@@ -1,0 +1,141 @@
+{
+  "upgrade_name": "Wave 6.1 — Real Interactive Map Enhancement",
+  "goal": "Upgrade the existing /app/(protected)/map page to render a real interactive Google-like map using Leaflet + react-leaflet while preserving all backend APIs, socket contracts, validation rules, and authentication logic.",
+  "execution_mode": "surgical_ui_upgrade_only",
+  "hard_constraints": {
+    "must_not_modify": [
+      "Backend API routes",
+      "Socket.io server implementation",
+      "Zod schemas",
+      "Authentication logic",
+      "Event names or payload contracts"
+    ],
+    "must_keep": [
+      "Next.js App Router",
+      "Tailwind CSS",
+      "shadcn/ui components",
+      "Existing useSocket hook",
+      "Existing nearby_driver_update event contract"
+    ]
+  },
+  "map_library": {
+    "preferred": "react-leaflet with OpenStreetMap tiles",
+    "packages_to_install": [
+      "leaflet",
+      "react-leaflet"
+    ],
+    "reason": "No API key required, lightweight, Google-like experience, mobile friendly"
+  },
+  "tasks": [
+    {
+      "id": "W6.1-T1",
+      "title": "Install and configure Leaflet",
+      "steps": [
+        "Install leaflet and react-leaflet",
+        "Import leaflet CSS globally (in layout or map component)",
+        "Fix default marker icon path issue (configure L.Icon.Default if necessary)"
+      ],
+      "deliverable": "Leaflet working without missing marker icon errors"
+    },
+    {
+      "id": "W6.1-T2",
+      "title": "Create reusable DriverMap component",
+      "file": "/components/map/DriverMap.tsx",
+      "requirements": [
+        "Client component",
+        "Render MapContainer full width and height",
+        "Use OpenStreetMap TileLayer",
+        "Accept props: currentDriver, nearbyDrivers, selectedDriverId, onSelectDriver",
+        "Render current driver marker with distinct icon",
+        "Render nearby drivers as markers",
+        "Allow marker click to trigger onSelectDriver(driverId)",
+        "Auto-center on current driver initially",
+        "Support recentering when selected driver changes"
+      ],
+      "ui_constraints": [
+        "Mobile responsive",
+        "No overflow scroll issues",
+        "Height should fill viewport minus navbar"
+      ]
+    },
+    {
+      "id": "W6.1-T3",
+      "title": "Upgrade map page to use real map",
+      "file": "/app/(protected)/map/page.tsx",
+      "steps": [
+        "Request browser geolocation on mount",
+        "Emit update_location via useSocket",
+        "Subscribe to nearby_driver_update",
+        "Maintain local state for nearby drivers",
+        "Pass data into DriverMap component",
+        "Cleanup socket listeners on unmount"
+      ],
+      "must_preserve": [
+        "Existing event names",
+        "Existing payload shapes",
+        "Existing location emission strategy"
+      ]
+    },
+    {
+      "id": "W6.1-T4",
+      "title": "Selected driver UI panel",
+      "requirements": [
+        "Use shadcn/ui Card component",
+        "Display driver name and distance (km)",
+        "Add Button: Send Voice Message",
+        "Add Button: Meet Here",
+        "Panel must be mobile-friendly (bottom sheet or overlay card)",
+        "Highlight selected marker visually"
+      ]
+    },
+    {
+      "id": "W6.1-T5",
+      "title": "Mobile-first polish",
+      "requirements": [
+        "Usable at 375px width",
+        "No horizontal scroll",
+        "Touch-friendly marker interaction",
+        "No console errors"
+      ]
+    }
+  ],
+  "real_time_requirements": [
+    "Two authenticated users should see each other as live markers",
+    "Movement should update marker position in real time",
+    "Clicking a marker shows driver info card",
+    "Socket listeners must detach on unmount"
+  ],
+  "verification_checklist": [
+    "Map renders with real OpenStreetMap tiles",
+    "Current user marker visible",
+    "Nearby drivers markers visible",
+    "Real-time updates work between two browser sessions",
+    "No TypeScript errors",
+    "No runtime console errors",
+    "Mobile layout functional"
+  ],
+  "expected_output_format": {
+    "status": "completed | blocked",
+    "new_files": [
+      "List of new files created"
+    ],
+    "modified_files": [
+      "List of modified files"
+    ],
+    "dependencies_added": [
+      "leaflet",
+      "react-leaflet"
+    ],
+    "manual_test_steps": [
+      "Open two browsers",
+      "Login as two users",
+      "Verify markers appear",
+      "Verify real-time movement updates"
+    ],
+    "notes": [
+      "Any implementation notes",
+      "Any limitations"
+    ]
+  },
+  "stop_condition": "Real interactive map renders, live updates work, no backend changes required, no TypeScript or runtime errors."
+}

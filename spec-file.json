@@ -1,0 +1,165 @@
+{
+  "project": {
+    "name": "TruckConnect",
+    "type": "Real-Time Web Communication Platform",
+    "description": "A real-time interpersonal communication system for truck drivers enabling geolocation-based discovery, voice messaging, and emergency stress signaling."
+  },
+
+  "tech_stack": {
+    "frontend": [
+      "Next.js (App Router)",
+      "Tailwind CSS",
+      "shadcn/ui",
+      "Socket.io Client",
+      "MediaRecorder API"
+    ],
+    "backend": [
+      "Next.js Route Handlers",
+      "Auth.js",
+      "Socket.io Server",
+      "Drizzle ORM",
+      "PostgreSQL",
+      "Zod"
+    ]
+  },
+
+  "validation_layer": {
+    "library": "Zod",
+    "purpose": [
+      "Validate API inputs",
+      "Validate socket events",
+      "Validate environment variables",
+      "Enforce database-safe payloads"
+    ],
+
+    "schemas": {
+
+      "UserRegisterSchema": {
+        "zod": "z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(8) })"
+      },
+
+      "UserLoginSchema": {
+        "zod": "z.object({ email: z.string().email(), password: z.string().min(8) })"
+      },
+
+      "LocationUpdateSchema": {
+        "zod": "z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) })"
+      },
+
+      "VoiceMessageSchema": {
+        "zod": "z.object({ receiverId: z.string().uuid(), audioUrl: z.string().url(), durationSeconds: z.number().max(60) })"
+      },
+
+      "StressSignalSchema": {
+        "zod": "z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) })"
+      },
+
+      "EnvSchema": {
+        "zod": "z.object({ DATABASE_URL: z.string().url(), NEXTAUTH_SECRET: z.string().min(10), NEXTAUTH_URL: z.string().url(), SOCKET_PORT: z.string() })"
+      }
+    }
+  },
+
+  "roles": [
+    {
+      "name": "Driver",
+      "permissions": "Full access"
+    }
+  ],
+
+  "features": {
+
+    "nearby_drivers": {
+      "radius_km_default": 50,
+      "distance_calculation": "Haversine formula or PostGIS",
+      "requires_validation": "LocationUpdateSchema"
+    },
+
+    "voice_messaging": {
+      "max_duration_seconds": 60,
+      "validation_schema": "VoiceMessageSchema",
+      "status_enum": ["delivered", "listened"]
+    },
+
+    "stress_signal": {
+      "expiration_minutes": 30,
+      "validation_schema": "StressSignalSchema",
+      "status_enum": ["active", "resolved"]
+    }
+  },
+
+  "real_time_architecture": {
+    "technology": "Socket.io",
+    "client_events": {
+      "update_location": "LocationUpdateSchema",
+      "send_voice_message": "VoiceMessageSchema",
+      "send_stress_signal": "StressSignalSchema"
+    },
+    "server_events": [
+      "nearby_driver_update",
+      "voice_message_received",
+      "stress_signal_alert"
+    ]
+  },
+
+  "database_schema": {
+
+    "users": {
+      "id": "uuid (pk)",
+      "name": "text",
+      "email": "text unique",
+      "password_hash": "text",
+      "created_at": "timestamp"
+    },
+
+    "driver_locations": {
+      "id": "uuid",
+      "user_id": "uuid fk users.id",
+      "latitude": "float",
+      "longitude": "float",
+      "updated_at": "timestamp"
+    },
+
+    "voice_messages": {
+      "id": "uuid",
+      "sender_id": "uuid fk users.id",
+      "receiver_id": "uuid fk users.id",
+      "audio_url": "text",
+      "created_at": "timestamp",
+      "status": "enum(delivered, listened)"
+    },
+
+    "stress_signals": {
+      "id": "uuid",
+      "user_id": "uuid fk users.id",
+      "latitude": "float",
+      "longitude": "float",
+      "created_at": "timestamp",
+      "status": "enum(active, resolved)"
+    }
+  },
+
+  "security_requirements": [
+    "All API routes validated with Zod",
+    "All socket events validated with Zod before processing",
+    "Rate limiting on stress signal and voice message",
+    "HTTPS only",
+    "Server-side session validation"
+  ],
+
+  "non_functional_requirements": {
+    "concurrent_users_target": 10000,
+    "max_latency_ms": 500,
+    "scalable_socket_architecture": true
+  },
+
+  "ai_agent_requirements": {
+    "must_generate": [
+      "Zod validation layer",
+      "Type inference from Zod schemas",
+      "Strict input parsing (safeParse)",
+      "Environment variable validation at startup"
+    ],
+    "code_standard": "Production-ready with strict typing"
+  }
+}

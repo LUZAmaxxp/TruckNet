@@ -1,0 +1,135 @@
+{
+  "project_name": "TruckConnect",
+  "wave_id": 7,
+  "wave_name": "Testing & QA",
+  "parallel_execution": false,
+  "goal": "Add robust automated tests: unit, integration, socket tests, and E2E Playwright smoke tests validating the complete driver workflow.",
+  "agents": [
+    {
+      "agent_name": "TestingQAAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "ZodValidationAgent",
+        "DatabaseSchemaAgent",
+        "AuthenticationAgent",
+        "APIRouteLayerAgent",
+        "SecurityRateLimitingAgent",
+        "RealTimeSocketAgent",
+        "GeolocationAgent",
+        "VoiceMessagingAgent",
+        "StressSignalAgent",
+        "UISystemAgent"
+      ],
+      "tasks": [
+        {
+          "id": "W7-A1-T1",
+          "title": "Unit tests for schemas and utilities",
+          "steps": [
+            "Set up Vitest config",
+            "Create unit tests for all Zod schemas (valid + invalid cases per field constraint)",
+            "Create unit tests for /lib/haversine.ts (known coordinate pairs, edge cases)",
+            "Create unit tests for /lib/rate-limit.ts (window enforcement + reset)"
+          ],
+          "outputs": [
+            "vitest.config.ts",
+            "/__tests__/schemas/*",
+            "/__tests__/lib/haversine.test.ts",
+            "/__tests__/lib/rate-limit.test.ts"
+          ],
+          "verification": [
+            "npm run test (unit subset) passes"
+          ]
+        },
+        {
+          "id": "W7-A1-T2",
+          "title": "Integration tests for API routes",
+          "steps": [
+            "Provision isolated test PostgreSQL database for CI/local",
+            "Run Drizzle migrations before tests",
+            "Write integration tests for: register, login, /users/me, drivers/location, drivers/nearby, stress endpoints, voice endpoints",
+            "Assert correct status codes, ownership checks, and error shapes"
+          ],
+          "outputs": [
+            "/__tests__/api/*",
+            "Test DB setup/teardown helpers"
+          ],
+          "verification": [
+            "npm run test passes integration suite"
+          ]
+        },
+        {
+          "id": "W7-A1-T3",
+          "title": "Socket.io integration tests",
+          "steps": [
+            "Use socket.io-client in tests",
+            "Test authenticated socket connect success and unauthenticated rejection",
+            "Test Zod validation rejection for bad payloads",
+            "Test update_location -> nearby_driver_update behavior",
+            "Test send_voice_message -> voice_message_received",
+            "Test send_stress_signal -> stress_signal_alert"
+          ],
+          "outputs": [
+            "/__tests__/sockets/*"
+          ],
+          "verification": [
+            "Socket suite passes without flakiness"
+          ]
+        },
+        {
+          "id": "W7-A1-T4",
+          "title": "Playwright E2E smoke tests",
+          "steps": [
+            "Set up Playwright config",
+            "Write E2E flow: register -> login -> map -> send voice -> trigger stress -> verify alerts",
+            "Run against local server + test DB",
+            "Avoid brittle selectors; use role-based selectors"
+          ],
+          "outputs": [
+            "playwright.config.ts",
+            "/e2e/*"
+          ],
+          "verification": [
+            "npm run test:e2e passes on clean run"
+          ]
+        },
+        {
+          "id": "W7-A1-T5",
+          "title": "Coverage reporting and thresholds",
+          "steps": [
+            "Enable coverage reporting in Vitest",
+            "Target >= 80% for /lib, /sockets/handlers, /app/api",
+            "Fail CI if below threshold"
+          ],
+          "outputs": [
+            "Coverage configuration in Vitest",
+            "Coverage report output"
+          ],
+          "verification": [
+            "Coverage threshold is met and enforced"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "How to run tests locally",
+          "How to run with test DB",
+          "Flake prevention notes (timeouts, retries, isolation)"
+        ]
+      }
+    }
+  ],
+  "integration_checkpoint": {
+    "name": "Checkpoint G — QA Gate",
+    "must_pass": [
+      "npm run test passes (unit + integration + sockets)",
+      "npm run test:e2e passes",
+      "Coverage >= 80% for target modules",
+      "No unhandled promise rejections or console errors during tests"
+    ],
+    "commands": [
+      "npm run test",
+      "npm run test:e2e"
+    ]
+  },
+  "stop_condition_to_advance": "All automated tests pass reliably and coverage thresholds are enforced."
+}

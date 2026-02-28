@@ -1,0 +1,158 @@
+{
+  "project_name": "TruckConnect",
+  "wave_id": 3,
+  "wave_name": "API Utilities + Real-Time Backbone",
+  "parallel_execution": true,
+  "goal": "Create consistent API response utilities and establish authenticated, Zod-validated Socket.io infrastructure so feature agents can build on it safely.",
+  "agents": [
+    {
+      "agent_name": "APIRouteLayerAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "AuthenticationAgent: requireAuth() helper",
+        "ZodValidationAgent: validateOrThrow()",
+        "DatabaseSchemaAgent: users table + Drizzle client"
+      ],
+      "tasks": [
+        {
+          "id": "W3-A1-T1",
+          "title": "Implement shared API utilities",
+          "steps": [
+            "Create /lib/api.ts",
+            "Implement: withAuth(handler), errorResponse(message,status,details?), successResponse(data,status), methodGuard(allowed, handler)",
+            "Ensure errorResponse returns { error, details? }"
+          ],
+          "outputs": [
+            "/lib/api.ts"
+          ],
+          "verification": [
+            "Utilities are importable and return consistent JSON shapes"
+          ]
+        },
+        {
+          "id": "W3-A1-T2",
+          "title": "Implement /api/users/me endpoints",
+          "steps": [
+            "Create /app/api/users/me/route.ts",
+            "GET: return authenticated user's profile (id,name,email,created_at), exclude password_hash",
+            "PATCH: validate name with z.string().min(2), update user name for authenticated user"
+          ],
+          "outputs": [
+            "/app/api/users/me/route.ts"
+          ],
+          "verification": [
+            "GET returns safe user profile",
+            "PATCH updates name with validation and returns updated profile"
+          ]
+        },
+        {
+          "id": "W3-A1-T3",
+          "title": "Enforce contract usage guidance",
+          "steps": [
+            "Document (in comments) that all protected routes must use withAuth and all bodies must use validateOrThrow",
+            "Make helper signatures ergonomic so feature agents will naturally use them"
+          ],
+          "outputs": [
+            "Contract guidance embedded in /lib/api.ts comments"
+          ],
+          "verification": [
+            "Feature agent can easily adopt utilities without custom patterns"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "Example route handler using withAuth + validateOrThrow",
+          "Error/Success response examples"
+        ]
+      }
+    },
+    {
+      "agent_name": "RealTimeSocketAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "AuthenticationAgent: JWT verification approach + session identity",
+        "ZodValidationAgent: validateSocketEvent + schemas",
+        "ProjectArchitectureSetupAgent: env + /sockets directory"
+      ],
+      "tasks": [
+        {
+          "id": "W3-A2-T1",
+          "title": "Create custom server.ts and initialize Socket.io",
+          "steps": [
+            "Create /server.ts as Next.js + Node HTTP server entry point",
+            "Initialize Socket.io server on SOCKET_PORT",
+            "Set CORS origin to NEXTAUTH_URL",
+            "Export singleton server in /sockets/index.ts"
+          ],
+          "outputs": [
+            "/server.ts",
+            "/sockets/index.ts"
+          ],
+          "verification": [
+            "Server boots and socket server listens without errors"
+          ]
+        },
+        {
+          "id": "W3-A2-T2",
+          "title": "Implement socket auth middleware",
+          "steps": [
+            "Create /sockets/middleware/auth.middleware.ts",
+            "Require JWT token from handshake.auth.token",
+            "Verify token using Auth.js-compatible verification",
+            "Set socket.data.userId on success, reject on failure"
+          ],
+          "outputs": [
+            "/sockets/middleware/auth.middleware.ts"
+          ],
+          "verification": [
+            "Unauthenticated connection rejected",
+            "Authenticated connection has socket.data.userId"
+          ]
+        },
+        {
+          "id": "W3-A2-T3",
+          "title": "Implement in-memory location store + handler stubs",
+          "steps": [
+            "Create /sockets/store/location.store.ts as Map<userId, {lat,lng,socketId,updatedAt}>",
+            "Create handler stubs: /sockets/handlers/location.handler.ts, voice.handler.ts, stress.handler.ts",
+            "Wire event listeners: update_location, send_voice_message, send_stress_signal",
+            "Validate payloads using validateSocketEvent before calling handler stubs"
+          ],
+          "outputs": [
+            "/sockets/store/location.store.ts",
+            "/sockets/handlers/location.handler.ts",
+            "/sockets/handlers/voice.handler.ts",
+            "/sockets/handlers/stress.handler.ts"
+          ],
+          "verification": [
+            "All events are registered",
+            "Invalid payload emits error and does not crash server"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "How to start server with socket (node server.ts or npm script)",
+          "Socket connection auth requirements",
+          "Event name list and expected payload shapes"
+        ]
+      }
+    }
+  ],
+  "integration_checkpoint": {
+    "name": "Checkpoint C — API + Socket Gate",
+    "must_pass": [
+      "/lib/api.ts exists and compiles",
+      "GET /api/users/me returns safe user profile when authenticated",
+      "Socket server starts and listens on SOCKET_PORT",
+      "Unauthenticated socket connection rejected",
+      "Socket event payloads are Zod validated before handler stubs are invoked"
+    ],
+    "commands": [
+      "npm run dev (or npm run server if separate)",
+      "curl GET /api/users/me with authenticated session"
+    ]
+  },
+  "stop_condition_to_advance": "Checkpoint C passes and both API and socket foundations are stable for feature development."
+}

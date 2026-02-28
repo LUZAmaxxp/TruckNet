@@ -1,0 +1,134 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { UserRegisterSchema } from "@/schemas/user.schema";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Truck } from "lucide-react";
+
+export default function RegisterPage() {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string }>({});
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setServerError(null);
+
+    const result = UserRegisterSchema.safeParse({ name, email, password });
+    if (!result.success) {
+      const fieldErrors: { name?: string; email?: string; password?: string } = {};
+      for (const issue of result.error.issues) {
+        const field = issue.path[0] as keyof typeof fieldErrors;
+        fieldErrors[field] = issue.message;
+      }
+      setErrors(fieldErrors);
+      return;
+    }
+    setErrors({});
+    setLoading(true);
+
+    const res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(result.data),
+    });
+
+    setLoading(false);
+
+    if (res.status === 409) {
+      setServerError("An account with this email already exists.");
+      return;
+    }
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setServerError((json as { error?: string }).error ?? "Registration failed. Please try again.");
+      return;
+    }
+
+    router.push("/login?registered=1");
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader className="text-center">
+          <div className="flex justify-center mb-2">
+            <Truck className="h-10 w-10 text-primary" />
+          </div>
+          <CardTitle className="text-2xl">Create Account</CardTitle>
+          <CardDescription>Join TruckConnect today</CardDescription>
+        </CardHeader>
+
+        <form onSubmit={handleSubmit}>
+          <CardContent className="space-y-4">
+            {serverError && (
+              <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">
+                {serverError}
+              </p>
+            )}
+
+            <div className="space-y-1">
+              <Label htmlFor="name">Full Name</Label>
+              <Input
+                id="name"
+                type="text"
+                autoComplete="name"
+                placeholder="John Doe"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                placeholder="driver@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="new-password"
+                placeholder="Min. 8 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
+            </div>
+          </CardContent>
+
+          <CardFooter className="flex flex-col gap-3">
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? "Creating account…" : "Create Account"}
+            </Button>
+            <p className="text-sm text-muted-foreground text-center">
+              Already have an account?{" "}
+              <Link href="/login" className="text-primary hover:underline">
+                Sign in
+              </Link>
+            </p>
+          </CardFooter>
+        </form>
+      </Card>
+    </div>
+  );
+}

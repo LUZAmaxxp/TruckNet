@@ -1,0 +1,111 @@
+{
+  "project_name": "TruckConnect",
+  "wave_id": 4,
+  "wave_name": "Security Hardening (Rate Limiting + Headers + Socket Limits)",
+  "parallel_execution": false,
+  "goal": "Add abuse protection and security headers across HTTP and Socket.io to reduce brute-force and spam risks before feature expansion.",
+  "agents": [
+    {
+      "agent_name": "SecurityRateLimitingAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "ProjectArchitectureSetupAgent: next.config.ts, middleware.ts exists, /lib/env.ts provides NEXTAUTH_URL",
+        "AuthenticationAgent: session user.id available for per-user rate limiting context",
+        "RealTimeSocketAgent: socket server middleware pipeline available"
+      ],
+      "tasks": [
+        {
+          "id": "W4-A1-T1",
+          "title": "Implement HTTP rate limiter utility",
+          "steps": [
+            "Create /lib/rate-limit.ts implementing a sliding window rate limiter (Map-based or lru-cache)",
+            "Support per-user (session.user.id) keys and per-IP keys",
+            "Return a structure that includes allowed:boolean, retryAfterSeconds:number"
+          ],
+          "outputs": [
+            "/lib/rate-limit.ts"
+          ],
+          "verification": [
+            "Unit-testable deterministic behavior (window enforcement + reset)"
+          ]
+        },
+        {
+          "id": "W4-A1-T2",
+          "title": "Enforce rate limiting in middleware.ts",
+          "steps": [
+            "Update middleware.ts to enforce limits on specific routes:",
+            "POST /api/stress-signals: 3 per 10 minutes per user",
+            "POST /api/voice-messages: 10 per 1 minute per user",
+            "POST /api/auth/register: 5 per hour per IP",
+            "On limit exceeded: return 429 with Retry-After header and JSON { error } shape"
+          ],
+          "outputs": [
+            "middleware.ts updated with rate limiting"
+          ],
+          "verification": [
+            "N+1 request returns 429 with Retry-After",
+            "Authenticated routes use per-user key, register uses per-IP key"
+          ]
+        },
+        {
+          "id": "W4-A1-T3",
+          "title": "Add HTTP security headers",
+          "steps": [
+            "Update next.config.ts headers() to include:",
+            "Strict-Transport-Security max-age>=31536000; includeSubDomains; preload",
+            "X-Frame-Options: DENY",
+            "X-Content-Type-Options: nosniff",
+            "Referrer-Policy: strict-origin-when-cross-origin (or stricter)",
+            "Content-Security-Policy: baseline restrictive policy compatible with Next.js"
+          ],
+          "outputs": [
+            "next.config.ts updated with security headers"
+          ],
+          "verification": [
+            "curl -I response contains headers"
+          ]
+        },
+        {
+          "id": "W4-A1-T4",
+          "title": "Implement Socket.io event rate limiting middleware",
+          "steps": [
+            "Create /sockets/middleware/rate-limit.middleware.ts",
+            "Apply per-user event rate limits to abuse-prone events:",
+            "send_voice_message: max 10 per minute",
+            "send_stress_signal: max 3 per 10 minutes",
+            "On exceeded limit: emit error event to sender, do NOT disconnect socket",
+            "Ensure limiter keys use socket.data.userId"
+          ],
+          "outputs": [
+            "/sockets/middleware/rate-limit.middleware.ts",
+            "RealTimeSocketAgent integration: middleware registration"
+          ],
+          "verification": [
+            "Excess events are rejected with error event while socket stays connected"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "Route-to-limit mapping",
+          "How to verify with curl and a socket client",
+          "Security header list and expected values"
+        ]
+      }
+    }
+  ],
+  "integration_checkpoint": {
+    "name": "Checkpoint D — Security Gate",
+    "must_pass": [
+      "429 returned correctly for exceeded limits with Retry-After header",
+      "Security headers appear on HTTP responses",
+      "Socket event rate limiting rejects excess events without disconnecting"
+    ],
+    "commands": [
+      "curl -I http://localhost:<port>/",
+      "curl POST /api/auth/register repeated to trigger 429",
+      "socket.io-client script to spam events and verify rejection"
+    ]
+  },
+  "stop_condition_to_advance": "Security protections are active and verified across HTTP and sockets."
+}

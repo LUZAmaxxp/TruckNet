@@ -1,0 +1,1111 @@
+{
+  "project_name": "TruckConnect",
+  "sub_agents": [
+    {
+      "name": "ProjectArchitectureSetupAgent",
+      "responsibility": "Initialize the Next.js 14+ App Router monorepo with TypeScript strict mode, configure Tailwind CSS, shadcn/ui, ESLint, Prettier, path aliases, project folder structure, and validate environment variables at startup using EnvSchema.",
+      "scope": {
+        "included": [
+          "next.config.ts configuration",
+          "tsconfig.json with strict: true and path aliases",
+          "Tailwind CSS configuration (tailwind.config.ts)",
+          "shadcn/ui initialization via CLI (components.json)",
+          "ESLint and Prettier configuration",
+          "Project folder structure: /app, /components, /lib, /db, /schemas, /sockets, /hooks, /middleware",
+          "Environment variable bootstrapping and EnvSchema Zod validation at startup in /lib/env.ts",
+          ".env.local template with all required keys"
+        ],
+        "excluded": [
+          "Database schema definitions",
+          "Authentication logic",
+          "Socket.io server implementation",
+          "Feature-level UI components"
+        ]
+      },
+      "inputs": [
+        "spec-file.json (project specification)",
+        "TruckConnect system requirements"
+      ],
+      "outputs": [
+        "Initialized Next.js 14+ App Router project",
+        "tsconfig.json with strict: true and path aliases",
+        "tailwind.config.ts",
+        "components.json (shadcn/ui config)",
+        ".eslintrc.json",
+        "prettier.config.js",
+        ".env.local template with DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, SOCKET_PORT",
+        "/lib/env.ts — EnvSchema Zod validation with process.env parsing, app crashes on invalid env",
+        "Folder structure scaffold: /app, /components/ui, /lib, /db, /schemas, /sockets, /hooks, /middleware"
+      ],
+      "dependencies": [],
+      "deliverables": [
+        "Runnable Next.js project skeleton (npm run dev succeeds)",
+        "EnvSchema validates environment variables at process startup with descriptive Zod errors on failure",
+        "shadcn/ui CLI initialized with base Button component renderable"
+      ],
+      "tech_stack_constraints": [
+        "Next.js 14+ with App Router (not Pages Router)",
+        "TypeScript with strict: true",
+        "Tailwind CSS v3+",
+        "shadcn/ui latest",
+        "Zod v3+ for EnvSchema validation"
+      ],
+      "validation_requirements": [
+        "EnvSchema must validate DATABASE_URL (url), NEXTAUTH_SECRET (min 10), NEXTAUTH_URL (url), SOCKET_PORT (string) at process startup",
+        "Application must fail fast with a descriptive ZodError if any env var is missing or malformed"
+      ],
+      "security_requirements": [
+        "No secrets committed to source control",
+        ".env.local listed in .gitignore"
+      ],
+      "scalability_requirements": [
+        "Folder structure must support feature modularization for 10k concurrent user scale"
+      ],
+      "definition_of_done": [
+        "npm run dev runs without TypeScript or runtime errors",
+        "EnvSchema throws ZodError on missing or malformed env vars and halts startup",
+        "All configured directories exist and are importable via TypeScript path aliases",
+        "shadcn/ui Button component renders without errors"
+      ]
+    },
+    {
+      "name": "DatabaseSchemaAgent",
+      "responsibility": "Define and implement all Drizzle ORM table schemas for PostgreSQL, configure the database connection pool, generate and apply migrations, and export typed table references for use across the application.",
+      "scope": {
+        "included": [
+          "Drizzle ORM schema definitions for: users, driver_locations, voice_messages, stress_signals in /db/schema.ts",
+          "UUID primary keys using crypto.randomUUID() or pgCrypto",
+          "PostgreSQL enum types: voice_message_status ('delivered', 'listened'), stress_signal_status ('active', 'resolved')",
+          "Foreign key constraints: driver_locations.user_id → users.id, voice_messages.sender_id → users.id, voice_messages.receiver_id → users.id, stress_signals.user_id → users.id",
+          "drizzle.config.ts configuration file",
+          "Database connection pool setup in /db/index.ts using DATABASE_URL from validated EnvSchema",
+          "Migration generation (drizzle-kit generate) and migration application (drizzle-kit push or migrate) scripts",
+          "Index on driver_locations(user_id) and driver_locations(updated_at) for geospatial queries",
+          "Index on stress_signals(status, created_at) for expiration queries"
+        ],
+        "excluded": [
+          "Zod schema definitions (handled by ZodValidationAgent)",
+          "Feature-specific query logic (handled by respective feature agents)",
+          "Auth.js session tables (handled by AuthenticationAgent)"
+        ]
+      },
+      "inputs": [
+        "spec-file.json database_schema section",
+        "ProjectArchitectureSetupAgent output: initialized project, /lib/env.ts, DATABASE_URL env var, /db directory"
+      ],
+      "outputs": [
+        "/db/schema.ts — all Drizzle table and enum definitions",
+        "/db/index.ts — exported Drizzle postgres client instance",
+        "drizzle.config.ts",
+        "/db/migrations/ — generated SQL migration files",
+        "Exported TypeScript types: User, DriverLocation, VoiceMessage, StressSignal via Drizzle InferSelectModel"
+      ],
+      "dependencies": [
+        "ProjectArchitectureSetupAgent"
+      ],
+      "deliverables": [
+        "All 4 tables created in PostgreSQL via Drizzle migration",
+        "Enum types created in PostgreSQL for voice_message_status and stress_signal_status",
+        "All foreign key constraints enforced at DB level",
+        "Typed Drizzle query client exported and importable in other agents",
+        "npm run db:migrate executes without error against live PostgreSQL"
+      ],
+      "tech_stack_constraints": [
+        "Drizzle ORM (drizzle-orm, drizzle-kit)",
+        "PostgreSQL 14+",
+        "postgres.js or pg driver",
+        "TypeScript strict mode"
+      ],
+      "validation_requirements": [
+        "DATABASE_URL consumed exclusively from validated EnvSchema output in /lib/env.ts",
+        "Drizzle inferred types must structurally align with Zod schema types produced by ZodValidationAgent"
+      ],
+      "security_requirements": [
+        "Database connection established using validated DATABASE_URL only",
+        "No raw SQL string interpolation — parameterized queries exclusively via Drizzle ORM"
+      ],
+      "scalability_requirements": [
+        "Connection pool configured for minimum 20 connections to support 10k concurrent users",
+        "Indexes on driver_locations(updated_at) for efficient staleness filtering",
+        "Composite index on stress_signals(status, created_at) for fast active signal lookups"
+      ],
+      "definition_of_done": [
+        "npm run db:migrate succeeds against a live PostgreSQL instance",
+        "All 4 tables exist with correct columns, types, and constraints",
+        "TypeScript compilation succeeds with all exported Drizzle types",
+        "Foreign key violation on invalid user_id raises a DB constraint error"
+      ]
+    },
+    {
+      "name": "ZodValidationAgent",
+      "responsibility": "Implement the complete Zod validation layer including all schemas defined in the spec, TypeScript type inference exports, safeParse-based utility functions for API routes and socket events, and environment variable schema.",
+      "scope": {
+        "included": [
+          "UserRegisterSchema: name (z.string().min(2)), email (z.string().email()), password (z.string().min(8))",
+          "UserLoginSchema: email (z.string().email()), password (z.string().min(8))",
+          "LocationUpdateSchema: latitude (z.number().min(-90).max(90)), longitude (z.number().min(-180).max(180))",
+          "VoiceMessageSchema: receiverId (z.string().uuid()), audioUrl (z.string().url()), durationSeconds (z.number().max(60))",
+          "StressSignalSchema: latitude (z.number().min(-90).max(90)), longitude (z.number().min(-180).max(180))",
+          "EnvSchema: DATABASE_URL (z.string().url()), NEXTAUTH_SECRET (z.string().min(10)), NEXTAUTH_URL (z.string().url()), SOCKET_PORT (z.string())",
+          "TypeScript type exports via z.infer<> for all schemas",
+          "validateOrThrow(schema, data): wraps safeParse, returns typed data or throws NextResponse 400 with ZodIssue[] details",
+          "validateSocketEvent(schema, data): wraps safeParse for socket payloads, returns Result<T, ZodError> for handler use"
+        ],
+        "excluded": [
+          "Database schema definitions (handled by DatabaseSchemaAgent)",
+          "API route implementation (handled by APIRouteLayerAgent and feature agents)",
+          "Socket server implementation (handled by RealTimeSocketAgent)"
+        ]
+      },
+      "inputs": [
+        "spec-file.json validation_layer.schemas section",
+        "ProjectArchitectureSetupAgent output: /schemas directory, TypeScript path aliases"
+      ],
+      "outputs": [
+        "/schemas/user.schema.ts — UserRegisterSchema, UserLoginSchema + z.infer types",
+        "/schemas/location.schema.ts — LocationUpdateSchema + z.infer type",
+        "/schemas/voice.schema.ts — VoiceMessageSchema + z.infer type",
+        "/schemas/stress.schema.ts — StressSignalSchema + z.infer type",
+        "/schemas/env.schema.ts — EnvSchema + z.infer type",
+        "/lib/validate.ts — validateOrThrow() and validateSocketEvent() utility functions"
+      ],
+      "dependencies": [
+        "ProjectArchitectureSetupAgent"
+      ],
+      "deliverables": [
+        "All 6 Zod schemas implemented and exported with exact field constraints from spec",
+        "All schemas export TypeScript types via z.infer<> (no manual type duplication)",
+        "validateOrThrow() returns typed data on success and throws NextResponse with 400 + ZodIssue[] on failure",
+        "validateSocketEvent() returns a discriminated union Result type for safe handler use",
+        "100% schema coverage matching spec-file.json validation_layer.schemas"
+      ],
+      "tech_stack_constraints": [
+        "Zod v3+",
+        "TypeScript strict mode",
+        "No 'any' types in schema definitions or utility function signatures"
+      ],
+      "validation_requirements": [
+        "All schemas must use z.object() with field-level constraints exactly matching spec-file.json",
+        "safeParse must be used exclusively (never parse()) to avoid unhandled exceptions",
+        "Type inference must be used throughout — no manual TypeScript type duplication"
+      ],
+      "security_requirements": [
+        "Minimum length constraints prevent empty-string injection attacks",
+        "z.string().uuid() on receiverId prevents arbitrary non-UUID ID injection"
+      ],
+      "scalability_requirements": [
+        "Validation utilities must be stateless and safe for concurrent execution across 10k requests"
+      ],
+      "definition_of_done": [
+        "All schemas parse valid inputs without error and return typed output",
+        "All schemas reject invalid inputs with descriptive ZodError field messages",
+        "TypeScript compilation succeeds with zero errors across all schema files",
+        "validateOrThrow() unit tests pass for both success and failure cases",
+        "validateSocketEvent() unit tests pass for both success and failure cases"
+      ]
+    },
+    {
+      "name": "AuthenticationAgent",
+      "responsibility": "Implement full user authentication using Auth.js (NextAuth v5) with Credentials provider, bcrypt password hashing, JWT session management, user registration API route, and Next.js middleware for protected route enforcement.",
+      "scope": {
+        "included": [
+          "Auth.js (next-auth v5) configuration in /auth.ts with Credentials provider",
+          "Email/password login strategy with bcryptjs password comparison",
+          "bcryptjs password hashing on user registration (salt rounds: 12)",
+          "JWT session strategy with user.id and user.email in token",
+          "TypeScript session type augmentation to include user.id",
+          "POST /api/auth/register — validates with UserRegisterSchema, hashes password, inserts user into DB, returns 201",
+          "Auth.js built-in route handler at /app/api/auth/[...nextauth]/route.ts",
+          "middleware.ts — protects all routes under /app/(protected), redirects unauthenticated users to /login",
+          "/lib/auth-helpers.ts — getServerSession() wrapper and requireAuth() utility for route handlers"
+        ],
+        "excluded": [
+          "OAuth providers",
+          "Email verification flows",
+          "Role-based authorization beyond single Driver role"
+        ]
+      },
+      "inputs": [
+        "ZodValidationAgent outputs: UserRegisterSchema, UserLoginSchema, validateOrThrow()",
+        "DatabaseSchemaAgent outputs: /db/index.ts Drizzle client, users table schema and User type",
+        "ProjectArchitectureSetupAgent outputs: NEXTAUTH_SECRET and NEXTAUTH_URL from /lib/env.ts"
+      ],
+      "outputs": [
+        "/auth.ts — NextAuth v5 configuration with Credentials provider",
+        "/app/api/auth/[...nextauth]/route.ts — Auth.js handler",
+        "/app/api/auth/register/route.ts — user registration endpoint",
+        "middleware.ts — route protection with matcher for /(protected) paths",
+        "/lib/auth-helpers.ts — getServerSession() typed wrapper and requireAuth() for server-side use",
+        "TypeScript module augmentation for Session type including user.id field"
+      ],
+      "dependencies": [
+        "ProjectArchitectureSetupAgent",
+        "DatabaseSchemaAgent",
+        "ZodValidationAgent"
+      ],
+      "deliverables": [
+        "POST /api/auth/register creates user with bcrypt-hashed password and returns 201",
+        "Valid login credentials return an active JWT session",
+        "Invalid credentials return 401 Unauthorized",
+        "Unauthenticated requests to protected routes are redirected to /login",
+        "requireAuth() returns typed session with user.id without TypeScript casting"
+      ],
+      "tech_stack_constraints": [
+        "Auth.js (next-auth) v5",
+        "bcryptjs for password hashing (salt rounds: 12)",
+        "JWT session strategy (no database session adapter required)",
+        "Zod for input validation on register route"
+      ],
+      "validation_requirements": [
+        "POST /api/auth/register must validate request body with UserRegisterSchema via validateOrThrow()",
+        "Login credentials must be validated with UserLoginSchema before any database lookup"
+      ],
+      "security_requirements": [
+        "Passwords stored exclusively as bcrypt hash with salt rounds ≥ 12",
+        "NEXTAUTH_SECRET sourced from validated EnvSchema — minimum 10 characters",
+        "Session tokens stored as HTTP-only, Secure, SameSite=Lax cookies",
+        "password_hash field never returned from any API response",
+        "No plaintext password logging at any level"
+      ],
+      "scalability_requirements": [
+        "JWT strategy avoids per-request database session lookup, supporting 10k concurrent authenticated users"
+      ],
+      "definition_of_done": [
+        "Registration endpoint creates user in DB and returns 201",
+        "Login returns valid JWT session on correct credentials",
+        "Login returns 401 on incorrect password",
+        "middleware.ts blocks unauthenticated access to all /(protected) routes",
+        "TypeScript session type includes user.id without type casting"
+      ]
+    },
+    {
+      "name": "RealTimeSocketAgent",
+      "responsibility": "Implement the Socket.io server infrastructure integrated with a custom Next.js HTTP server, including authenticated socket connection middleware, Zod-validated event routing stubs, in-memory driver location store, and sub-500ms event dispatch architecture.",
+      "scope": {
+        "included": [
+          "Custom Next.js server in /server.ts integrating Socket.io with Node.js HTTP server",
+          "Socket.io server initialization on SOCKET_PORT from EnvSchema",
+          "Socket.io CORS configuration matching NEXTAUTH_URL",
+          "Authentication middleware on socket connection: validates Auth.js JWT from handshake.auth.token",
+          "Socket user context injection: socket.data.userId set on successful auth",
+          "Typed event registration for client events: update_location, send_voice_message, send_stress_signal",
+          "Zod validation of all incoming socket payloads using validateSocketEvent() before routing to handlers",
+          "Server event emission definitions: nearby_driver_update, voice_message_received, stress_signal_alert",
+          "In-memory driver location store (/sockets/store/location.store.ts): Map<userId, { lat, lng, socketId, updatedAt }> with get/set/delete methods",
+          "Graceful disconnect: remove driver from in-memory store, notify affected nearby drivers",
+          "Handler stub files for location, voice, and stress events"
+        ],
+        "excluded": [
+          "Business logic for voice message DB persistence (handled by VoiceMessagingAgent)",
+          "Business logic for stress signal DB persistence (handled by StressSignalAgent)",
+          "Geolocation distance calculations (handled by GeolocationAgent)"
+        ]
+      },
+      "inputs": [
+        "ProjectArchitectureSetupAgent outputs: project scaffold, SOCKET_PORT from /lib/env.ts, /sockets directory",
+        "ZodValidationAgent outputs: LocationUpdateSchema, VoiceMessageSchema, StressSignalSchema, validateSocketEvent()",
+        "AuthenticationAgent outputs: Auth.js JWT verification method, /lib/auth-helpers.ts"
+      ],
+      "outputs": [
+        "/server.ts — custom Next.js + Socket.io HTTP server entry point",
+        "/sockets/index.ts — Socket.io server instance export (singleton)",
+        "/sockets/middleware/auth.middleware.ts — JWT-based socket authentication middleware",
+        "/sockets/handlers/location.handler.ts — stub for update_location event",
+        "/sockets/handlers/voice.handler.ts — stub for send_voice_message event",
+        "/sockets/handlers/stress.handler.ts — stub for send_stress_signal event",
+        "/sockets/store/location.store.ts — in-memory Map with typed get/set/delete operations"
+      ],
+      "dependencies": [
+        "ProjectArchitectureSetupAgent",
+        "ZodValidationAgent",
+        "AuthenticationAgent"
+      ],
+      "deliverables": [
+        "Socket.io server accepts authenticated socket connections and rejects unauthenticated ones with 'unauthorized' error",
+        "All three client event types are received and validated with Zod before routing to stubs",
+        "Invalid payloads emit socket error event to sender without server crash",
+        "socket.data.userId is correctly set for all authenticated connections",
+        "Driver location store tracks connected drivers and clears on disconnect",
+        "Sub-500ms roundtrip measured under local benchmark"
+      ],
+      "tech_stack_constraints": [
+        "Socket.io v4+",
+        "Node.js HTTP server integrated with Next.js",
+        "Zod for all event payload validation via validateSocketEvent()",
+        "TypeScript strict mode with typed socket event maps"
+      ],
+      "validation_requirements": [
+        "Every incoming client socket event must pass validateSocketEvent() before any processing",
+        "Socket connection must verify Auth.js JWT from handshake.auth.token before establishing session"
+      ],
+      "security_requirements": [
+        "No unauthenticated socket connections permitted under any circumstance",
+        "Socket CORS origin must match NEXTAUTH_URL from validated EnvSchema",
+        "No raw unvalidated event payload data passed to any handler"
+      ],
+      "scalability_requirements": [
+        "In-memory location store must support 10k concurrent driver entries",
+        "Architecture must be designed to accommodate future Redis adapter (socket.io-adapter-redis) for horizontal scaling without handler code changes",
+        "All event handlers must complete within 500ms under 10k concurrent connection load"
+      ],
+      "definition_of_done": [
+        "Server starts and Socket.io listens on SOCKET_PORT without errors",
+        "Authenticated client connects and socket.data.userId is populated",
+        "Unauthenticated connection attempt is rejected with error event",
+        "update_location event with valid payload reaches location.handler.ts stub",
+        "Invalid payload on any event emits error to sender and does not crash server"
+      ]
+    },
+    {
+      "name": "GeolocationAgent",
+      "responsibility": "Implement nearby driver discovery using Haversine distance calculation, driver location persistence to PostgreSQL, and real-time nearby_driver_update broadcasting via Socket.io on location change events.",
+      "scope": {
+        "included": [
+          "Haversine distance calculation utility /lib/haversine.ts: pure function (lat1, lon1, lat2, lon2) → distance in km",
+          "POST /api/drivers/location — authenticates user, validates body with LocationUpdateSchema, upserts driver_locations table, triggers socket nearby calculation",
+          "GET /api/drivers/nearby — authenticates user, validates query params with LocationUpdateSchema, returns array of drivers within 50km",
+          "Completion of /sockets/handlers/location.handler.ts: validates payload, upserts in-memory location store, calculates nearby drivers via Haversine, emits nearby_driver_update to each affected connected socket",
+          "Stale location filtering: exclude drivers with updatedAt older than 5 minutes from nearby results",
+          "Default radius: 50km as specified in spec"
+        ],
+        "excluded": [
+          "Map UI rendering (handled by UISystemAgent)",
+          "Socket server infrastructure (handled by RealTimeSocketAgent)",
+          "PostGIS integration (Haversine specified as v1 default)"
+        ]
+      },
+      "inputs": [
+        "DatabaseSchemaAgent outputs: driver_locations table schema, Drizzle client (/db/index.ts)",
+        "ZodValidationAgent outputs: LocationUpdateSchema, validateOrThrow()",
+        "RealTimeSocketAgent outputs: Socket.io server instance (/sockets/index.ts), location store (/sockets/store/location.store.ts), /sockets/handlers/location.handler.ts stub",
+        "AuthenticationAgent outputs: requireAuth utility from /lib/auth-helpers.ts"
+      ],
+      "outputs": [
+        "/lib/haversine.ts — pure Haversine distance function typed (lat1: number, lon1: number, lat2: number, lon2: number) => number",
+        "/app/api/drivers/location/route.ts — POST handler: validates, upserts DB, updates in-memory store",
+        "/app/api/drivers/nearby/route.ts — GET handler: validates, returns nearby drivers array within 50km",
+        "/sockets/handlers/location.handler.ts — completed: validates update_location payload, updates store, emits nearby_driver_update to nearby sockets"
+      ],
+      "dependencies": [
+        "DatabaseSchemaAgent",
+        "ZodValidationAgent",
+        "RealTimeSocketAgent",
+        "AuthenticationAgent"
+      ],
+      "deliverables": [
+        "Haversine function returns correct km distance for known coordinate pairs (unit testable)",
+        "POST /api/drivers/location upserts location in DB and updates in-memory store, returns 200",
+        "GET /api/drivers/nearby returns only drivers within 50km radius, excludes stale (>5min) entries",
+        "update_location socket event triggers nearby_driver_update emission to relevant connected drivers within 500ms",
+        "User can only update their own location (session.user.id ownership enforced)"
+      ],
+      "tech_stack_constraints": [
+        "Haversine formula in pure TypeScript (no external geospatial library for v1)",
+        "Drizzle ORM for DB upsert operations",
+        "Socket.io for real-time broadcasting",
+        "Zod via validateOrThrow() for all input validation"
+      ],
+      "validation_requirements": [
+        "All incoming coordinates validated with LocationUpdateSchema before any processing",
+        "Both API routes reject unauthenticated requests with 401"
+      ],
+      "security_requirements": [
+        "Location updates only accepted for the authenticated user's own userId (session.user.id === body.userId)",
+        "Nearby results do not expose other drivers' private data beyond id, name, latitude, longitude"
+      ],
+      "scalability_requirements": [
+        "Nearby driver calculation performed on in-memory store (not DB query) to achieve sub-500ms latency",
+        "DB write for location persistence is non-blocking on the socket event path"
+      ],
+      "definition_of_done": [
+        "Haversine unit tests pass for known coordinate pairs including edge cases",
+        "POST /api/drivers/location returns 200 and updates both DB and in-memory store",
+        "GET /api/drivers/nearby excludes drivers outside 50km and stale drivers",
+        "Socket update_location event triggers nearby_driver_update emission within 500ms"
+      ]
+    },
+    {
+      "name": "VoiceMessagingAgent",
+      "responsibility": "Implement end-to-end voice messaging including browser-based audio recording via MediaRecorder API, audio file upload, message persistence in PostgreSQL, real-time delivery via Socket.io, and status lifecycle management.",
+      "scope": {
+        "included": [
+          "Client-side audio recording hook /hooks/useVoiceRecorder.ts: start(), stop(), audioBlob state, durationSeconds state, enforces 60s max duration via timer",
+          "POST /api/upload/audio — accepts multipart audio blob, saves to /public/uploads or configurable storage, returns { audioUrl: string }",
+          "POST /api/voice-messages — validates body with VoiceMessageSchema, inserts into voice_messages table with status='delivered', returns 201",
+          "GET /api/voice-messages — returns authenticated user's received message inbox ordered by created_at desc",
+          "PATCH /api/voice-messages/[id]/status — validates ownership (receiver_id === session.user.id), updates status to 'listened'",
+          "Completion of /sockets/handlers/voice.handler.ts: validates send_voice_message payload, inserts to DB, emits voice_message_received to receiver's socket by socketId lookup"
+        ],
+        "excluded": [
+          "Audio player UI component (handled by UISystemAgent)",
+          "Socket.io server infrastructure (handled by RealTimeSocketAgent)"
+        ]
+      },
+      "inputs": [
+        "DatabaseSchemaAgent outputs: voice_messages table schema, Drizzle client",
+        "ZodValidationAgent outputs: VoiceMessageSchema, validateOrThrow(), validateSocketEvent()",
+        "RealTimeSocketAgent outputs: Socket.io server instance, location store for socketId lookup, /sockets/handlers/voice.handler.ts stub",
+        "AuthenticationAgent outputs: requireAuth utility"
+      ],
+      "outputs": [
+        "/hooks/useVoiceRecorder.ts — MediaRecorder hook with start, stop, audioBlob, durationSeconds, isRecording state",
+        "/app/api/upload/audio/route.ts — audio blob upload handler returning { audioUrl }",
+        "/app/api/voice-messages/route.ts — POST (send) and GET (inbox) handlers",
+        "/app/api/voice-messages/[id]/status/route.ts — PATCH listened status handler",
+        "/sockets/handlers/voice.handler.ts — completed: validates, persists, emits voice_message_received to receiver"
+      ],
+      "dependencies": [
+        "DatabaseSchemaAgent",
+        "ZodValidationAgent",
+        "RealTimeSocketAgent",
+        "AuthenticationAgent"
+      ],
+      "deliverables": [
+        "useVoiceRecorder hook records audio and auto-stops at 60 seconds",
+        "POST /api/upload/audio returns a valid accessible audioUrl",
+        "POST /api/voice-messages persists message with status='delivered' and returns 201",
+        "GET /api/voice-messages returns authenticated user's inbox",
+        "PATCH /api/voice-messages/[id]/status updates to 'listened' and enforces receiver ownership",
+        "send_voice_message socket event emits voice_message_received to correct receiver within 500ms"
+      ],
+      "tech_stack_constraints": [
+        "MediaRecorder API (browser-native, no external recording library)",
+        "Drizzle ORM for message and status persistence",
+        "Socket.io for real-time delivery notification",
+        "Zod for all input validation",
+        "Local filesystem storage for development; abstracted for S3-compatible production storage"
+      ],
+      "validation_requirements": [
+        "VoiceMessageSchema enforced on all POST /api/voice-messages requests via validateOrThrow()",
+        "durationSeconds must be ≤ 60 — reject with 400 if violated at API level",
+        "receiverId must be a valid UUID — reject with 400 if not a valid UUID"
+      ],
+      "security_requirements": [
+        "Only authenticated users can send or retrieve voice messages",
+        "PATCH status endpoint enforces receiver_id === session.user.id ownership check",
+        "Audio file URLs must not be predictable or guessable (use UUID in filename)"
+      ],
+      "scalability_requirements": [
+        "Rate limiting enforced by SecurityRateLimitingAgent: max 10 voice messages per minute per user",
+        "Audio file storage abstraction must allow migration to object storage (S3) without changing API contract"
+      ],
+      "definition_of_done": [
+        "Full send-receive voice message flow works end-to-end in integration test",
+        "60-second duration limit enforced at both hook level (auto-stop) and API level (reject >60)",
+        "voice_message_received socket event delivered to receiver within 500ms",
+        "PATCH status endpoint rejects requests from non-receiver with 403"
+      ]
+    },
+    {
+      "name": "StressSignalAgent",
+      "responsibility": "Implement the emergency stress signal system including signal creation, real-time broadcast to nearby connected drivers, 30-minute auto-expiration, status management, and signal resolution flow.",
+      "scope": {
+        "included": [
+          "POST /api/stress-signals — authenticates user, validates body with StressSignalSchema, inserts signal with status='active', triggers socket broadcast to nearby drivers",
+          "GET /api/stress-signals/active — returns active signals within 50km of requesting driver, filters out signals older than 30 minutes",
+          "PATCH /api/stress-signals/[id]/resolve — validates creator ownership (user_id === session.user.id), updates status to 'resolved'",
+          "Completion of /sockets/handlers/stress.handler.ts: validates send_stress_signal payload, inserts to DB, uses in-memory location store to identify nearby connected drivers, emits stress_signal_alert to each",
+          "/lib/stress-signal-expiry.ts — expiration utility function: queries stress_signals WHERE status='active' AND created_at < NOW() - INTERVAL '30 minutes', bulk updates to 'resolved'",
+          "Stale signal filtering on GET /api/stress-signals/active using 30-minute cutoff"
+        ],
+        "excluded": [
+          "Stress signal UI components (handled by UISystemAgent)",
+          "Socket.io server infrastructure (handled by RealTimeSocketAgent)",
+          "Rate limiting implementation (handled by SecurityRateLimitingAgent)"
+        ]
+      },
+      "inputs": [
+        "DatabaseSchemaAgent outputs: stress_signals table schema, Drizzle client",
+        "ZodValidationAgent outputs: StressSignalSchema, validateOrThrow(), validateSocketEvent()",
+        "RealTimeSocketAgent outputs: Socket.io server instance, location store, /sockets/handlers/stress.handler.ts stub",
+        "AuthenticationAgent outputs: requireAuth utility",
+        "GeolocationAgent outputs: /lib/haversine.ts for nearby filtering"
+      ],
+      "outputs": [
+        "/app/api/stress-signals/route.ts — POST handler",
+        "/app/api/stress-signals/active/route.ts — GET active signals within radius handler",
+        "/app/api/stress-signals/[id]/resolve/route.ts — PATCH resolve handler",
+        "/sockets/handlers/stress.handler.ts — completed: validates, persists, emits stress_signal_alert to nearby drivers",
+        "/lib/stress-signal-expiry.ts — expiration utility callable from cron or on-read"
+      ],
+      "dependencies": [
+        "DatabaseSchemaAgent",
+        "ZodValidationAgent",
+        "RealTimeSocketAgent",
+        "AuthenticationAgent",
+        "GeolocationAgent"
+      ],
+      "deliverables": [
+        "POST /api/stress-signals creates signal with status='active' and returns 201",
+        "send_stress_signal socket event broadcasts stress_signal_alert to all nearby connected drivers within 500ms",
+        "GET /api/stress-signals/active excludes signals older than 30 minutes and outside 50km radius",
+        "PATCH /api/stress-signals/[id]/resolve sets status to 'resolved' and enforces creator ownership",
+        "Expiration utility correctly identifies and resolves stale signals in DB"
+      ],
+      "tech_stack_constraints": [
+        "Drizzle ORM for signal persistence and status updates",
+        "Socket.io for real-time broadcast to nearby drivers",
+        "Zod for all input validation",
+        "TypeScript strict mode"
+      ],
+      "validation_requirements": [
+        "StressSignalSchema enforced on POST /api/stress-signals and send_stress_signal socket event",
+        "Latitude and longitude must pass full range constraints before any DB write"
+      ],
+      "security_requirements": [
+        "Only authenticated drivers can create or resolve signals",
+        "PATCH resolve enforces user_id === session.user.id ownership",
+        "Rate limiting applied by SecurityRateLimitingAgent: max 3 stress signals per 10 minutes per user"
+      ],
+      "scalability_requirements": [
+        "Nearby broadcast uses in-memory location store (not DB query) to meet 500ms latency target",
+        "DB index on stress_signals(status, created_at) ensures fast expiration queries at scale"
+      ],
+      "definition_of_done": [
+        "POST creates signal and triggers real-time alert to nearby drivers within 500ms",
+        "Signals older than 30 minutes excluded from GET /active responses",
+        "PATCH resolve returns 200 and updates DB, rejects non-creator with 403",
+        "Expiration utility updates stale active signals to 'resolved' in unit test"
+      ]
+    },
+    {
+      "name": "UISystemAgent",
+      "responsibility": "Build all user-facing Next.js pages and UI components using Tailwind CSS and shadcn/ui, including authentication forms, dashboard, map view, voice message interface, stress signal panel, and real-time Socket.io client integration hooks.",
+      "scope": {
+        "included": [
+          "/app/(auth)/login/page.tsx — login form with UserLoginSchema client-side validation, field-level Zod error display",
+          "/app/(auth)/register/page.tsx — registration form with UserRegisterSchema client-side validation",
+          "/app/(protected)/dashboard/page.tsx — main dashboard with session user info and navigation",
+          "/app/(protected)/map/page.tsx — map view displaying nearby drivers updated in real-time via nearby_driver_update socket event",
+          "/app/(protected)/messages/page.tsx — voice message inbox (GET /api/voice-messages) and record/send interface using useVoiceRecorder",
+          "/app/(protected)/stress/page.tsx — stress signal trigger button and active alerts list updated via stress_signal_alert socket event",
+          "Shared layout: /components/layout/Navbar.tsx, /components/layout/Sidebar.tsx, /app/(protected)/layout.tsx",
+          "shadcn/ui components: Button, Input, Form, Card, Badge, Dialog, Sonner (toast)",
+          "Custom components: DriverCard, VoiceMessageItem, RecordButton, StressSignalBadge",
+          "/hooks/useSocket.ts — Socket.io client hook with authentication token from useSession, auto-reconnect, typed event listeners, cleanup on unmount",
+          "Mobile-first responsive design with Tailwind breakpoints"
+        ],
+        "excluded": [
+          "API route implementations",
+          "Socket server logic",
+          "Authentication backend"
+        ]
+      },
+      "inputs": [
+        "ProjectArchitectureSetupAgent outputs: tailwind.config.ts, components.json, folder structure",
+        "ZodValidationAgent outputs: UserRegisterSchema, UserLoginSchema for client-side form validation",
+        "VoiceMessagingAgent outputs: /hooks/useVoiceRecorder.ts",
+        "AuthenticationAgent outputs: useSession patterns, typed Session with user.id, middleware.ts route protection",
+        "RealTimeSocketAgent outputs: Socket.io event names (nearby_driver_update, voice_message_received, stress_signal_alert), SOCKET_PORT"
+      ],
+      "outputs": [
+        "/app/(auth)/login/page.tsx",
+        "/app/(auth)/register/page.tsx",
+        "/app/(protected)/layout.tsx",
+        "/app/(protected)/dashboard/page.tsx",
+        "/app/(protected)/map/page.tsx",
+        "/app/(protected)/messages/page.tsx",
+        "/app/(protected)/stress/page.tsx",
+        "/components/layout/Navbar.tsx",
+        "/components/layout/Sidebar.tsx",
+        "/components/drivers/DriverCard.tsx",
+        "/components/voice/VoiceMessageItem.tsx",
+        "/components/voice/RecordButton.tsx",
+        "/components/stress/StressSignalBadge.tsx",
+        "/hooks/useSocket.ts — typed Socket.io client hook"
+      ],
+      "dependencies": [
+        "ProjectArchitectureSetupAgent",
+        "ZodValidationAgent",
+        "AuthenticationAgent",
+        "VoiceMessagingAgent",
+        "RealTimeSocketAgent"
+      ],
+      "deliverables": [
+        "All 4 protected pages render without TypeScript or runtime errors when authenticated",
+        "Login and register forms validate client-side with Zod and display field-level error messages",
+        "useSocket.ts connects to Socket.io server with Auth.js session token and cleans up on unmount",
+        "RecordButton triggers useVoiceRecorder, displays recording state, enforces 60s limit",
+        "StressSignalBadge displays incoming stress_signal_alert events in real-time",
+        "All pages are mobile-responsive at 375px viewport width"
+      ],
+      "tech_stack_constraints": [
+        "Next.js App Router (Server Components for data fetching, Client Components for interactivity)",
+        "Tailwind CSS v3+ (mobile-first, no inline styles)",
+        "shadcn/ui components exclusively (no other UI library)",
+        "Socket.io-client v4+",
+        "React Hook Form or controlled forms with Zod safeParse for client-side validation"
+      ],
+      "validation_requirements": [
+        "Login and register forms must validate with corresponding Zod schemas on submit before sending API request",
+        "Field-level Zod error messages must display adjacent to each invalid input"
+      ],
+      "security_requirements": [
+        "Protected pages enforce session via middleware.ts (no client-side-only auth guards)",
+        "No sensitive data (password_hash, full JWT) rendered in any client component"
+      ],
+      "scalability_requirements": [
+        "Socket event listeners must be removed on component unmount to prevent memory leaks",
+        "Voice message inbox must support pagination or virtual scrolling for large datasets"
+      ],
+      "definition_of_done": [
+        "All pages compile and render without TypeScript or runtime console errors",
+        "Full login and register flow works end-to-end in the browser",
+        "Real-time updates appear in UI within 500ms of socket event emission",
+        "Mobile layout renders correctly at 375px viewport width across all pages"
+      ]
+    },
+    {
+      "name": "APIRouteLayerAgent",
+      "responsibility": "Implement shared Next.js Route Handler utilities including authentication guards, standardized error and success response formatting, HTTP method enforcement, and user profile endpoints to establish a consistent API contract across the application.",
+      "scope": {
+        "included": [
+          "withAuth(handler) higher-order route handler: injects typed session, returns 401 if unauthenticated",
+          "errorResponse(message, status, details?) utility: returns NextResponse with { error: string, details?: ZodIssue[] }",
+          "successResponse(data, status) utility: returns NextResponse with typed data payload",
+          "methodGuard(allowed[], handler): returns 405 Method Not Allowed for unlisted HTTP methods",
+          "GET /api/users/me — returns authenticated user profile (id, name, email, created_at) excluding password_hash",
+          "PATCH /api/users/me — updates authenticated user's name field with Zod string min(2) validation",
+          "TypeScript generic ApiResponse<T> type for all route return shapes"
+        ],
+        "excluded": [
+          "Feature-specific routes (handled by GeolocationAgent, VoiceMessagingAgent, StressSignalAgent, AuthenticationAgent)",
+          "Socket event handling"
+        ]
+      },
+      "inputs": [
+        "ZodValidationAgent outputs: all schemas, validateOrThrow(), /lib/validate.ts",
+        "AuthenticationAgent outputs: requireAuth, getServerSession wrapper from /lib/auth-helpers.ts",
+        "DatabaseSchemaAgent outputs: Drizzle client, users table schema"
+      ],
+      "outputs": [
+        "/lib/api.ts — withAuth(), errorResponse(), successResponse(), methodGuard() utilities and ApiResponse<T> type",
+        "/app/api/users/me/route.ts — GET and PATCH handlers",
+        "Consistent JSON error shape { error: string, details?: ZodIssue[] } used across the entire application"
+      ],
+      "dependencies": [
+        "ProjectArchitectureSetupAgent",
+        "DatabaseSchemaAgent",
+        "ZodValidationAgent",
+        "AuthenticationAgent"
+      ],
+      "deliverables": [
+        "withAuth() correctly injects session and returns 401 on missing or expired session",
+        "All API errors across the application return { error, details } shape",
+        "GET /api/users/me returns user profile without password_hash field",
+        "PATCH /api/users/me updates name and enforces min(2) validation",
+        "405 returned correctly for disallowed HTTP methods on all route handlers"
+      ],
+      "tech_stack_constraints": [
+        "Next.js App Router Route Handlers",
+        "Zod for validation via validateOrThrow()",
+        "TypeScript strict mode with generic types"
+      ],
+      "validation_requirements": [
+        "All route handlers must use validateOrThrow() for any request body parsing",
+        "All protected routes must use withAuth() — no ad-hoc session checks"
+      ],
+      "security_requirements": [
+        "password_hash field must never be included in any API response at any route",
+        "session.user.id used exclusively for all ownership and identity checks"
+      ],
+      "scalability_requirements": [
+        "All route utility functions must be stateless and safe for concurrent invocation"
+      ],
+      "definition_of_done": [
+        "GET /api/users/me returns user profile without password_hash",
+        "withAuth() rejects requests with missing or expired session with 401",
+        "All feature route handlers use errorResponse() and successResponse() consistently",
+        "TypeScript compilation succeeds with zero errors across all route handler files"
+      ]
+    },
+    {
+      "name": "SecurityRateLimitingAgent",
+      "responsibility": "Implement application-layer security hardening including per-user and per-IP API rate limiting, HTTP security headers, CORS enforcement, and socket-level rate limiting for abuse-prone features.",
+      "scope": {
+        "included": [
+          "Rate limiter factory in /lib/rate-limit.ts: supports per-user (by session.user.id) and per-IP strategies using sliding window algorithm",
+          "Rate limit rules: POST /api/stress-signals — max 3 per 10 minutes per user; POST /api/voice-messages — max 10 per 1 minute per user; POST /api/auth/register — max 5 per hour per IP",
+          "Integration into middleware.ts: rate limit check before route processing, return 429 with Retry-After header on exceeded limit",
+          "HTTP security headers in next.config.ts headers(): Strict-Transport-Security, X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Content-Security-Policy, Referrer-Policy",
+          "Socket.io CORS whitelist: only NEXTAUTH_URL origin accepted",
+          "/sockets/middleware/rate-limit.middleware.ts: per-user event rate limiting on socket events, rejects excess events without disconnecting socket"
+        ],
+        "excluded": [
+          "WAF or infrastructure-level DDoS mitigation",
+          "Auth.js session security (handled by AuthenticationAgent)"
+        ]
+      },
+      "inputs": [
+        "ProjectArchitectureSetupAgent outputs: next.config.ts, middleware.ts, /lib/env.ts (NEXTAUTH_URL)",
+        "AuthenticationAgent outputs: session user.id for per-user rate limiting context in middleware",
+        "RealTimeSocketAgent outputs: Socket.io server instance for socket-level middleware integration"
+      ],
+      "outputs": [
+        "/lib/rate-limit.ts — rate limiter factory with createApiRateLimiter(key, max, windowMs) and createSocketRateLimiter()",
+        "middleware.ts — updated with rate limit enforcement before route handler call",
+        "next.config.ts — updated with security headers() configuration",
+        "/sockets/middleware/rate-limit.middleware.ts — socket event rate limiter middleware"
+      ],
+      "dependencies": [
+        "ProjectArchitectureSetupAgent",
+        "AuthenticationAgent",
+        "RealTimeSocketAgent"
+      ],
+      "deliverables": [
+        "4th POST /api/stress-signals within 10 minutes returns 429 with Retry-After header",
+        "11th POST /api/voice-messages within 1 minute returns 429 with Retry-After header",
+        "6th POST /api/auth/register from same IP within 1 hour returns 429",
+        "All HTTP responses include Strict-Transport-Security, X-Frame-Options, X-Content-Type-Options headers",
+        "Socket events exceeding rate limit are rejected with error event, socket remains connected",
+        "Rate limit window resets correctly after expiry"
+      ],
+      "tech_stack_constraints": [
+        "In-memory sliding window rate limiter for development (lru-cache or Map-based)",
+        "Designed to swap to Redis-backed Upstash Ratelimit adapter for production without consumer code changes",
+        "Next.js middleware for HTTP rate limiting",
+        "Socket.io middleware for socket rate limiting",
+        "TypeScript strict mode"
+      ],
+      "validation_requirements": [
+        "Rate limit keys must incorporate session.user.id for per-user limits (not IP alone for authenticated routes)"
+      ],
+      "security_requirements": [
+        "Strict-Transport-Security max-age must be at least 31536000 (1 year)",
+        "Content-Security-Policy must restrict default-src and script-src",
+        "X-Frame-Options: DENY prevents all framing-based clickjacking",
+        "Rate limiting on register and stress-signal endpoints prevents brute force and abuse"
+      ],
+      "scalability_requirements": [
+        "Rate limiter must be replaceable with Redis adapter (Upstash Ratelimit) for multi-instance horizontal scaling without changes to callsites"
+      ],
+      "definition_of_done": [
+        "Rate limit rules verified by integration tests asserting 429 on the (N+1)th request",
+        "Security headers verified present on all responses via curl -I assertions in test",
+        "Socket rate limiting rejects excess events and socket remains connected",
+        "Rate limit resets verified at window boundary in unit test"
+      ]
+    },
+    {
+      "name": "TestingQAAgent",
+      "responsibility": "Implement comprehensive test suites covering Zod schema unit tests, API route integration tests with test DB, Socket.io event tests, authentication flow tests, and Playwright end-to-end smoke tests for the complete driver workflow.",
+      "scope": {
+        "included": [
+          "Unit tests for all 6 Zod schemas: valid and invalid input matrix per schema field",
+          "Unit tests for /lib/haversine.ts: known coordinate pairs, edge cases (same point, antipodal points)",
+          "Unit tests for /lib/rate-limit.ts: window enforcement, reset behavior",
+          "Integration tests for all API routes using Vitest with a test PostgreSQL instance and Drizzle migrations",
+          "Auth flow integration tests: POST /api/auth/register (success, duplicate email), login (success, wrong password), protected route 401",
+          "Socket.io integration tests using socket.io-client: authenticated connection, event Zod rejection, location update flow, voice message delivery, stress signal broadcast",
+          "E2E tests with Playwright: register → login → update location → send voice message → send stress signal → verify real-time alerts",
+          "Test database isolation: each test suite runs migrations against an isolated test DB and tears down after",
+          "vitest.config.ts and playwright.config.ts configuration files",
+          "npm run test (unit + integration) and npm run test:e2e (Playwright) scripts"
+        ],
+        "excluded": [
+          "Load and performance testing (handled by DevOpsDeploymentAgent)",
+          "Visual regression testing"
+        ]
+      },
+      "inputs": [
+        "All agent outputs: schemas, API routes, socket handlers, UI pages, utilities",
+        "ZodValidationAgent outputs: all schemas from /schemas/",
+        "DatabaseSchemaAgent outputs: /db/migrations/ for test DB setup"
+      ],
+      "outputs": [
+        "/__tests__/schemas/ — Zod schema unit tests",
+        "/__tests__/lib/ — haversine.ts and rate-limit.ts unit tests",
+        "/__tests__/api/ — API route integration tests",
+        "/__tests__/sockets/ — Socket.io integration tests",
+        "/e2e/ — Playwright E2E test suite",
+        "vitest.config.ts",
+        "playwright.config.ts",
+        "Test coverage report targeting ≥ 80% on /lib, /sockets/handlers, /app/api"
+      ],
+      "dependencies": [
+        "ZodValidationAgent",
+        "DatabaseSchemaAgent",
+        "AuthenticationAgent",
+        "RealTimeSocketAgent",
+        "GeolocationAgent",
+        "VoiceMessagingAgent",
+        "StressSignalAgent",
+        "SecurityRateLimitingAgent",
+        "APIRouteLayerAgent"
+      ],
+      "deliverables": [
+        "npm run test passes with zero failures on clean environment",
+        "Each Zod schema has valid + invalid test cases covering every field constraint",
+        "Auth integration test covers register success, duplicate email 409, login success, login 401, protected route 401",
+        "Socket test verifies Zod payload rejection emits error without server crash",
+        "Playwright E2E smoke test completes full driver workflow without assertion failures",
+        "Test coverage report shows ≥ 80% on target modules"
+      ],
+      "tech_stack_constraints": [
+        "Vitest for unit and integration tests",
+        "Playwright for E2E browser tests",
+        "socket.io-client for socket integration tests",
+        "Isolated test PostgreSQL database with Drizzle migration on setup and teardown"
+      ],
+      "validation_requirements": [
+        "Each Zod schema test must assert both successful parse result and ZodError shape on invalid input"
+      ],
+      "security_requirements": [
+        "Integration tests must assert 401 on all unauthenticated API requests to protected routes",
+        "Integration tests must assert 429 on rate-limit-exceeded requests"
+      ],
+      "scalability_requirements": [
+        "Full unit + integration test suite must complete in under 3 minutes in CI environment"
+      ],
+      "definition_of_done": [
+        "npm run test exits with code 0 with no skipped tests",
+        "npm run test:e2e completes the full smoke test with all assertions passing",
+        "Coverage report shows ≥ 80% branch coverage on /lib, /sockets/handlers, /app/api",
+        "No console errors or unhandled promise rejections during test execution"
+      ]
+    },
+    {
+      "name": "DevOpsDeploymentAgent",
+      "responsibility": "Configure production deployment infrastructure including multi-stage Dockerfile, docker-compose for local development, GitHub Actions CI/CD pipelines, automated DB migration on deploy, health check endpoint, and k6 load test validating 10k concurrent Socket.io connections under 500ms p95 latency.",
+      "scope": {
+        "included": [
+          "Dockerfile: multi-stage build (deps → builder → runner) for Next.js custom server.ts, Node.js 20 Alpine, non-root user execution",
+          "docker-compose.yml: app, PostgreSQL 14, optional Redis services with automatic npm run db:migrate on app startup",
+          ".github/workflows/ci.yml: triggers on push/PR — steps: install → lint → type-check → test → build",
+          ".github/workflows/deploy.yml: triggers on merge to main — steps: build Docker image → push to registry → deploy",
+          "GET /api/health route handler returning 200 { status: 'ok', timestamp: ISO string }",
+          "/load-tests/k6-script.js: simulates 10k virtual users with Socket.io WebSocket connections, measures event emission latency, asserts p95 < 500ms",
+          ".env.example: all required env var keys with placeholder values and comments",
+          "DEPLOYMENT.md: required env vars, Docker build commands, migration steps, Redis adapter configuration for multi-instance Socket.io scaling, HTTPS setup guidance"
+        ],
+        "excluded": [
+          "Cloud provider-specific IaC (Terraform, Pulumi)",
+          "CDN configuration",
+          "Database backup automation"
+        ]
+      },
+      "inputs": [
+        "All agent outputs: complete application codebase",
+        "ProjectArchitectureSetupAgent outputs: /lib/env.ts EnvSchema for env var documentation",
+        "DatabaseSchemaAgent outputs: /db/migrations/ for migration step in entrypoint",
+        "RealTimeSocketAgent outputs: /server.ts custom server as Docker entrypoint",
+        "SecurityRateLimitingAgent outputs: security headers in next.config.ts",
+        "TestingQAAgent outputs: npm run test script for CI pipeline"
+      ],
+      "outputs": [
+        "Dockerfile",
+        "docker-compose.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/deploy.yml",
+        ".env.example",
+        "/app/api/health/route.ts",
+        "/load-tests/k6-script.js",
+        "DEPLOYMENT.md"
+      ],
+      "dependencies": [
+        "ProjectArchitectureSetupAgent",
+        "DatabaseSchemaAgent",
+        "RealTimeSocketAgent",
+        "SecurityRateLimitingAgent",
+        "TestingQAAgent"
+      ],
+      "deliverables": [
+        "docker build -t truckconnect . exits 0 without errors",
+        "docker-compose up starts application and PostgreSQL with automatic migration applied",
+        "GET /api/health returns 200 { status: 'ok', timestamp }",
+        "CI workflow passes all steps (lint, type-check, test, build) on clean branch",
+        "k6 load test sustains 10k concurrent WebSocket virtual users with p95 event latency < 500ms",
+        "DEPLOYMENT.md documents all env vars, deployment steps, and Redis scaling instructions"
+      ],
+      "tech_stack_constraints": [
+        "Docker with multi-stage build (node:20-alpine base image)",
+        "GitHub Actions for CI/CD",
+        "k6 for Socket.io WebSocket load testing",
+        "docker-compose v3.8+"
+      ],
+      "validation_requirements": [
+        "CI pipeline must run npm run test and fail the workflow on any test failure before allowing deploy",
+        "Dockerfile CMD must trigger EnvSchema validation at container startup before serving traffic"
+      ],
+      "security_requirements": [
+        "No secrets in Dockerfile, docker-compose.yml, or committed workflow files — use GitHub Actions Secrets",
+        "Docker container runs as non-root user (USER node pattern)",
+        "DEPLOYMENT.md must document HTTPS termination requirement via reverse proxy or platform TLS"
+      ],
+      "scalability_requirements": [
+        "k6 test must produce a report showing p95 Socket.io event latency < 500ms at 10k virtual users",
+        "DEPLOYMENT.md must include socket.io-adapter-redis configuration instructions for multi-instance horizontal scaling"
+      ],
+      "definition_of_done": [
+        "Docker image builds successfully and container starts without errors",
+        "docker-compose up produces a running application accessible on localhost with DB migrated",
+        "GitHub Actions CI workflow passes on a clean branch push",
+        "k6 load test report shows p95 latency < 500ms at 10k virtual users",
+        "DEPLOYMENT.md is complete and reviewed for accuracy"
+      ]
+    },
+    {
+  "name": "StorageAdapterAgent",
+  "responsibility": "Implement a pluggable storage abstraction layer for voice message audio files supporting local filesystem (development) and S3-compatible object storage (production) without changing the VoiceMessagingAgent API contract.",
+  "scope": {
+    "included": [
+      "Define StorageProvider interface in /lib/storage/storage.interface.ts with methods: upload(file: Buffer, filename: string) => Promise<string>, delete(url: string) => Promise<void>",
+      "Implement LocalStorageProvider in /lib/storage/local.provider.ts storing files in /public/uploads",
+      "Implement S3StorageProvider in /lib/storage/s3.provider.ts using AWS SDK v3",
+      "Create storage factory in /lib/storage/index.ts selecting provider based on env var STORAGE_PROVIDER",
+      "Update /api/upload/audio route to consume storage abstraction instead of writing directly to filesystem"
+    ],
+    "excluded": [
+      "Voice message DB persistence logic",
+      "Frontend recording logic"
+    ]
+  },
+  "inputs": [
+    "ProjectArchitectureSetupAgent output: /lib/env.ts",
+    "VoiceMessagingAgent audio upload contract"
+  ],
+  "outputs": [
+    "/lib/storage/storage.interface.ts",
+    "/lib/storage/local.provider.ts",
+    "/lib/storage/s3.provider.ts",
+    "/lib/storage/index.ts"
+  ],
+  "dependencies": [
+    "ProjectArchitectureSetupAgent"
+  ],
+  "deliverables": [
+    "Audio upload works with local provider in development",
+    "Switching STORAGE_PROVIDER to 's3' works without changing API route code",
+    "Uploaded filenames use UUID-based naming"
+  ],
+  "tech_stack_constraints": [
+    "AWS SDK v3 for S3 implementation",
+    "TypeScript strict mode",
+    "No direct filesystem usage outside provider"
+  ],
+  "validation_requirements": [
+    "Uploaded file size must be validated (max 10MB)",
+    "Only audio MIME types allowed"
+  ],
+  "security_requirements": [
+    "Uploaded filenames must not be user-controlled",
+    "S3 bucket must not be public-write"
+  ],
+  "scalability_requirements": [
+    "Provider abstraction must allow horizontal scaling without shared filesystem dependency"
+  ],
+  "definition_of_done": [
+    "Audio upload works in both local and S3 modes",
+    "Switching provider requires only env var change"
+  ]
+},{
+  "name": "ObservabilityAgent",
+  "responsibility": "Implement structured logging, request timing, socket event latency measurement, error tracing, and production-ready observability hooks.",
+  "scope": {
+    "included": [
+      "Integrate pino logger in /lib/logger.ts with structured JSON logs",
+      "Request timing middleware logging method, path, status, durationMs",
+      "Socket event timing wrapper logging event name and execution duration",
+      "Global error handler logging uncaught exceptions",
+      "Enhance /api/health to include uptime and memory usage",
+      "Optional OpenTelemetry instrumentation hooks scaffold"
+    ],
+    "excluded": [
+      "External monitoring vendor integration (Datadog, Sentry)"
+    ]
+  },
+  "inputs": [
+    "APIRouteLayerAgent",
+    "RealTimeSocketAgent"
+  ],
+  "outputs": [
+    "/lib/logger.ts",
+    "/lib/request-timer.ts",
+    "/sockets/middleware/metrics.middleware.ts"
+  ],
+  "dependencies": [
+    "ProjectArchitectureSetupAgent",
+    "RealTimeSocketAgent"
+  ],
+  "deliverables": [
+    "All API requests log structured JSON entries",
+    "Socket events log execution duration",
+    "Errors logged with stack trace"
+  ],
+  "tech_stack_constraints": [
+    "pino logger",
+    "TypeScript strict mode"
+  ],
+  "validation_requirements": [
+    "No sensitive data (password, tokens) logged"
+  ],
+  "security_requirements": [
+    "PII fields masked in logs"
+  ],
+  "scalability_requirements": [
+    "Logging must not block request/response cycle"
+  ],
+  "definition_of_done": [
+    "API request logs include durationMs",
+    "Socket event logs include event name and execution time",
+    "Application does not crash on logging failure"
+  ]
+}, {
+  "name": "SystemIntegrationAgent",
+  "responsibility": "Ensure all agents are correctly wired together, enforce cross-layer contracts, verify consistent validation and authentication usage, and perform full system integration validation before testing phase.",
+  "scope": {
+    "included": [
+      "Verify all API routes use withAuth and validateOrThrow",
+      "Ensure all socket events pass through validateSocketEvent",
+      "Ensure no route bypasses rate limiting where required",
+      "Ensure consistent error response format across all routes",
+      "Verify all handlers are registered in Socket.io initialization",
+      "Cross-check Drizzle types align with Zod inferred types"
+    ],
+    "excluded": [
+      "Feature implementation",
+      "Deployment configuration"
+    ]
+  },
+  "inputs": [
+    "All previously defined agents"
+  ],
+  "outputs": [
+    "Integration validation report",
+    "List of mismatches fixed",
+    "Verified event-handler registration map"
+  ],
+  "dependencies": [
+    "APIRouteLayerAgent",
+    "AuthenticationAgent",
+    "RealTimeSocketAgent",
+    "ZodValidationAgent",
+    "SecurityRateLimitingAgent"
+  ],
+  "deliverables": [
+    "No route exists without authentication guard where required",
+    "All event handlers registered and reachable",
+    "Consistent error shape across application"
+  ],
+  "tech_stack_constraints": [
+    "No new libraries introduced"
+  ],
+  "validation_requirements": [
+    "All route bodies validated with Zod",
+    "All socket payloads validated"
+  ],
+  "security_requirements": [
+    "No authentication bypass path exists",
+    "Ownership checks enforced consistently"
+  ],
+  "scalability_requirements": [
+    "No blocking synchronous calls inside socket event handlers"
+  ],
+  "definition_of_done": [
+    "Full system integration checklist passes",
+    "No TypeScript mismatches between DB and validation layers",
+    "Application runs end-to-end without manual patching"
+  ]
+}
+  ]
+}

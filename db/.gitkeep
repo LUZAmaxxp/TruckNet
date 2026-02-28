@@ -1,0 +1,2 @@
+# This directory contains Drizzle ORM schema, migrations, and the database client.
+# Populated by DatabaseSchemaAgent in Wave 2.

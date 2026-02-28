@@ -1,0 +1,179 @@
+{
+  "project_name": "TruckConnect",
+  "wave_id": 8,
+  "wave_name": "Deployment + CI/CD + Load Validation",
+  "parallel_execution": false,
+  "goal": "Make the system production-deployable with Docker and CI/CD, ensure health checks exist, and add k6 load tests to validate real-time constraints at scale.",
+  "agents": [
+    {
+      "agent_name": "DevOpsDeploymentAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "ProjectArchitectureSetupAgent",
+        "DatabaseSchemaAgent: migrations exist",
+        "RealTimeSocketAgent: server.ts entrypoint exists",
+        "SecurityRateLimitingAgent: security headers present",
+        "TestingQAAgent: tests and scripts exist"
+      ],
+      "tasks": [
+        {
+          "id": "W8-A1-T1",
+          "title": "Add health check endpoint",
+          "steps": [
+            "Create /app/api/health/route.ts",
+            "Return 200 JSON: { status: 'ok', timestamp: ISO string }",
+            "Optionally include uptime + memory if already available"
+          ],
+          "outputs": [
+            "/app/api/health/route.ts"
+          ],
+          "verification": [
+            "GET /api/health returns 200 with expected JSON"
+          ]
+        },
+        {
+          "id": "W8-A1-T2",
+          "title": "Dockerize application with multi-stage Dockerfile",
+          "steps": [
+            "Create multi-stage Dockerfile: deps -> builder -> runner",
+            "Use node:20-alpine base image",
+            "Ensure it runs custom server.ts in production mode",
+            "Run as non-root user",
+            "Ensure container startup triggers EnvSchema validation (fail-fast)"
+          ],
+          "outputs": [
+            "Dockerfile"
+          ],
+          "verification": [
+            "docker build -t truckconnect . succeeds",
+            "docker run starts the server successfully with correct env vars"
+          ]
+        },
+        {
+          "id": "W8-A1-T3",
+          "title": "Local dev environment with docker-compose",
+          "steps": [
+            "Create docker-compose.yml with services: app + postgres",
+            "Optionally include redis service (for future socket scaling)",
+            "Ensure migrations apply on startup (entrypoint script or app boot hook)",
+            "Expose app and db ports for local use"
+          ],
+          "outputs": [
+            "docker-compose.yml",
+            "Optional entrypoint script for migration"
+          ],
+          "verification": [
+            "docker-compose up starts app + postgres",
+            "DB migrations applied automatically",
+            "App accessible at localhost"
+          ]
+        },
+        {
+          "id": "W8-A1-T4",
+          "title": "Add CI workflow",
+          "steps": [
+            "Create .github/workflows/ci.yml",
+            "Steps: install -> lint -> type-check -> test -> build",
+            "Fail workflow on any step failure"
+          ],
+          "outputs": [
+            ".github/workflows/ci.yml"
+          ],
+          "verification": [
+            "CI workflow runs successfully on push/PR (simulated locally where possible)"
+          ]
+        },
+        {
+          "id": "W8-A1-T5",
+          "title": "Add deploy workflow skeleton",
+          "steps": [
+            "Create .github/workflows/deploy.yml",
+            "Trigger on merge to main",
+            "Build docker image, push to registry, deploy step placeholder",
+            "Require GitHub Actions Secrets for credentials"
+          ],
+          "outputs": [
+            ".github/workflows/deploy.yml"
+          ],
+          "verification": [
+            "Workflow syntax valid and ready for target platform edits"
+          ]
+        },
+        {
+          "id": "W8-A1-T6",
+          "title": "Environment variable documentation",
+          "steps": [
+            "Create .env.example listing all required env keys",
+            "Include placeholders and comments (no secrets)",
+            "Document storage, socket, db, auth variables"
+          ],
+          "outputs": [
+            ".env.example"
+          ],
+          "verification": [
+            ".env.example matches EnvSchema required keys"
+          ]
+        },
+        {
+          "id": "W8-A1-T7",
+          "title": "Add k6 load test scripts for sockets",
+          "steps": [
+            "Create /load-tests/k6-script.js",
+            "Simulate high concurrency socket connections in steps (e.g., 1k -> 5k -> 10k)",
+            "Measure event RTT and compute p95 latency, assert p95 < 500ms (or record baseline if 10k is not feasible locally)",
+            "Document how to run k6 and interpret results"
+          ],
+          "outputs": [
+            "/load-tests/k6-script.js"
+          ],
+          "verification": [
+            "k6 script runs and produces latency metrics",
+            "Assertions configured (or staged thresholds documented)"
+          ]
+        },
+        {
+          "id": "W8-A1-T8",
+          "title": "Deployment documentation",
+          "steps": [
+            "Create DEPLOYMENT.md",
+            "Document: env vars, docker build/run, migrations, production considerations",
+            "Include socket.io-redis adapter instructions for horizontal scaling",
+            "State HTTPS/TLS termination requirement"
+          ],
+          "outputs": [
+            "DEPLOYMENT.md"
+          ],
+          "verification": [
+            "Docs are complete and consistent with repo and EnvSchema"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "Exact commands to run docker build/run and docker-compose",
+          "CI pipeline steps summary",
+          "How to run k6 and what success looks like",
+          "Deployment checklist"
+        ]
+      }
+    }
+  ],
+  "integration_checkpoint": {
+    "name": "Checkpoint H — Production Readiness Gate",
+    "must_pass": [
+      "GET /api/health returns 200 in local dev and in docker",
+      "Docker image builds and container starts without errors",
+      "docker-compose boots app + postgres and applies migrations",
+      "CI workflow includes lint, type-check, test, build and fails on errors",
+      "k6 load test script exists and runs to produce latency metrics",
+      "DEPLOYMENT.md documents scaling path and required env vars"
+    ],
+    "commands": [
+      "docker build -t truckconnect .",
+      "docker-compose up",
+      "curl http://localhost:<port>/api/health",
+      "k6 run load-tests/k6-script.js (if k6 installed)"
+    ]
+  },
+  "stop_condition_to_finish": "All checkpoint conditions pass and the repo is deployable with documented operational procedures."
+}

@@ -1,0 +1,179 @@
+{
+  "project_name": "TruckConnect",
+  "wave_id": 6,
+  "wave_name": "UI Implementation (Auth + Dashboard + Map + Messages + Stress)",
+  "parallel_execution": false,
+  "goal": "Build all user-facing pages and components with Tailwind + shadcn/ui and wire them to the existing API + Socket.io contracts for real-time interactions.",
+  "agents": [
+    {
+      "agent_name": "UISystemAgent",
+      "priority": 1,
+      "depends_on_outputs_from": [
+        "AuthenticationAgent: Auth.js session working + middleware protection",
+        "ZodValidationAgent: UserRegisterSchema, UserLoginSchema",
+        "RealTimeSocketAgent: socket events and connection requirements",
+        "GeolocationAgent: nearby_driver_update behavior + API endpoints",
+        "VoiceMessagingAgent: /hooks/useVoiceRecorder.ts + voice APIs",
+        "StressSignalAgent: stress APIs + stress_signal_alert event"
+      ],
+      "tasks": [
+        {
+          "id": "W6-A1-T1",
+          "title": "Auth pages (login + register) with Zod validation",
+          "steps": [
+            "Create /app/(auth)/login/page.tsx as a client component form",
+            "Validate inputs on submit using UserLoginSchema.safeParse",
+            "Display field-level errors next to inputs",
+            "Call Auth.js signIn('credentials', ...)",
+            "Create /app/(auth)/register/page.tsx with UserRegisterSchema client validation",
+            "Call POST /api/auth/register then redirect to login or auto sign-in"
+          ],
+          "outputs": [
+            "/app/(auth)/login/page.tsx",
+            "/app/(auth)/register/page.tsx"
+          ],
+          "verification": [
+            "Register and login work end-to-end in browser",
+            "Invalid inputs show Zod-driven field errors"
+          ]
+        },
+        {
+          "id": "W6-A1-T2",
+          "title": "Protected layout + navigation",
+          "steps": [
+            "Create /app/(protected)/layout.tsx",
+            "Implement Navbar and/or Sidebar in /components/layout",
+            "Show session user info (safe fields only)",
+            "Add navigation links: Dashboard, Map, Messages, Stress"
+          ],
+          "outputs": [
+            "/app/(protected)/layout.tsx",
+            "/components/layout/Navbar.tsx",
+            "/components/layout/Sidebar.tsx"
+          ],
+          "verification": [
+            "Protected routes render only when authenticated (middleware enforced)",
+            "Layout works on mobile"
+          ]
+        },
+        {
+          "id": "W6-A1-T3",
+          "title": "Socket client hook",
+          "steps": [
+            "Create /hooks/useSocket.ts as a client hook",
+            "Connect to Socket.io server using auth token strategy consistent with server middleware",
+            "Implement auto-reconnect and cleanup on unmount",
+            "Expose on(event, handler) and emit(event, payload)",
+            "Type event names and payloads to avoid stringly-typed usage"
+          ],
+          "outputs": [
+            "/hooks/useSocket.ts"
+          ],
+          "verification": [
+            "Socket connects successfully when logged in",
+            "Listeners detach on unmount"
+          ]
+        },
+        {
+          "id": "W6-A1-T4",
+          "title": "Dashboard + Map page with nearby drivers",
+          "steps": [
+            "Create /app/(protected)/dashboard/page.tsx",
+            "Create /app/(protected)/map/page.tsx",
+            "Implement driver marker/list UI and selection UI",
+            "Subscribe to nearby_driver_update and render updated nearby drivers",
+            "Request browser geolocation, then emit update_location periodically (15–30s) or on change",
+            "Add DriverCard component for selected driver and action buttons"
+          ],
+          "outputs": [
+            "/app/(protected)/dashboard/page.tsx",
+            "/app/(protected)/map/page.tsx",
+            "/components/drivers/DriverCard.tsx"
+          ],
+          "verification": [
+            "Two users see each other on the map/nearby list when close",
+            "UI updates in real time on movement"
+          ]
+        },
+        {
+          "id": "W6-A1-T5",
+          "title": "Messages page (record + send + inbox)",
+          "steps": [
+            "Create /app/(protected)/messages/page.tsx",
+            "Render inbox by calling GET /api/voice-messages",
+            "Use useVoiceRecorder to record audio, upload audio via POST /api/upload/audio, then send via POST /api/voice-messages or socket send_voice_message",
+            "Add VoiceMessageItem component with audio playback",
+            "On play, call PATCH /api/voice-messages/[id]/status to mark listened",
+            "Subscribe to voice_message_received socket event and show toast/inbox refresh"
+          ],
+          "outputs": [
+            "/app/(protected)/messages/page.tsx",
+            "/components/voice/RecordButton.tsx",
+            "/components/voice/VoiceMessageItem.tsx"
+          ],
+          "verification": [
+            "User can record, send, and receiver can play message",
+            "Receiver gets real-time notification and message appears in inbox"
+          ]
+        },
+        {
+          "id": "W6-A1-T6",
+          "title": "Stress page (trigger + active alerts)",
+          "steps": [
+            "Create /app/(protected)/stress/page.tsx",
+            "Add large red stress button (floating if desired) that sends stress signal (socket event or POST API)",
+            "Render list of active signals using GET /api/stress-signals/active",
+            "Subscribe to stress_signal_alert socket event and show toast + update UI",
+            "Add StressSignalBadge component for alert display"
+          ],
+          "outputs": [
+            "/app/(protected)/stress/page.tsx",
+            "/components/stress/StressSignalBadge.tsx"
+          ],
+          "verification": [
+            "Sending stress signal triggers real-time alert for nearby users",
+            "Active signals list updates and shows only valid active signals"
+          ]
+        },
+        {
+          "id": "W6-A1-T7",
+          "title": "Mobile-first UI polish using shadcn/ui",
+          "steps": [
+            "Ensure all pages are usable at 375px width",
+            "Use shadcn/ui components consistently (Button, Card, Dialog, Badge, Input, etc.)",
+            "Add toast notifications (Sonner) for socket events",
+            "Avoid heavy UI libraries beyond shadcn/ui"
+          ],
+          "outputs": [
+            "Consistent UI styling across all pages"
+          ],
+          "verification": [
+            "No layout breakage on mobile viewport",
+            "No console errors in browser"
+          ]
+        }
+      ],
+      "handoff_contract": {
+        "must_provide": [
+          "Routes list and how to navigate",
+          "How to run two-user test in browser",
+          "Notes on socket connection/auth approach used on client"
+        ]
+      }
+    }
+  ],
+  "integration_checkpoint": {
+    "name": "Checkpoint F — UI Gate",
+    "must_pass": [
+      "Register → Login works end-to-end",
+      "Protected pages inaccessible when logged out (middleware enforced)",
+      "Map page shows nearby drivers and updates in real time",
+      "Voice messaging works end-to-end with record/upload/send/play/listened status",
+      "Stress signal triggers real-time alerts and appears on UI"
+    ],
+    "manual_verification": [
+      "Open two separate browser sessions (incognito + normal) as Driver A and Driver B; validate the full workflow"
+    ]
+  },
+  "stop_condition_to_advance": "Full end-to-end workflow works in UI with real-time updates and no runtime errors."
+}
