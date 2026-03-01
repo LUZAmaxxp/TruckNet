@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Mic, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,24 +15,20 @@ export function RecordButton({ onRecordingComplete, disabled }: RecordButtonProp
   const { start, stop, isRecording, audioBlob, durationSeconds, permissionError } =
     useVoiceRecorder();
 
-  // Forward blob up once recording completes
-  if (audioBlob && durationSeconds > 0) {
-    // Use a one-shot ref pattern via key to avoid calling on every render
-  }
+  // Track which blob we've already notified the parent about so the callback
+  // fires exactly once per recording — not on every re-render.
+  const notifiedBlobRef = useRef<Blob | null>(null);
 
-  // Notify parent when recording finishes
+  useEffect(() => {
+    if (audioBlob && durationSeconds > 0 && audioBlob !== notifiedBlobRef.current) {
+      notifiedBlobRef.current = audioBlob;
+      onRecordingComplete(audioBlob, durationSeconds);
+    }
+  }, [audioBlob, durationSeconds, onRecordingComplete]);
+
   const handleStop = () => {
     stop();
   };
-
-  // After blob is available, fire callback
-  const prevBlobRef = { current: null as Blob | null };
-
-  if (audioBlob && audioBlob !== prevBlobRef.current) {
-    prevBlobRef.current = audioBlob;
-    // Schedule so we don't call during render
-    setTimeout(() => onRecordingComplete(audioBlob, durationSeconds), 0);
-  }
 
   return (
     <div className="flex flex-col items-center gap-2">

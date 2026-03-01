@@ -1,0 +1,135 @@
+{
+  "task": "Fix TruckConnect Map Rendering Issue (Gray Canvas, No OpenStreetMap Tiles)",
+  "project": "TruckConnect",
+  "context": {
+    "framework": "Next.js 14 App Router",
+    "map_library": "Leaflet + react-leaflet",
+    "tile_provider": "OpenStreetMap",
+    "symptom": "Map shows gray background with markers visible but no roads or labels",
+    "environment": "Protected route (/map), Socket.io active, Geolocation enabled"
+  },
+
+  "root_cause_priority": [
+    "TileLayer missing or misconfigured",
+    "Leaflet CSS not imported",
+    "Mixed content (HTTP tiles on HTTPS origin)",
+    "Map container has zero height",
+    "SSR conflict in Next.js App Router",
+    "Tile requests blocked (CORS, firewall, adblock)"
+  ],
+
+  "sub_agents": [
+
+    {
+      "name": "ReactLeafletTileLayerAgent",
+      "objective": "Ensure OpenStreetMap TileLayer is correctly configured in react-leaflet",
+      "actions": [
+        "Locate MapContainer usage",
+        "Ensure TileLayer component exists inside MapContainer",
+        "Replace any http:// tile URL with https://",
+        "Ensure attribution is present",
+        "Ensure maxZoom is set to 19"
+      ],
+      "expected_code_pattern": "<TileLayer url=\"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png\" attribution=\"&copy; OpenStreetMap contributors\" maxZoom={19} />"
+    },
+
+    {
+      "name": "LeafletGlobalCSSAgent",
+      "objective": "Ensure Leaflet CSS is globally imported in App Router",
+      "actions": [
+        "Search for leaflet/dist/leaflet.css import",
+        "If missing, inject into app/layout.tsx or root client entry",
+        "Ensure it loads before map renders"
+      ],
+      "expected_fix": "import 'leaflet/dist/leaflet.css';"
+    },
+
+    {
+      "name": "NextAppRouterSSRGuardAgent",
+      "objective": "Prevent SSR from breaking Leaflet rendering",
+      "actions": [
+        "Ensure map component is marked 'use client'",
+        "If not, add 'use client' at top",
+        "If dynamic import used, ensure ssr:false",
+        "Ensure map initialization only happens in client context"
+      ],
+      "expected_fix_options": [
+        "'use client';",
+        "dynamic(() => import('./MapComponent'), { ssr: false })"
+      ]
+    },
+
+    {
+      "name": "MapContainerLayoutAgent",
+      "objective": "Ensure map container has proper dimensions in Tailwind layout",
+      "actions": [
+        "Locate MapContainer wrapper div",
+        "Ensure height is explicitly defined",
+        "Inject Tailwind class h-screen or h-[100vh]",
+        "Ensure parent containers are not height:0"
+      ],
+      "expected_fix_options": [
+        "className='w-full h-screen'",
+        "className='w-full h-[100vh]'"
+      ]
+    },
+
+    {
+      "name": "HTTPSMixedContentAgent",
+      "objective": "Prevent tile blocking when running over ngrok HTTPS",
+      "actions": [
+        "Check if NEXTAUTH_URL or app origin is HTTPS",
+        "Ensure tile URL is HTTPS",
+        "Replace any http://tile.openstreetmap.org with https://{s}.tile.openstreetmap.org"
+      ],
+      "severity": "critical"
+    },
+
+    {
+      "name": "NetworkDiagnosticsAgent",
+      "objective": "Verify tile PNG requests are successful",
+      "actions": [
+        "Inspect browser network tab",
+        "Check for 403 or CORS errors",
+        "Ensure tile.openstreetmap.org not blocked",
+        "Verify requests return 200"
+      ]
+    }
+  ],
+
+  "verification_procedure": [
+    "Open /map page",
+    "Open DevTools Network tab",
+    "Filter by 'tile'",
+    "Confirm PNG tiles load with status 200",
+    "Confirm roads and place names visible",
+    "Confirm markers render on top of tiles",
+    "Confirm no console errors"
+  ],
+
+  "success_criteria": [
+    "OpenStreetMap tiles render correctly",
+    "Roads visible",
+    "Place names visible",
+    "Markers render above tiles",
+    "Works over HTTPS (ngrok)",
+    "Works over LAN",
+    "No SSR hydration errors"
+  ],
+
+  "do_not_modify": [
+    "Socket.io connection logic",
+    "Location broadcasting logic",
+    "Authentication guards",
+    "Zod validation schemas"
+  ],
+
+  "auto_fix_priority_order": [
+    "ReactLeafletTileLayerAgent",
+    "LeafletGlobalCSSAgent",
+    "HTTPSMixedContentAgent",
+    "MapContainerLayoutAgent",
+    "NextAppRouterSSRGuardAgent",
+    "NetworkDiagnosticsAgent"
+  ]
+}

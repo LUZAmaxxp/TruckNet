@@ -43,7 +43,12 @@ export async function GET(_req: NextRequest) {
 
   // Batch fetch friend user profiles
   const friendProfiles = await db
-    .select({ id: users.id, name: users.name, tag: users.tag })
+    .select({
+      id: users.id,
+      name: users.name,
+      tag: users.tag,
+      profileImageUrl: users.profileImageUrl,
+    })
     .from(users)
     .where(or(...friendIds.map((fid) => eq(users.id, fid))));
 

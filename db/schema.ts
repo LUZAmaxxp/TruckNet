@@ -9,6 +9,7 @@ import {
   doublePrecision,
   index,
   unique,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { type InferSelectModel, type InferInsertModel } from "drizzle-orm";
 
@@ -19,6 +20,11 @@ import { type InferSelectModel, type InferInsertModel } from "drizzle-orm";
 export const voiceMessageStatusEnum = pgEnum("voice_message_status", [
   "delivered",
   "listened",
+]);
+
+export const textMessageStatusEnum = pgEnum("text_message_status", [
+  "delivered",
+  "read",
 ]);
 
 export const stressSignalStatusEnum = pgEnum("stress_signal_status", [
@@ -146,6 +152,35 @@ export const friendRequests = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// text_messages
+// ---------------------------------------------------------------------------
+
+export const textMessages = pgTable(
+  "text_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    senderId: uuid("sender_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    receiverId: uuid("receiver_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    status: textMessageStatusEnum("status").notNull().default("delivered"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    senderReceiverIdx: index("text_messages_sender_receiver_idx").on(
+      table.senderId,
+      table.receiverId
+    ),
+    createdAtIdx: index("text_messages_created_at_idx").on(table.createdAt),
+  })
+);
+
+// ---------------------------------------------------------------------------
 // Inferred TypeScript types
 // ---------------------------------------------------------------------------
 
@@ -163,3 +198,6 @@ export type NewStressSignal = InferInsertModel<typeof stressSignals>;
 
 export type FriendRequest = InferSelectModel<typeof friendRequests>;
 export type NewFriendRequest = InferInsertModel<typeof friendRequests>;
+
+export type TextMessage = InferSelectModel<typeof textMessages>;
+export type NewTextMessage = InferInsertModel<typeof textMessages>;

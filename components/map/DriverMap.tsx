@@ -1,5 +1,6 @@
 "use client";
 
+// leaflet CSS imported here (component-level) AND in globals.css
 import "leaflet/dist/leaflet.css";
 import { useEffect, useRef, useMemo, memo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
@@ -123,12 +124,13 @@ export const DriverMap = memo(function DriverMap({
       center={center}
       zoom={currentDriver ? 13 : 2}
       scrollWheelZoom
-      className="w-full h-full rounded-lg z-0"
+      className="w-full h-full"
       style={{ height: "100%", width: "100%" }}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        maxZoom={19}
       />
 
       {/* Recenter once we have real coords */}

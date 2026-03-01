@@ -1,0 +1,94 @@
+{
+  "task": "Fix Nearby Drivers component in TruckConnect",
+  "description": "The Nearby Drivers component on the dashboard shows 'No drivers within 50 km' even when multiple accounts are active within a few meters. Fix the logic and real-time updates so that nearby drivers are detected correctly on mobile and desktop.",
+  "priority": "high",
+  "environment": {
+    "frontend": ["Next.js 14", "React", "Tailwind CSS", "shadcn/ui", "Ably Realtime (replacing sockets)"],
+    "backend": ["Next.js API Route Handlers", "Drizzle ORM", "PostgreSQL"],
+    "realtime": "Ably Realtime for location updates"
+  },
+  "problems_identified": [
+    {
+      "id": 1,
+      "title": "Drivers on the same device may be filtered out",
+      "details": "Currently, the component may ignore drivers whose userId matches the current user or if the same device has multiple accounts."
+    },
+    {
+      "id": 2,
+      "title": "Distance calculation may fail",
+      "details": "Haversine formula or distance function may be incorrectly implemented, or lat/lon may be strings causing NaN distances."
+    },
+    {
+      "id": 3,
+      "title": "Real-time updates not received",
+      "details": "Nearby drivers may not appear because presence updates or location broadcasts are not correctly merged or subscribed to. The component may only subscribe to initial connections and ignore subsequent updates."
+    },
+    {
+      "id": 4,
+      "title": "Mobile geolocation issues",
+      "details": "Ensure mobile devices correctly broadcast current geolocation over secure context (HTTPS/ngrok)."
+    }
+  ],
+  "expected_behavior": [
+    "Drivers within the configured radius (50 km) are detected and displayed immediately",
+    "Drivers on the same network or different devices appear correctly",
+    "Distance calculation returns accurate values in km",
+    "Real-time updates merge new positions without overwriting existing drivers",
+    "Works on mobile and desktop"
+  ],
+  "tasks": [
+    {
+      "task_id": "T1",
+      "description": "Update the distance function to correctly compute Haversine distance in km",
+      "requirements": [
+        "Convert all lat/lon values to numbers",
+        "Return distance in km",
+        "Filter drivers by distance <= nearby radius"
+      ]
+    },
+    {
+      "task_id": "T2",
+      "description": "Fix driver filtering logic",
+      "requirements": [
+        "Do not ignore multiple accounts on the same device if they have different userIds",
+        "Ensure currentUserId filtering does not block detection of other accounts"
+      ]
+    },
+    {
+      "task_id": "T3",
+      "description": "Fix real-time location updates",
+      "requirements": [
+        "Subscribe to Ably presence and update events",
+        "Merge incoming location updates into existing drivers array without overwriting",
+        "Emit nearby_driver_update correctly after every location broadcast (20s interval)"
+      ]
+    },
+    {
+      "task_id": "T4",
+      "description": "Ensure mobile geolocation is accessible",
+      "requirements": [
+        "Test on mobile devices via HTTPS / ngrok",
+        "Prompt user for permission properly using navigator.geolocation.getCurrentPosition",
+        "Update store after first fix and every subsequent broadcast"
+      ]
+    },
+    {
+      "task_id": "T5",
+      "description": "Add console logging for debugging",
+      "requirements": [
+        "Log current userId and coordinates",
+        "Log distances to all nearby drivers",
+        "Log when a driver is filtered out or added"
+      ]
+    }
+  ],
+  "validation": {
+    "steps": [
+      "Place two accounts 100 meters apart on separate devices",
+      "Verify both accounts appear in Nearby Drivers component",
+      "Check distance displayed is correct",
+      "Check that updates occur every 20 seconds",
+      "Test on mobile via HTTPS / ngrok"
+    ]
+  }
+}

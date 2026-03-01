@@ -1,0 +1,95 @@
+{
+  "task": "Fix Voice Message Upload",
+  "description": "Uploading voice messages fails with 'Failed to upload voice message'. Diagnose and fix both frontend and backend integration issues for audio recording, uploading, and storing in TruckConnect.",
+  "priority": "high",
+  "environment": {
+    "frontend": ["Next.js 14", "React", "Tailwind CSS", "shadcn/ui", "MediaRecorder API", "Ably Realtime (if used)"],
+    "backend": ["Next.js API Route Handlers", "Drizzle ORM", "PostgreSQL", "POST /api/upload/audio", "POST /api/voice-messages"],
+    "storage": ["Local or S3-compatible storage for audio files"]
+  },
+  "problems_identified": [
+    {
+      "id": 1,
+      "title": "MediaRecorder incompatibility",
+      "details": "Mobile devices may not support the current MediaRecorder implementation or MIME type, causing empty/invalid blobs."
+    },
+    {
+      "id": 2,
+      "title": "Frontend upload errors",
+      "details": "The RecordButton component may not convert the audio blob to FormData correctly, or headers/content-type are misconfigured."
+    },
+    {
+      "id": 3,
+      "title": "Backend validation failure",
+      "details": "The /api/upload/audio route may be rejecting multipart/form-data, or Zod validation for audioUrl/receiverId fails."
+    },
+    {
+      "id": 4,
+      "title": "Race conditions with resolving tag to UUID",
+      "details": "If the API accepts { tag, audioUrl, durationSeconds }, the server may not resolve the tag correctly before validating VoiceMessageSchema."
+    }
+  ],
+  "expected_behavior": [
+    "User can record audio on desktop and mobile",
+    "Audio uploads successfully to backend storage",
+    "POST /api/voice-messages accepts { receiverId or tag, audioUrl, durationSeconds }",
+    "Voice message appears in inbox and triggers real-time notifications"
+  ],
+  "tasks": [
+    {
+      "task_id": "T1",
+      "description": "Fix MediaRecorder usage",
+      "requirements": [
+        "Detect browser/OS compatibility",
+        "Set appropriate MIME type for audio/webm or audio/mp4",
+        "Ensure blob is correctly created and not empty"
+      ]
+    },
+    {
+      "task_id": "T2",
+      "description": "Fix frontend upload",
+      "requirements": [
+        "Create FormData correctly: append('file', audioBlob, filename)",
+        "Use correct headers: multipart/form-data",
+        "Handle async upload promise errors and display meaningful messages"
+      ]
+    },
+    {
+      "task_id": "T3",
+      "description": "Fix backend upload endpoint",
+      "requirements": [
+        "Ensure /api/upload/audio accepts multipart/form-data",
+        "Save file to storage and return absolute audioUrl",
+        "Validate audioUrl format in response",
+        "Return proper HTTP error code if upload fails"
+      ]
+    },
+    {
+      "task_id": "T4",
+      "description": "Fix VoiceMessageSchema validation",
+      "requirements": [
+        "Resolve { tag } to UUID before Zod validation",
+        "Validate durationSeconds does not exceed 60",
+        "Ensure receiverId exists in users table"
+      ]
+    },
+    {
+      "task_id": "T5",
+      "description": "Add logging for debugging",
+      "requirements": [
+        "Log audio blob size and MIME type",
+        "Log FormData keys and values",
+        "Log backend storage response and audioUrl"
+      ]
+    }
+  ],
+  "validation": {
+    "steps": [
+      "Record audio on desktop and mobile",
+      "Upload audio and check network tab for 200 response",
+      "Verify audio is stored and audioUrl is returned",
+      "Send voice message to another user and check inbox",
+      "Check real-time event 'voice_message_received' fires correctly"
+    ]
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "project": {
+    "name": "TruckConnect",
+    "migration_target": "Ably Realtime",
+    "description": "Map all Socket.io events to Ably channels for enterprise-grade real-time functionality."
+  },
+  "channels": [
+    {
+      "name": "drivers:locations",
+      "purpose": "Broadcast driver geolocation updates",
+      "events": [
+        {
+          "name": "location_update",
+          "payload_schema": "LocationUpdateSchema",
+          "description": "Sent when a driver updates their location; subscribed by nearby drivers."
+        }
+      ],
+      "presence": true,
+      "notes": "Replace Socket.io 'update_location' emit and 'nearby_driver_update' listener."
+    },
+    {
+      "name": "voice_messages",
+      "purpose": "Send and receive voice messages",
+      "events": [
+        {
+          "name": "voice_message_received",
+          "payload_schema": "VoiceMessageSchema",
+          "description": "Emitted when a voice message is sent to a driver."
+        }
+      ],
+      "presence": false,
+      "notes": "Replace Socket.io 'send_voice_message' emit and listener."
+    },
+    {
+      "name": "stress_signals",
+      "purpose": "Broadcast emergency stress alerts",
+      "events": [
+        {
+          "name": "stress_signal_alert",
+          "payload_schema": "StressSignalSchema",
+          "description": "Emitted to all nearby drivers when a stress signal is sent."
+        }
+      ],
+      "presence": false,
+      "notes": "Replace Socket.io 'send_stress_signal' emit and listener."
+    },
+    {
+      "name": "friends",
+      "purpose": "Manage friend requests and real-time notifications",
+      "events": [
+        {
+          "name": "friend_request_received",
+          "payload_schema": "{ senderId, receiverId, senderName, senderTag }",
+          "description": "Emitted to receiver when a friend request is sent."
+        },
+        {
+          "name": "friend_request_accepted",
+          "payload_schema": "{ requestId, friendId, friendName, friendTag }",
+          "description": "Emitted to sender when the friend request is accepted."
+        }
+      ],
+      "presence": false,
+      "notes": "Replace Socket.io friend request emits and listeners."
+    }
+  ],
+  "client_integration": {
+    "token_auth_endpoint": "/api/auth/socket-token",
+    "tasks": [
+      "Fetch JWT token asynchronously before connecting to Ably.",
+      "Use Ably Realtime SDK to connect with token.",
+      "Replace all `socket.on` listeners with `channel.subscribe`.",
+      "Replace all `socket.emit` calls with `channel.publish`.",
+      "Maintain type safety using Zod for incoming and outgoing messages.",
+      "Implement presence subscription on `drivers:locations` to track online/offline drivers."
+    ]
+  },
+  "server_integration": {
+    "tasks": [
+      "Use Ably REST client to publish events on channels.",
+      "Validate payloads with Zod before publishing.",
+      "Replace all Socket.io server handlers (`update_location`, `send_voice_message`, `send_stress_signal`, `friend_request`) with Ably publish logic.",
+      "Maintain in-memory store only if needed for nearby drivers computations.",
+      "Ensure all channels use proper authentication and role validation."
+    ]
+  },
+  "migration_notes": [
+    "Socket.io rooms are no longer needed; use Ably channels and presence instead.",
+    "Client reconnection and buffering should be handled by Ably SDK.",
+    "Nearby driver filtering can still use Haversine calculation based on latest location updates received.",
+    "Update frontend hooks (`useSocket`) to a new `useAbly` hook with async token fetch, publish queue, and typed events."
+  ],
+  "testing_plan": [
+    "Verify multi-account nearby driver detection across devices.",
+    "Test voice messaging delivery and status updates.",
+    "Test stress signal alerts propagate to all nearby drivers.",
+    "Test friend request real-time notifications.",
+    "Validate presence online/offline updates correctly.",
+    "Monitor Ably dashboard for latency, message delivery, and errors."
+  ]
+}

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { TagInputSchema } from "@/schemas/tag.schema";
 import { assertIsUUID } from "@/lib/validate-uuid";
 import { NextResponse } from "next/server";
+import { ablyPublish } from "@/lib/ably-server";
 
 /**
  * External HTTP input schema — accepts EITHER a resolved UUID (receiverId)
@@ -82,6 +83,20 @@ export async function POST(req: NextRequest) {
       status: "delivered",
     })
     .returning();
+
+  // Notify receiver in real-time via their private Ably channel
+  try {
+    await ablyPublish(`user:${receiverUUID}`, "voice_message_received", {
+      id:              message.id,
+      senderId:        message.senderId,
+      senderName:      session.user.name,
+      audioUrl:        message.audioUrl,
+      durationSeconds: message.durationSeconds,
+      createdAt:       message.createdAt,
+    });
+  } catch (err) {
+    console.error("[voice-messages] Ably publish failed:", err);
+  }
 
   return successResponse(message, 201);
 }

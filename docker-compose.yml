@@ -1,0 +1,58 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: truckconnect
+      POSTGRES_PASSWORD: truckconnect_dev
+      POSTGRES_DB: truckconnect
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U truckconnect -d truckconnect"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Application ────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      NEXTAUTH_URL: http://localhost:3000
+      SOCKET_PORT: "3000"
+      NODE_ENV: production
+    volumes:
+      # Persist uploaded audio files across container restarts
+      - uploads_data:/app/public/uploads
+
+  # ── Redis (optional — enables socket.io horizontal scaling) ────
+  # Uncomment when deploying multiple app replicas behind a load balancer.
+  # redis:
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+volumes:
+  postgres_data:
+  uploads_data:

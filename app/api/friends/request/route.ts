@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/auth-helpers";
 import { db } from "@/db";
 import { friendRequests, users } from "@/db/schema";
 import { errorResponse } from "@/lib/api";
-import { getIO } from "@/sockets";
+import { ablyPublish } from "@/lib/ably-server";
 import { TagInputSchema } from "@/schemas/tag.schema";
 import { assertIsUUID } from "@/lib/validate-uuid";
 
@@ -79,19 +79,16 @@ export async function POST(req: NextRequest) {
     .values({ senderId, receiverId: receiverUUID })
     .returning();
 
-  // Notify receiver via socket if online
+  // Notify receiver via Ably if online
   try {
-    const io = getIO();
-    const { getDriverLocation } = await import("@/sockets/store/location.store");
     const [sender] = await db
       .select({ name: users.name, tag: users.tag })
       .from(users)
       .where(eq(users.id, senderId))
       .limit(1);
 
-    const receiverEntry = getDriverLocation(receiverUUID);
-    if (receiverEntry?.socketId && sender) {
-      io.to(receiverEntry.socketId).emit("friend_request_received", {
+    if (sender) {
+      await ablyPublish(`user:${receiverUUID}`, "friend_request_received", {
         requestId: request!.id,
         fromUserId: senderId,
         fromUserName: sender.name,
@@ -99,7 +96,7 @@ export async function POST(req: NextRequest) {
       });
     }
   } catch {
-    // Socket emission is best-effort — don't fail the HTTP response
+    // Ably publish is best-effort — don't fail the HTTP response
   }
 
   return NextResponse.json(request, { status: 201 });

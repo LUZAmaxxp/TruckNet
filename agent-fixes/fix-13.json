@@ -1,0 +1,80 @@
+{
+  "task": "Fix Messages Page Frontend Bugs",
+  "description": "Messages disappear when opening a conversation, and friends list does not show on mobile devices. Make messages page fully responsive and stable for desktop and mobile.",
+  "priority": "high",
+  "environment": {
+    "frontend": ["Next.js 14", "React", "Tailwind CSS", "shadcn/ui", "Framer Motion", "Sonner notifications"]
+  },
+  "problems_identified": [
+    {
+      "id": 1,
+      "title": "Messages container scroll/jump issue",
+      "details": "When opening a conversation, all messages animate upward and disappear. Likely caused by incorrect container height, overflow, or Framer Motion layout animation."
+    },
+    {
+      "id": 2,
+      "title": "Friends list not visible on mobile",
+      "details": "Friends list container is blank. Could be caused by responsive Tailwind classes (hidden / flex / width issues) or data not rendering properly on small screens."
+    }
+  ],
+  "expected_behavior": [
+    "Messages appear in conversation view, correctly stacked from top to bottom or bottom to top scroll",
+    "Messages remain visible and animate smoothly without disappearing",
+    "Friends list shows all friends on mobile and desktop",
+    "UI is responsive on all screen sizes",
+    "Toast notifications for new messages still appear"
+  ],
+  "tasks": [
+    {
+      "task_id": "T1",
+      "description": "Fix messages layout and scrolling",
+      "requirements": [
+        "Wrap messages in a scrollable container with proper height and overflow-y-auto",
+        "Use Framer Motion layout animation correctly with layoutId or variants",
+        "Ensure messages do not disappear when state updates",
+        "Auto-scroll to bottom when a new message is received"
+      ]
+    },
+    {
+      "task_id": "T2",
+      "description": "Fix friends list rendering on mobile",
+      "requirements": [
+        "Check Tailwind responsive classes (sm:, md:, lg:) on the friends container",
+        "Ensure container width, height, and flex properties render correctly on mobile",
+        "Validate data is passed correctly to the list component",
+        "Wrap list items in shadcn/ui Card or List component for consistent layout",
+        "Add Framer Motion staggered animation for friend items"
+      ]
+    },
+    {
+      "task_id": "T3",
+      "description": "Ensure overall responsiveness",
+      "requirements": [
+        "Test layout on mobile (portrait and landscape) and desktop",
+        "Use Tailwind responsive utilities to adjust flex/grid layout",
+        "Test conversation container height on small screens",
+        "Ensure toast notifications are not blocked by responsive layout"
+      ]
+    },
+    {
+      "task_id": "T4",
+      "description": "Add logging for debugging",
+      "requirements": [
+        "Log messages and friends array length on render",
+        "Log Framer Motion animation state for messages",
+        "Check mobile viewport rendering issues"
+      ]
+    }
+  ],
+  "validation": {
+    "steps": [
+      "Open a conversation on desktop and mobile",
+      "Verify messages are visible, stable, and animate smoothly",
+      "Scroll to bottom should always show latest messages",
+      "Open messages page on mobile",
+      "Confirm all friends are visible and clickable",
+      "Test responsiveness across multiple devices and screen sizes",
+      "Check toast notifications for new messages appear correctly"
+    ]
+  }
+}

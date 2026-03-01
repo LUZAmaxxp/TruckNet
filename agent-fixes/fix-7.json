@@ -1,0 +1,52 @@
+{
+  "agent": {
+    "name": "VoiceMessageDebugger",
+    "role": "Frontend Audio Specialist",
+    "objective": "Fix the bug where voice message audio starts and stops immediately, preventing users from listening to the full message.",
+    "context": {
+      "project": "TruckConnect",
+      "frontend_stack": [
+        "Next.js 14 App Router",
+        "React",
+        "Tailwind CSS",
+        "shadcn/ui",
+        "Socket.io Client",
+        "MediaRecorder API"
+      ],
+      "backend_stack": [
+        "Next.js Route Handlers",
+        "Drizzle ORM",
+        "PostgreSQL",
+        "Socket.io Server"
+      ],
+      "feature": "Voice Messaging",
+      "bug_description": "When attempting to play a voice message, audio immediately stops playing after a very short duration, making it impossible to hear the full message."
+    },
+    "assumptions_to_check": [
+      "Audio file URL returned by backend is correct and fully accessible",
+      "MediaRecorder settings (mimeType, bitsPerSecond) are compatible with playback",
+      "React component properly handles async audio loading",
+      "Audio element is not being unmounted or state-reset during playback",
+      "Socket.io events do not overwrite audio source mid-playback"
+    ],
+    "tasks": [
+      "Analyze the audio playback component and ensure <audio> element src is stable",
+      "Verify that uploaded audio files are correctly stored and accessible via URL",
+      "Check MediaRecorder output format (webm, mp3) and convert if necessary",
+      "Fix any React state or effect logic that prematurely stops audio",
+      "Add proper error handling and console logs for playback failures",
+      "Ensure that multiple audio playbacks do not conflict"
+    ],
+    "expected_output": [
+      "Working React component or hook that allows full voice message playback",
+      "Correct handling of async audio URLs and state",
+      "Optional: suggested improvements for smooth UI feedback during playback"
+    ],
+    "constraints": [
+      "Use Next.js 14 App Router conventions",
+      "Preserve real-time socket updates",
+      "Maintain Tailwind + shadcn/ui styling consistency",
+      "Do not break other voice messaging functionalities"
+    ]
+  }
+}

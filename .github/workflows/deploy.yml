@@ -1,0 +1,88 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Pass build-time env placeholders so `next build` succeeds
+          build-args: |
+            DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder
+            NEXTAUTH_SECRET=build-time-placeholder-secret
+            NEXTAUTH_URL=http://localhost:3000
+            SOCKET_PORT=3000
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: production
+
+    steps:
+      - name: Deploy
+        # ──────────────────────────────────────────────────────────────────
+        # TODO: Replace this step with your target platform's deploy action.
+        #
+        # Common options:
+        #
+        #  Railway:
+        #    uses: railwayapp/github-action@v1
+        #    with:
+        #      service: truckconnect
+        #
+        #  Fly.io:
+        #    run: flyctl deploy --remote-only
+        #    env:
+        #      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        #
+        #  AWS ECS / GCP Cloud Run / Azure Container Apps:
+        #    Follow your provider's official GitHub Actions workflow.
+        #
+        # Required GitHub Actions Secrets (Settings → Secrets → Actions):
+        #   DATABASE_URL       — Production PostgreSQL connection string
+        #   NEXTAUTH_SECRET    — Production Auth.js secret (openssl rand -base64 32)
+        #   NEXTAUTH_URL       — Production base URL (https://your-domain.com)
+        #   SOCKET_PORT        — Production port (usually 3000 or 8080)
+        # ──────────────────────────────────────────────────────────────────
+        run: |
+          echo "⚠  Deploy step not yet configured."
+          echo "Edit .github/workflows/deploy.yml and add your platform-specific deploy step."
+          echo "Image pushed: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"

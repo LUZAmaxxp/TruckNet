@@ -14,7 +14,6 @@ export interface DriverLocationEntry {
   userId: string;
   latitude: number;
   longitude: number;
-  socketId: string;
   updatedAt: Date;
   name: string | null;
   profileImageUrl: string | null;

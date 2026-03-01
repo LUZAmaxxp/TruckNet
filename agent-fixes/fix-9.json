@@ -1,0 +1,113 @@
+{
+  "project": "TruckConnect",
+  "feature": "Responsive Messages Page Fix",
+  "goal": "Make the WhatsApp-style messages page fully responsive for mobile, tablet, and desktop with smooth animated transitions.",
+  "strategy": "Mobile-first redesign with conditional rendering and animated panel transitions.",
+  "breakpoints": {
+    "mobile": "<768px",
+    "tablet": "768px - 1024px",
+    "desktop": ">1024px"
+  },
+  "layout_rules": {
+    "desktop": {
+      "container": "flex h-[calc(100vh-80px)]",
+      "sidebar": "w-[340px] border-r",
+      "chatPanel": "flex-1",
+      "behavior": "Sidebar and chat visible simultaneously"
+    },
+    "mobile": {
+      "container": "relative h-screen overflow-hidden",
+      "sidebar": "absolute inset-0",
+      "chatPanel": "absolute inset-0",
+      "behavior": "Only one visible at a time",
+      "navigation": "Use selectedConversationId state to toggle views"
+    }
+  },
+  "state_management": {
+    "selectedConversationId": "null = show friends list, value = show chat panel",
+    "mobileViewMode": "friends | chat"
+  },
+  "mobile_behavior": {
+    "friends_visible": "selectedConversationId === null",
+    "chat_visible": "selectedConversationId !== null",
+    "back_button": "Visible only on mobile inside ChatHeader"
+  },
+  "animations": {
+    "library": "Framer Motion",
+    "mobile_slide_transition": {
+      "friends_to_chat": {
+        "initial": "x: 100%",
+        "animate": "x: 0",
+        "exit": "x: 100%",
+        "transition": "spring stiffness 260 damping 20"
+      },
+      "chat_to_friends": {
+        "initial": "x: -100%",
+        "animate": "x: 0",
+        "exit": "x: -100%",
+        "transition": "spring stiffness 260 damping 20"
+      }
+    },
+    "desktop_transition": {
+      "type": "fade",
+      "duration": 0.2
+    }
+  },
+  "component_changes": [
+    {
+      "component": "MessagesPage",
+      "tasks": [
+        "Wrap panels in <AnimatePresence>",
+        "Conditionally render based on screen size",
+        "Use Tailwind hidden/md:flex utilities",
+        "Add mobile slide animations"
+      ]
+    },
+    {
+      "component": "FriendsSidebar",
+      "mobile_behavior": "Full width when selectedConversationId is null",
+      "desktop_behavior": "Fixed width sidebar"
+    },
+    {
+      "component": "ChatPanel",
+      "mobile_behavior": "Full width overlay when conversation selected",
+      "desktop_behavior": "Flex-1 main panel",
+      "header_update": "Add back arrow button for mobile only"
+    }
+  ],
+  "tailwind_classes_required": {
+    "responsive_visibility": [
+      "hidden md:flex",
+      "flex md:hidden"
+    ],
+    "layout_helpers": [
+      "absolute inset-0",
+      "relative",
+      "overflow-hidden",
+      "h-screen"
+    ]
+  },
+  "scroll_behavior": {
+    "chat_scroll": "Use ScrollArea with auto scroll to bottom",
+    "mobile_fix": "Ensure overflow-y-auto is applied correctly",
+    "prevent_body_scroll": "Disable background scroll when chat active"
+  },
+  "ui_enhancements": {
+    "mobile_header": "Sticky top header with back arrow",
+    "safe_area_padding": "Add pb-safe for iOS",
+    "touch_optimization": "Increase tap targets to min h-12"
+  },
+  "performance_rules": [
+    "Do not unmount sidebar unnecessarily on desktop",
+    "Use AnimatePresence only for mobile transitions",
+    "Memoize MessageBubble component"
+  ],
+  "testing_checklist": [
+    "Mobile: selecting friend slides chat in",
+    "Mobile: back button slides back to list",
+    "Desktop: both panels visible",
+    "Tablet: behaves like desktop",
+    "No horizontal overflow",
+    "Scroll works smoothly"
+  ]
+}

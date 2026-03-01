@@ -30,6 +30,7 @@ export interface NearbyDriverEntry {
 export interface VoiceMessageAlert {
   id: string;
   senderId: string;
+  senderName: string | null;
   audioUrl: string;
   durationSeconds: number;
   createdAt: Date;
@@ -57,9 +58,18 @@ export interface FriendRequestAcceptedAlert {
   friendTag: string;
 }
 
+export interface TextMessageAlert {
+  id: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  createdAt: Date;
+}
+
 export interface ServerToClientEvents {
   nearby_driver_update: (drivers: NearbyDriverEntry[]) => void;
   voice_message_received: (message: VoiceMessageAlert) => void;
+  text_message_received: (message: TextMessageAlert) => void;
   stress_signal_alert: (signal: StressSignalAlert) => void;
   friend_request_received: (payload: FriendRequestAlert) => void;
   friend_request_accepted: (payload: FriendRequestAcceptedAlert) => void;

@@ -17,7 +17,7 @@ const LOCATION_BROADCAST_INTERVAL_MS = 20_000; // 20 seconds
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { on, emit, onConnect, isConnected } = useSocket();
+  const { on, onConnect, isConnected } = useSocket();
 
   const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriverEntry[]>([]);
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -26,15 +26,22 @@ export default function DashboardPage() {
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Broadcast current position to socket server
-  const broadcastLocation = useCallback(
-    (lat: number, lng: number) => {
-      emit("update_location", { latitude: lat, longitude: lng });
-    },
-    [emit]
-  );
+  // Hydrate nearby list from DB immediately (before first broadcast fires)
+  const fetchNearbyDrivers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/drivers/nearby");
+      if (res.ok) {
+        const { data } = (await res.json()) as { data: { drivers: NearbyDriverEntry[] } };
+        const drivers = data?.drivers ?? [];
+        console.log(`[dashboard] fetchNearbyDrivers → ${drivers.length} driver(s)`);
+        setNearbyDrivers(drivers);
+      }
+    } catch (err) {
+      console.error("[dashboard] fetchNearbyDrivers error:", err);
+    }
+  }, []);
 
-  // Fetch location from browser and broadcast
+  // Fetch location from browser and POST it (server side does store + Ably publish)
   const updateLocation = useCallback(() => {
     if (!navigator.geolocation) {
       setGeoError("Geolocation is not supported by your browser.");
@@ -45,22 +52,22 @@ export default function DashboardPage() {
         const { latitude, longitude } = pos.coords;
         setMyLocation({ lat: latitude, lng: longitude });
         setGeoError(null);
-        broadcastLocation(latitude, longitude);
         setBroadcasting(true);
-        // Also persist to DB (fire-and-forget)
+        console.log(`[dashboard] updateLocation lat=${latitude} lon=${longitude}`);
         fetch("/api/drivers/location", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ latitude, longitude }),
-        }).catch(() => {});
+        }).catch((err) => console.error("[dashboard] location POST error:", err));
       },
       (err) => {
         setGeoError(err.message);
         setBroadcasting(false);
+        console.warn("[dashboard] geolocation error:", err.message);
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  }, [broadcastLocation]);
+  }, []);
 
   // Re-emit location immediately whenever the socket (re)connects
   useEffect(() => {
@@ -68,18 +75,20 @@ export default function DashboardPage() {
     return unsub;
   }, [onConnect, updateLocation]);
 
-  // Initial location fetch + periodic interval
+  // Hydrate nearby list + start periodic location broadcast
   useEffect(() => {
-    updateLocation();
+    void fetchNearbyDrivers(); // immediate DB fetch so list isn't blank on first render
+    updateLocation();          // first broadcast
     intervalRef.current = setInterval(updateLocation, LOCATION_BROADCAST_INTERVAL_MS);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [updateLocation]);
+  }, [updateLocation, fetchNearbyDrivers]);
 
-  // Subscribe to nearby_driver_update
+  // Subscribe to nearby_driver_update (now on private user:<clientId> channel)
   useEffect(() => {
     const unsub = on("nearby_driver_update", (drivers) => {
+      console.log(`[dashboard] nearby_driver_update received: ${drivers.length} driver(s)`, drivers);
       setNearbyDrivers(drivers);
     });
     return unsub;
@@ -98,9 +107,26 @@ export default function DashboardPage() {
 
   // Subscribe to voice_message_received
   useEffect(() => {
-    const unsub = on("voice_message_received", () => {
-      toast.info("🎙️ New voice message received!", {
-        action: { label: "View", onClick: () => router.push("/messages") },
+    const unsub = on("voice_message_received", (msg) => {
+      console.log("[dashboard] voice_message_received", msg);
+      const name = msg.senderName ?? "A contact";
+      toast.info(`🎙️ New voice message from ${name}`, {
+        duration: 12_000,
+        action: { label: "Listen", onClick: () => router.push("/messages") },
+      });
+    });
+    return unsub;
+  }, [on, router]);
+
+  // Subscribe to text_message_received
+  useEffect(() => {
+    const unsub = on("text_message_received", (msg) => {
+      console.log("[dashboard] text_message_received", msg);
+      const name = msg.senderName ?? "A contact";
+      const preview = msg.content.length > 60 ? msg.content.slice(0, 60) + "…" : msg.content;
+      toast.info(`💬 ${name}: ${preview}`, {
+        duration: 10_000,
+        action: { label: "Reply", onClick: () => router.push("/messages") },
       });
     });
     return unsub;

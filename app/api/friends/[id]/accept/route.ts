@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/auth-helpers";
 import { db } from "@/db";
 import { friendRequests, users } from "@/db/schema";
 import { errorResponse } from "@/lib/api";
-import { getIO } from "@/sockets";
+import { ablyPublish } from "@/lib/ably-server";
 
 /**
  * PATCH /api/friends/[id]/accept
@@ -43,19 +43,16 @@ export async function PATCH(
     .where(and(eq(friendRequests.id, params.id), eq(friendRequests.receiverId, userId)))
     .returning();
 
-  // Notify original sender via socket
+  // Notify original sender via Ably
   try {
-    const io = getIO();
-    const { getDriverLocation } = await import("@/sockets/store/location.store");
     const [accepter] = await db
       .select({ name: users.name, tag: users.tag })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
 
-    const senderEntry = getDriverLocation(request.senderId);
-    if (senderEntry?.socketId && accepter) {
-      io.to(senderEntry.socketId).emit("friend_request_accepted", {
+    if (accepter) {
+      await ablyPublish(`user:${request.senderId}`, "friend_request_accepted", {
         requestId: params.id,
         friendId: userId,
         friendName: accepter.name,
@@ -63,7 +60,7 @@ export async function PATCH(
       });
     }
   } catch {
-    // Best-effort socket notification
+    // Best-effort Ably notification
   }
 
   return NextResponse.json(updated);

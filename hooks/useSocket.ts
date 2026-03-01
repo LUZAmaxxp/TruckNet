@@ -1,142 +1,171 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import { io, type Socket } from "socket.io-client";
-import type {
-  ClientToServerEvents,
-  ServerToClientEvents,
-} from "@/sockets/types";
+import Ably from "ably";
+import type { ServerToClientEvents, ClientToServerEvents } from "@/sockets/types";
 
-type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+type EventName = keyof ServerToClientEvents;
 
 /**
- * useSocket
+ * Events that live on a shared channel rather than the per-user channel.
+ * All other server→client events go to "user:<clientId>".
  *
- * Singleton-per-component Socket.io client hook.
+ * NOTE: nearby_driver_update is intentionally NOT listed here — it is
+ * delivered on the private "user:<clientId>" channel so each driver
+ * receives their own personalised list (different distances, different subset).
+ */
+const SHARED_CHANNEL_MAP: Partial<Record<EventName, string>> = {
+  // nearby_driver_update → private user:<clientId>  (personalised per driver)
+  stress_signal_alert:  "stress:alerts",
+};
+
+/**
+ * useSocket (Ably-backed)
  *
- * Auth strategy: fetches a raw JWT from GET /api/auth/socket-token and passes
- * it as `auth.token` on the socket handshake.  This matches the server-side
- * socketAuthMiddleware which decodes the same JWT via Auth.js v5 decode().
+ * Drop-in replacement for the legacy Socket.io hook.
+ * Maintains the same public API so zero page-level changes are required.
  *
- * Features:
- *   - Connects once on mount, disconnects cleanly on unmount
- *   - Auto-reconnect handled natively by socket.io-client (reconnection: true)
- *   - Typed on() / emit() wrappers prevent stringly-typed event names
- *   - Returns the raw socket for callers that need direct access
+ * Auth strategy: fetches a signed Ably TokenRequest from GET /api/auth/ably-token
+ * (set as `authUrl`). The Ably SDK auto-refreshes the token before expiry.
+ *
+ * Channel topology:
+ *   "stress:alerts"      — emergency alerts                    (stress_signal_alert)
+ *   "user:<userId>"      — per-user private channel  (voice / friends / nearby_driver_update / errors)
+ *
+ * emit() is intentionally a no-op: all client→server data is sent via REST.
+ * Pages already call the REST endpoint directly — the socket emit was supplemental.
  */
 export function useSocket() {
-  const socketRef = useRef<TypedSocket | null>(null);
-  // Buffers emit() calls made before the socket object is created (async JWT fetch window)
-  const emitQueue = useRef<Array<() => void>>([]);
-  // Callbacks fired on every socket connect / reconnect
-  const connectCallbacks = useRef<Array<() => void>>();
-  connectCallbacks.current ??= [];
+  const ablyRef = useRef<Ably.Realtime | null>(null);
+  const clientIdRef = useRef<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const connectCallbacks = useRef<Array<() => void>>([]);
 
   useEffect(() => {
-    let socket: TypedSocket;
+    const ably = new Ably.Realtime({
+      authUrl: "/api/auth/ably-token",
+      autoConnect: true,
+    });
 
-    async function connect() {
-      // Fetch raw JWT for socket handshake auth
-      const res = await fetch("/api/auth/socket-token");
-      if (!res.ok) {
-        console.error("[useSocket] Failed to fetch socket token — not connecting");
-        return;
-      }
-      const { token } = (await res.json()) as { token: string };
+    ablyRef.current = ably;
 
-      socket = io({
-        path: "/socket.io",
-        auth: { token },
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        transports: ["websocket", "polling"],
-      }) as TypedSocket;
+    ably.connection.on("connected", () => {
+      clientIdRef.current = ably.auth.clientId ?? null;
+      setIsConnected(true);
+      connectCallbacks.current.forEach((cb) => cb());
+      console.log("[useSocket] Ably connected, clientId:", clientIdRef.current);
+    });
 
-      // Assign ref FIRST so subsequent emit() calls go directly to the socket
-      // (socket.io buffers them internally until the handshake completes)
-      socketRef.current = socket;
-
-      // Flush any emissions that arrived before the JWT fetch completed
-      const queued = emitQueue.current.splice(0);
-      queued.forEach((fn) => fn());
-
-      socket.on("connect", () => {
-        console.log("[useSocket] Connected:", socket.id);
-        setIsConnected(true);
-        // Fire all registered connect callbacks (initial connect + every reconnect)
-        connectCallbacks.current!.forEach((cb) => cb());
-      });
-      socket.on("disconnect", (reason) => {
-        console.log("[useSocket] Disconnected:", reason);
-        setIsConnected(false);
-      });
-      socket.on("connect_error", (err) => {
-        console.warn("[useSocket] Connection error:", err.message);
-        setIsConnected(false);
-      });
-    }
-
-    connect();
+    ably.connection.on("disconnected", () => setIsConnected(false));
+    ably.connection.on("suspended",    () => setIsConnected(false));
+    ably.connection.on("failed", (stateChange) => {
+      console.error("[useSocket] Ably connection failed:", stateChange?.reason?.message);
+      setIsConnected(false);
+    });
 
     return () => {
-      socket?.disconnect();
-      socketRef.current = null;
+      ably.close();
+      ablyRef.current    = null;
+      clientIdRef.current = null;
     };
   }, []);
 
-  /** Listen to a typed server→client event. Automatically removes on component unmount. */
+  /** Resolve the Ably channel for a given server→client event name. */
+  const resolveChannel = useCallback((event: EventName): Ably.RealtimeChannel | null => {
+    const ably = ablyRef.current;
+    if (!ably) return null;
+
+    const shared = SHARED_CHANNEL_MAP[event];
+    if (shared) return ably.channels.get(shared);
+
+    const cid = clientIdRef.current ?? ably.auth.clientId;
+    if (!cid) {
+      console.warn(`[useSocket] clientId not yet available for private channel (event: ${event})`);
+      return null;
+    }
+    return ably.channels.get(`user:${cid}`);
+  }, []);
+
+  /**
+   * Subscribe to a typed server→client event.
+   * Returns an unsubscribe function — call it on component unmount.
+   *
+   * Uses a persistent `on("connected", ...)` listener so that subscriptions
+   * are automatically re-established after every reconnection, not just the
+   * first one.  The channel listener is removed before re-adding to avoid
+   * duplicate deliveries.
+   */
   const on = useCallback(
-    <E extends keyof ServerToClientEvents>(
-      event: E,
-      handler: ServerToClientEvents[E]
-    ) => {
-      // @ts-expect-error — socket.io typing with generics needs casting
-      socketRef.current?.on(event, handler);
+    <E extends EventName>(event: E, handler: ServerToClientEvents[E]) => {
+      const ably = ablyRef.current;
+      if (!ably) return () => {};
+
+      const listener = (msg: Ably.Message) =>
+        (handler as (data: unknown) => void)(msg.data);
+
+      const subscribe = () => {
+        const channel = resolveChannel(event);
+        if (!channel) {
+          console.warn(
+            `[useSocket] could not resolve channel for "${event}" — clientId not yet available`
+          );
+          return;
+        }
+        // Unsubscribe first so reconnections don't stack duplicate listeners.
+        channel.unsubscribe(event, listener);
+        void channel.subscribe(event, listener);
+        console.log(
+          `[useSocket] subscribed to "${event}" on channel "${channel.name}"`
+        );
+      };
+
+      // Subscribe now if already connected.
+      if (ably.connection.state === "connected") {
+        subscribe();
+      }
+
+      // Re-subscribe on every (re)connection — this also covers the initial
+      // connection when the hook hasn't connected yet.
+      ably.connection.on("connected", subscribe);
+
       return () => {
-        // @ts-expect-error
-        socketRef.current?.off(event, handler);
+        // Stop re-subscribing on future reconnections.
+        ably.connection.off("connected", subscribe);
+        // Remove the channel listener.
+        const channel = resolveChannel(event);
+        channel?.unsubscribe(event, listener);
       };
     },
-    []
+    [resolveChannel]
   );
 
-  /** Emit a typed client→server event. Queues the call if socket hasn't been created yet. */
+  /**
+   * No-op — all client→server data travels over REST API routes.
+   * Preserved for backward compatibility with page-level code.
+   */
   const emit = useCallback(
     <E extends keyof ClientToServerEvents>(
-      event: E,
-      ...args: Parameters<ClientToServerEvents[E]>
+      _event: E,
+      ..._args: Parameters<ClientToServerEvents[E]>
     ) => {
-      if (socketRef.current) {
-        (socketRef.current.emit as (...a: unknown[]) => void)(event, ...args);
-      } else {
-        // Socket object not yet created (JWT fetch in-flight); buffer and replay once ready
-        emitQueue.current.push(() => {
-          if (socketRef.current) {
-            (socketRef.current.emit as (...a: unknown[]) => void)(event, ...args);
-          }
-        });
-      }
+      // intentional no-op: REST handles persistence + Ably server-side handles broadcast
     },
     []
   );
 
   /**
-   * Register a callback to run whenever the socket (re)connects.
-   * If the socket is already connected when this is called, the callback fires immediately.
-   * Returns an unsubscribe function.
+   * Register a callback to run each time the Ably connection (re)establishes.
+   * Fires immediately if already connected. Returns an unsubscribe function.
    */
   const onConnect = useCallback((cb: () => void) => {
-    if (socketRef.current?.connected) {
+    if (ablyRef.current?.connection.state === "connected") {
       cb();
     }
-    connectCallbacks.current!.push(cb);
+    connectCallbacks.current.push(cb);
     return () => {
-      connectCallbacks.current = connectCallbacks.current!.filter((fn) => fn !== cb);
+      connectCallbacks.current = connectCallbacks.current.filter((fn) => fn !== cb);
     };
   }, []);
 
-  return { socket: socketRef, on, emit, onConnect, isConnected };
+  return { socket: ablyRef, on, emit, onConnect, isConnected };
 }

@@ -1,3 +1,6 @@
+/* Leaflet CSS — must be global so it loads before the dynamic map component */
+@import 'leaflet/dist/leaflet.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

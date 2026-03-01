@@ -1,0 +1,170 @@
+{
+  "project": "TruckConnect",
+  "feature": "Messages Page Redesign - WhatsApp Layout",
+  "tech_stack": ["Next.js", "React", "TypeScript", "TailwindCSS", "shadcn/ui", "Framer Motion"],
+  "goal": "Redesign the messages page to display a friends list first, and upon selecting a friend, show the full conversation with smooth animations similar to WhatsApp Web.",
+  "layout_architecture": {
+    "type": "responsive-split-layout",
+    "desktop": {
+      "sidebar_width": "w-[340px]",
+      "chat_panel": "flex-1"
+    },
+    "mobile": {
+      "behavior": "Stacked layout with animated screen transition between list and chat",
+      "navigation": "Back button to return to friends list"
+    }
+  },
+  "pages": [
+    {
+      "name": "MessagesPage",
+      "path": "/dashboard/messages",
+      "responsibilities": [
+        "Render FriendsSidebar",
+        "Render ChatPanel",
+        "Handle selectedConversation state",
+        "Handle responsive behavior",
+        "Animate panel transitions"
+      ]
+    }
+  ],
+  "components": [
+    {
+      "name": "FriendsSidebar",
+      "description": "Left panel showing all friends with last message preview.",
+      "ui_library": "shadcn/ui",
+      "elements": [
+        "Input (search friends)",
+        "ScrollArea",
+        "Avatar",
+        "Badge (unread count)",
+        "Separator"
+      ],
+      "features": [
+        "Display friend avatar, name, last message preview, timestamp",
+        "Highlight active conversation",
+        "Unread badge indicator",
+        "Online presence dot (green circle)",
+        "Hover background animation"
+      ],
+      "animations": {
+        "item_hover": "Framer motion scale 1 -> 1.02",
+        "list_appear": "Fade in + stagger children",
+        "active_indicator": "Animated left border highlight"
+      }
+    },
+    {
+      "name": "ChatPanel",
+      "description": "Right panel displaying full conversation.",
+      "ui_library": "shadcn/ui",
+      "elements": [
+        "Header (Avatar + Name + Online status)",
+        "ScrollArea (messages)",
+        "MessageBubble",
+        "MessageInput",
+        "Button (Send)",
+        "Button (Voice message)"
+      ],
+      "features": [
+        "Auto scroll to latest message",
+        "Different bubble styles for sender vs receiver",
+        "Timestamp display",
+        "Seen indicator",
+        "Typing indicator animation"
+      ],
+      "animations": {
+        "message_enter": "Slide up + fade in",
+        "panel_transition_desktop": "Crossfade",
+        "panel_transition_mobile": "Slide left/right full width",
+        "typing_dots": "Infinite pulse animation"
+      }
+    },
+    {
+      "name": "MessageBubble",
+      "description": "Reusable message component.",
+      "variants": {
+        "sent": "Right aligned, primary background",
+        "received": "Left aligned, muted background"
+      },
+      "animations": {
+        "initial": "opacity 0, y 10",
+        "animate": "opacity 1, y 0",
+        "transition": "spring"
+      }
+    },
+    {
+      "name": "MessageInput",
+      "description": "Sticky input at bottom of chat panel.",
+      "elements": [
+        "Textarea (auto grow)",
+        "Send button",
+        "Voice button"
+      ],
+      "animations": {
+        "focus_glow": "Subtle border glow",
+        "send_click": "Scale down 0.95 then bounce"
+      }
+    }
+  ],
+  "state_management": {
+    "local_state": [
+      "selectedConversationId",
+      "messages[]",
+      "friends[]",
+      "typingUsers[]"
+    ],
+    "realtime_integration": [
+      "Subscribe to Ably channel 'friends'",
+      "Subscribe to Ably channel 'voice_messages'",
+      "Append incoming messages in real-time",
+      "Update unread counters when not active"
+    ]
+  },
+  "design_system": {
+    "theme": "Modern minimal, WhatsApp-inspired",
+    "colors": {
+      "background": "bg-background",
+      "sidebar": "bg-muted/40",
+      "active_chat": "bg-primary/10",
+      "sent_message": "bg-primary text-primary-foreground",
+      "received_message": "bg-muted"
+    },
+    "rounded_style": "rounded-2xl",
+    "spacing": "p-4 gap-3",
+    "scrollbar": "custom thin scrollbar"
+  },
+  "animations_global": {
+    "page_mount": "Fade in entire layout",
+    "conversation_switch": "AnimatePresence exit + enter",
+    "mobile_navigation": "Slide full width with spring easing"
+  },
+  "performance_rules": [
+    "Use React.memo for MessageBubble",
+    "Virtualize long message lists if > 100 messages",
+    "Debounce search input",
+    "Avoid unnecessary re-renders on new message"
+  ],
+  "responsiveness": {
+    "breakpoints": {
+      "mobile": "<768px",
+      "tablet": "768px - 1024px",
+      "desktop": ">1024px"
+    },
+    "mobile_behavior": [
+      "Hide sidebar when conversation selected",
+      "Show animated back arrow in ChatPanel header"
+    ]
+  },
+  "accessibility": [
+    "Keyboard navigation for friend list",
+    "Enter key sends message",
+    "ARIA roles for chat regions",
+    "Screen reader labels for unread count"
+  ],
+  "testing_tasks": [
+    "Verify smooth conversation switching",
+    "Verify animation performance on mobile",
+    "Test real-time message delivery",
+    "Ensure scroll stays at bottom when new message arrives",
+    "Test unread badge logic"
+  ]
+}

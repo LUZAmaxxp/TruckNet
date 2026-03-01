@@ -177,8 +177,8 @@ export default function MapPage() {
 
       {/* ── Map + overlay panel wrapper ─────────────────────────────── */}
       <div
-        className="relative w-full rounded-lg overflow-hidden border"
-        style={{ height: "calc(100dvh - 180px)", minHeight: "400px" }}
+        className="relative w-full rounded-lg border"
+        style={{ height: "calc(100dvh - 180px)", minHeight: "400px", overflow: "clip" }}
       >
         {/* Real interactive OpenStreetMap */}
         <DriverMap

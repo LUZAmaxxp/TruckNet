@@ -1,0 +1,83 @@
+{
+  "task": "Fix Text Message Notifications",
+  "description": "Text message notifications are not received by the target user in TruckConnect. Diagnose and fix server, client, and real-time delivery issues.",
+  "priority": "high",
+  "environment": {
+    "frontend": ["Next.js 14", "React", "Tailwind CSS", "shadcn/ui", "Ably Realtime or Socket.io client"],
+    "backend": ["Next.js Route Handlers", "Drizzle ORM", "Ably Realtime or Socket.io server", "POST /api/messages"],
+    "notifications": ["Sonner (toast notifications)"]
+  },
+  "problems_identified": [
+    {
+      "id": 1,
+      "title": "Server event not emitted",
+      "details": "The backend route that sends messages may save to the DB but does not trigger the real-time notification event to the receiver."
+    },
+    {
+      "id": 2,
+      "title": "Client subscription missing",
+      "details": "The receiver may not be subscribed to the correct Ably/Sockets channel or event to listen for incoming messages."
+    },
+    {
+      "id": 3,
+      "title": "Payload mismatch",
+      "details": "The notification payload may be malformed or missing required fields like senderName, messageText, or conversationId."
+    },
+    {
+      "id": 4,
+      "title": "Toast rendering issues",
+      "details": "Frontend may not trigger Sonner toast correctly when a message event is received."
+    }
+  ],
+  "expected_behavior": [
+    "When sender posts a message, receiver gets a real-time notification",
+    "Notification includes sender name, message text, and conversation ID",
+    "Toast pops up on receiver's UI immediately",
+    "Messages appear in conversation view in real-time"
+  ],
+  "tasks": [
+    {
+      "task_id": "T1",
+      "description": "Ensure backend emits notification",
+      "requirements": [
+        "After storing message in DB, emit 'text_message_received' event to receiverId via Ably/Sockets",
+        "Include senderName, senderId, messageText, conversationId, timestamp in payload"
+      ]
+    },
+    {
+      "task_id": "T2",
+      "description": "Ensure client subscribes to correct channel/event",
+      "requirements": [
+        "Subscribe to 'text_message_received' using receiverId or conversation channel",
+        "Use Ably/Sockets typed on() listener to handle incoming events"
+      ]
+    },
+    {
+      "task_id": "T3",
+      "description": "Trigger toast notification",
+      "requirements": [
+        "Use Sonner toast when 'text_message_received' is captured",
+        "Show sender name and preview of message text",
+        "Ensure toast appears even if conversation view is not currently open"
+      ]
+    },
+    {
+      "task_id": "T4",
+      "description": "Add logging for debugging",
+      "requirements": [
+        "Log message payload at server emit and client receive",
+        "Log channel subscription confirmation",
+        "Log toast rendering success/failure"
+      ]
+    }
+  ],
+  "validation": {
+    "steps": [
+      "Send a text message from one account to another",
+      "Verify server emits 'text_message_received' with correct payload",
+      "Check client console logs for event reception",
+      "Confirm toast notification appears with correct info",
+      "Open conversation view and confirm message appears in real-time"
+    ]
+  }
+}

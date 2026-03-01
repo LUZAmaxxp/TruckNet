@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Play, Pause, CheckCheck, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,30 +24,59 @@ interface VoiceMessageItemProps {
 
 export function VoiceMessageItem({ message, onListened }: VoiceMessageItemProps) {
   const [playing, setPlaying] = useState(false);
-  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
+  // Use a ref so the Audio element is never garbage-collected during a re-render
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Pause and release the audio element when the component unmounts
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+        audioRef.current = null;
+      }
+    };
+  }, []);
 
   function handlePlay() {
-    if (playing && audioEl) {
-      audioEl.pause();
+    // — Pause if already playing —
+    if (playing && audioRef.current) {
+      audioRef.current.pause();
       setPlaying(false);
       return;
     }
-    const audio = new Audio(message.audioUrl);
-    setAudioEl(audio);
-    setPlaying(true);
 
-    audio.play().catch((err) => {
-      console.error("[VoiceMessageItem] Playback error:", err);
-      setPlaying(false);
-    });
+    // — Tear down any previous audio object before creating a new one —
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+    }
+
+    const audio = new Audio(message.audioUrl);
+    // Store in ref immediately — the ref update is synchronous and keeps
+    // the object alive across any React re-renders triggered below.
+    audioRef.current = audio;
 
     audio.addEventListener("ended", () => {
       setPlaying(false);
-      // Mark as listened if still 'delivered'
       if (message.status === "delivered" && onListened) {
         onListened(message.id);
       }
     });
+
+    audio.addEventListener("error", (e) => {
+      console.error("[VoiceMessageItem] Audio load/playback error:", e);
+      setPlaying(false);
+    });
+
+    // Only mark as playing AFTER the browser confirms playback has started
+    audio
+      .play()
+      .then(() => setPlaying(true))
+      .catch((err) => {
+        console.error("[VoiceMessageItem] play() rejected:", err);
+        setPlaying(false);
+      });
   }
 
   const createdAt = new Date(message.createdAt);

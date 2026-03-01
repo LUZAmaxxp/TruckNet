@@ -36,11 +36,11 @@ const nextConfig = {
               // Next.js inline scripts + Socket.io client
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
               // Allow connections to same origin (API, WS) and ws/wss for Socket.io
-              "connect-src 'self' ws://localhost:* wss://localhost:* ws: wss:",
+              "connect-src 'self' ws://localhost:* wss://localhost:* ws: wss: https://*.ably.io wss://*.ably.io https://*.ably-realtime.com wss://*.ably-realtime.com",
               // Allow audio blobs for voice message playback
               "media-src 'self' blob:",
-              // Images: same origin + data URIs for avatars/icons
-              "img-src 'self' data: blob:",
+              // Images: same origin + data URIs for avatars/icons + OpenStreetMap tiles
+              "img-src 'self' data: blob: https://*.tile.openstreetmap.org",
               // Fonts from same origin only
               "font-src 'self'",
               // Worker blobs for Next.js internals
