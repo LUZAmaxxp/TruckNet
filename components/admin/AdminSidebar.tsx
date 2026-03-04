@@ -85,7 +85,7 @@ export function AdminSidebar() {
                 "relative flex items-center gap-3 rounded-[12px] px-3 py-[9px] text-[13px] font-medium transition-all duration-[0.18s]",
                 active
                   ? "bg-navy-lt text-navy font-semibold"
-                  : "text-muted hover:bg-base hover:text-ink-2"
+                  : "text-[var(--muted)] hover:bg-base hover:text-ink-2"
               )}
             >
               {/* Active indicator — left bar */}
@@ -123,7 +123,7 @@ export function AdminSidebar() {
           onClick={() => void signOut({ callbackUrl: "/login" })}
           className={cn(
             "flex w-full items-center gap-3 rounded-[12px] px-3 py-[9px] text-[13px] font-medium",
-            "text-muted hover:bg-base hover:text-terra transition-colors duration-[0.18s]"
+            "text-[var(--muted)] hover:bg-base hover:text-terra transition-colors duration-[0.18s]"
           )}
         >
           <LogOut className="h-4 w-4 shrink-0" />

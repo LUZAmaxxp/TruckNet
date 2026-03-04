@@ -39,7 +39,7 @@ export function BottomNav() {
                   ? emergency
                     ? "text-terra"
                     : "text-navy"
-                  : "text-subtle hover:text-ink-2"
+                  : "text-[var(--muted)] hover:text-ink-2"
               )}
             >
               <div

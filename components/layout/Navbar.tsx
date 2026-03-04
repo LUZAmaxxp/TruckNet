@@ -83,7 +83,7 @@ export function Navbar() {
                   "flex h-9 items-center gap-1.5 rounded-sm px-[14px] text-[13px] font-medium transition-all duration-[0.18s]",
                   active
                     ? "bg-navy-lt text-navy font-semibold"
-                    : "text-muted hover:bg-hairline-2 hover:text-ink-2"
+                    : "text-[var(--muted)] hover:bg-hairline-2 hover:text-ink-2"
                 )}
               >
                 <Icon className="h-[15px] w-[15px]" />
