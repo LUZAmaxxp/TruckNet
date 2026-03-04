@@ -49,9 +49,12 @@ export default function AdminMessagesDriverPage({ params }: AdminMessagesDriverP
   }, [driverId]);
 
   return (
-    <div className="flex h-full overflow-hidden rounded-xl border border-gray-800 bg-gray-900">
+    <div
+      className="flex h-full overflow-hidden rounded-[12px]"
+      style={{ border: "1px solid var(--hairline)", background: "var(--surface)" }}
+    >
       {/* Left — conversation list */}
-      <div className="w-72 shrink-0 border-r border-gray-800 overflow-hidden">
+      <div className="w-72 shrink-0 overflow-hidden" style={{ borderRight: "1px solid var(--hairline)" }}>
         <AdminConversationList
           selectedDriverId={driverId}
           onSelect={setSelected}
@@ -67,7 +70,7 @@ export default function AdminMessagesDriverPage({ params }: AdminMessagesDriverP
             driverAvatar={selected.partnerAvatar}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-gray-500 text-sm">
+          <div className="flex h-full items-center justify-center font-body text-[13px]" style={{ color: "var(--muted)" }}>
             Loading…
           </div>
         )}

@@ -60,11 +60,17 @@ export function AdminDriverCard({ driver }: AdminDriverCardProps) {
   };
 
   return (
-    <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
+    <div
+      className="rounded-[12px] p-4"
+      style={{ border: "1px solid var(--hairline)", background: "var(--surface)" }}
+    >
       <div className="flex items-start gap-3">
         {/* Avatar */}
         <div className="relative shrink-0">
-          <div className="h-12 w-12 overflow-hidden rounded-full bg-gray-700 flex items-center justify-center text-base font-bold text-gray-300">
+          <div
+            className="h-12 w-12 overflow-hidden rounded-full flex items-center justify-center font-display text-[16px] font-bold"
+            style={{ background: "var(--navy-lt)", color: "var(--navy)" }}
+          >
             {driver.profileImageUrl ? (
               <img src={driver.profileImageUrl} alt={driver.name} className="h-full w-full object-cover" />
             ) : (
@@ -72,28 +78,30 @@ export function AdminDriverCard({ driver }: AdminDriverCardProps) {
             )}
           </div>
           <span
-            className={`absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-gray-800 ${
-              driver.isOnline ? "bg-green-500" : "bg-gray-500"
-            }`}
+            className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2"
+            style={{
+              background: driver.isOnline ? "var(--sage-md)" : "var(--subtle)",
+              borderColor: "var(--surface)",
+            }}
           />
         </div>
 
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-white truncate">{driver.name}</p>
-          <p className="text-xs text-gray-400">@{driver.tag}</p>
+          <p className="font-body font-semibold truncate" style={{ color: "var(--ink)" }}>{driver.name}</p>
+          <p className="font-mono text-[11px]" style={{ color: "var(--subtle)" }}>@{driver.tag}</p>
           <div className="flex items-center gap-1 mt-1">
             {driver.isOnline ? (
-              <Wifi className="h-3 w-3 text-green-400" />
+              <Wifi className="h-3 w-3" style={{ color: "var(--sage)" }} />
             ) : (
-              <WifiOff className="h-3 w-3 text-gray-500" />
+              <WifiOff className="h-3 w-3" style={{ color: "var(--muted)" }} />
             )}
-            <span className={`text-[11px] ${driver.isOnline ? "text-green-400" : "text-gray-500"}`}>
+            <span className="font-body text-[11px]" style={{ color: driver.isOnline ? "var(--sage)" : "var(--muted)" }}>
               {driver.isOnline ? "Online" : `Last seen ${formatLastSeen(driver.lastSeenAt)}`}
             </span>
           </div>
           {driver.lastLatitude != null && (
-            <p className="text-[11px] text-gray-500 font-mono mt-0.5">
+            <p className="font-mono text-[11px] mt-0.5" style={{ color: "var(--slate)" }}>
               {driver.lastLatitude.toFixed(5)}, {driver.lastLongitude!.toFixed(5)}
             </p>
           )}
@@ -105,7 +113,8 @@ export function AdminDriverCard({ driver }: AdminDriverCardProps) {
         <button
           disabled={!!callingId}
           onClick={() => void handleCall("voice")}
-          className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-xs font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-60"
+          className="flex-1 flex items-center justify-center gap-1.5 rounded-[8px] py-2 font-body text-[12px] font-semibold transition-colors disabled:opacity-60"
+          style={{ background: "var(--navy-lt)", color: "var(--navy)" }}
         >
           <Phone className="h-3.5 w-3.5" />
           {callingId === "voice" ? "…" : "Voice"}
@@ -113,14 +122,16 @@ export function AdminDriverCard({ driver }: AdminDriverCardProps) {
         <button
           disabled={!!callingId}
           onClick={() => void handleCall("video")}
-          className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-purple-600 py-2 text-xs font-medium text-white hover:bg-purple-700 transition-colors disabled:opacity-60"
+          className="flex-1 flex items-center justify-center gap-1.5 rounded-[8px] py-2 font-body text-[12px] font-semibold transition-colors disabled:opacity-60"
+          style={{ background: "var(--slate-lt)", color: "var(--slate)" }}
         >
           <Video className="h-3.5 w-3.5" />
           Video
         </button>
         <button
           onClick={() => router.push(`/admin/messages/${driver.id}`)}
-          className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-gray-700 py-2 text-xs font-medium text-white hover:bg-gray-600 transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 rounded-[8px] py-2 font-body text-[12px] font-semibold transition-colors"
+          style={{ background: "var(--base)", border: "1px solid var(--hairline)", color: "var(--ink)" }}
         >
           <MessageSquare className="h-3.5 w-3.5" />
           Message
@@ -129,7 +140,8 @@ export function AdminDriverCard({ driver }: AdminDriverCardProps) {
           <a
             href={`/map?focus=${driver.id}`}
             title="View on map"
-            className="flex items-center justify-center rounded-lg bg-gray-700 px-2.5 py-2 text-gray-300 hover:bg-gray-600 transition-colors"
+            className="flex items-center justify-center rounded-[8px] px-2.5 py-2 transition-colors"
+            style={{ background: "var(--base)", border: "1px solid var(--hairline)", color: "var(--slate)" }}
           >
             <MapPin className="h-3.5 w-3.5" />
           </a>

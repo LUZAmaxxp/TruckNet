@@ -39,21 +39,30 @@ export const MessageBubble = React.memo(function MessageBubble({
       className={cn("flex w-full", isSent ? "justify-end" : "justify-start")}
     >
       <div
-        className={cn(
-          "max-w-[70%] rounded-2xl px-4 py-2 text-sm shadow-sm",
+        className="max-w-[70%] px-4 py-2"
+        style={
           isSent
-            ? "bg-primary text-primary-foreground rounded-br-sm"
-            : "bg-muted text-foreground rounded-bl-sm"
-        )}
+            ? {
+                background: "var(--navy)",
+                color: "rgba(255,255,255,0.95)",
+                borderRadius: "14px 14px 4px 14px",
+                boxShadow: "0 2px 8px rgba(28,58,94,0.25)",
+              }
+            : {
+                background: "var(--surface)",
+                color: "var(--ink)",
+                border: "1px solid var(--hairline)",
+                borderRadius: "14px 14px 14px 4px",
+                boxShadow: "var(--shadow-xs)",
+              }
+        }
       >
-        <p className="whitespace-pre-wrap break-words leading-relaxed">
+        <p className="whitespace-pre-wrap break-words leading-relaxed text-[14px]">
           {message.content}
         </p>
         <p
-          className={cn(
-            "mt-1 text-right text-[10px]",
-            isSent ? "text-primary-foreground/70" : "text-muted-foreground"
-          )}
+          className="mt-1 text-right font-mono text-[10px]"
+          style={{ color: isSent ? "rgba(255,255,255,0.55)" : "var(--subtle)" }}
         >
           {formatTime(message.createdAt)}
         </p>

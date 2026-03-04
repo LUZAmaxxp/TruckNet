@@ -5,10 +5,7 @@ import Image from "next/image";
 import { toast } from "sonner";
 import { Camera, Loader2, User } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 
 interface ProfileData {
   id: string;
@@ -110,22 +107,45 @@ export default function ProfilePage() {
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
+      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
       className="max-w-lg mx-auto space-y-6"
     >
-      <h1 className="text-2xl font-bold flex items-center gap-2">
-        <User className="h-6 w-6" /> My Profile
-      </h1>
+      {/* Page header */}
+      <div>
+        <div className="mb-2 flex items-center gap-3">
+          <span className="inline-block h-[1.5px] w-4 rounded-full" style={{ background: "var(--navy-md)" }} />
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--navy-md)" }}>
+            Account
+          </span>
+        </div>
+        <h1 className="font-display text-[26px] font-bold leading-tight tracking-[-0.03em]" style={{ color: "var(--ink)" }}>
+          My Profile
+        </h1>
+      </div>
 
       {/* Avatar section */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Avatar</CardTitle>
-          <CardDescription>Upload a profile picture (JPEG, PNG, WebP, GIF — max 5 MB)</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-4">
-          {/* Avatar preview */}
-          <div className={`relative w-24 h-24 rounded-full overflow-hidden border-2 bg-muted flex items-center justify-center transition-all duration-300 ${preview ? 'border-primary ring-4 ring-primary/30' : 'border-border'}`}>
+      <div
+        className="rounded-lg border p-5"
+        style={{ background: "var(--surface)", borderColor: "var(--hairline)", boxShadow: "var(--shadow-sm)" }}
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <div className="flex h-8 w-8 items-center justify-center rounded-sm text-[16px]" style={{ background: "var(--navy-lt)" }}>
+            <Camera className="h-4 w-4" style={{ color: "var(--navy)" }} />
+          </div>
+          <span className="font-display text-[14px] font-semibold tracking-[-0.01em]" style={{ color: "var(--ink)" }}>
+            Avatar
+          </span>
+        </div>
+        <p className="text-[12px] mb-4" style={{ color: "var(--muted)" }}>
+          Upload a profile picture (JPEG, PNG, WebP, GIF — max 5 MB)
+        </p>
+
+        <div className="flex flex-col items-center gap-4">
+          {/* Avatar circle */}
+          <div
+            className={`relative h-24 w-24 overflow-hidden rounded-full flex items-center justify-center transition-all duration-300 ${preview ? "ring-[3px] ring-[rgba(28,58,94,0.25)]" : ""}`}
+            style={{ border: "2px solid var(--hairline)", background: "var(--navy-lt)" }}
+          >
             {avatarUrl ? (
               <Image
                 src={avatarUrl}
@@ -135,7 +155,7 @@ export default function ProfilePage() {
                 unoptimized={avatarUrl.startsWith("blob:")}
               />
             ) : (
-              <span className="text-2xl font-bold text-muted-foreground">{initials}</span>
+              <span className="font-display text-[22px] font-bold" style={{ color: "var(--navy)" }}>{initials}</span>
             )}
           </div>
 
@@ -151,11 +171,11 @@ export default function ProfilePage() {
           <div className="flex gap-2">
             <Button
               type="button"
-              variant="outline"
+              variant="soft"
               size="sm"
               onClick={() => fileInputRef.current?.click()}
             >
-              <Camera className="h-4 w-4 mr-1" />
+              <Camera className="h-4 w-4 mr-1.5" />
               Choose Image
             </Button>
             <AnimatePresence>
@@ -168,49 +188,66 @@ export default function ProfilePage() {
                 >
                   <Button
                     size="sm"
+                    variant="primary"
                     onClick={() => void handleUpload()}
                     disabled={uploading}
                   >
-                    {uploading ? (
-                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                    ) : null}
+                    {uploading && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
                     Upload
                   </Button>
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      <Separator />
+      {/* Account details */}
+      <div
+        className="rounded-lg border p-5"
+        style={{ background: "var(--surface)", borderColor: "var(--hairline)", boxShadow: "var(--shadow-sm)" }}
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <div className="flex h-8 w-8 items-center justify-center rounded-sm text-[16px]" style={{ background: "var(--navy-lt)" }}>
+            <User className="h-4 w-4" style={{ color: "var(--navy)" }} />
+          </div>
+          <span className="font-display text-[14px] font-semibold tracking-[-0.01em]" style={{ color: "var(--ink)" }}>
+            Account Details
+          </span>
+        </div>
 
-      {/* Profile info */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Account Details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-muted-foreground">Name</span>
-            <span className="font-medium text-sm">{profile.name}</span>
+        <div className="space-y-3">
+          {[
+            { label: "Name", value: profile.name },
+            { label: "Email", value: profile.email },
+          ].map(({ label, value }) => (
+            <div
+              key={label}
+              className="flex items-center justify-between rounded-[8px] px-[14px] py-3"
+              style={{ background: "var(--base)", border: "1px solid var(--hairline)" }}
+            >
+              <span className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>{label}</span>
+              <span className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{value}</span>
+            </div>
+          ))}
+          <div
+            className="flex items-center justify-between rounded-[8px] px-[14px] py-3"
+            style={{ background: "var(--base)", border: "1px solid var(--hairline)" }}
+          >
+            <span className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>Tag</span>
+            <span className="font-mono text-[12px] font-semibold" style={{ color: "var(--navy)" }}>{profile.tag}</span>
           </div>
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-muted-foreground">Email</span>
-            <span className="font-medium text-sm">{profile.email}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-muted-foreground">Tag</span>
-            <Badge variant="secondary" className="font-mono">{profile.tag}</Badge>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-muted-foreground">Member since</span>
-            <span className="text-sm text-muted-foreground">
+          <div
+            className="flex items-center justify-between rounded-[8px] px-[14px] py-3"
+            style={{ background: "var(--base)", border: "1px solid var(--hairline)" }}
+          >
+            <span className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>Member since</span>
+            <span className="font-mono text-[11px]" style={{ color: "var(--muted)" }}>
               {new Date(profile.createdAt).toLocaleDateString()}
             </span>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </motion.div>
   );
 }

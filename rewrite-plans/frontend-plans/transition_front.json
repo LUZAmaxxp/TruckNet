@@ -1,0 +1,712 @@
+{
+  "mission": {
+    "id": "DESIGN-IMPL-001",
+    "project": "TruckNet",
+    "title": "Implement Warm Maritime Precision Design System",
+    "date": "2026-03-04",
+    "design_direction": "Warm Maritime Precision — linen base, maritime navy, terracotta SOS, soft shadows, editorial typography. Professional, chic, enterprise-grade. Inspired by Untitled UI spacing discipline, Craft warmth, Linear typographic confidence, Stripe data hierarchy.",
+    "rule": "Every subagent must follow the design tokens exactly. Agents may add new components or micro-interactions if they enhance UX, but must strictly follow the color palette, typography, spacing system, shadow system, and border-radius scale defined in the DESIGN_TOKENS block below.",
+    "execution_order": [1, 2, 3, 4, 5, 6, 7, 8]
+  },
+
+  "DESIGN_TOKENS": {
+    "description": "Single source of truth. All subagents read this block before writing any code.",
+    "css_variables": {
+      "colors": {
+        "--base":        "#F7F5F1",
+        "--base-2":      "#EFECE6",
+        "--surface":     "#FFFFFF",
+        "--surface-2":   "#FDFCFB",
+        "--navy":        "#1C3A5E",
+        "--navy-md":     "#2C527F",
+        "--navy-lt":     "#EEF3F9",
+        "--navy-pale":   "#F4F7FB",
+        "--sage":        "#3A6B52",
+        "--sage-lt":     "#EBF4EF",
+        "--sage-md":     "#5A9474",
+        "--terra":       "#B85039",
+        "--terra-lt":    "#FBF0EE",
+        "--terra-md":    "#D4614A",
+        "--honey":       "#C98A2E",
+        "--honey-lt":    "#FBF5E8",
+        "--honey-md":    "#E0A93E",
+        "--slate":       "#6678A0",
+        "--slate-lt":    "#EEF1F9",
+        "--ink":         "#1A1A24",
+        "--ink-2":       "#3D3D4E",
+        "--muted":       "#7A7A8C",
+        "--subtle":      "#ABABBA",
+        "--hairline":    "#E8E5DF",
+        "--hairline-2":  "#F0EDE8"
+      },
+      "shadows": {
+        "--shadow-xs":  "0 1px 2px rgba(28,58,94,0.06)",
+        "--shadow-sm":  "0 1px 4px rgba(28,58,94,0.07), 0 4px 12px rgba(28,58,94,0.05)",
+        "--shadow-md":  "0 4px 6px rgba(28,58,94,0.07), 0 10px 30px rgba(28,58,94,0.08)",
+        "--shadow-lg":  "0 8px 16px rgba(28,58,94,0.08), 0 24px 48px rgba(28,58,94,0.1)",
+        "--shadow-nav": "0 1px 0 var(--hairline), 0 4px 24px rgba(28,58,94,0.05)",
+        "rule": "All shadows use navy tint rgba(28,58,94,...) — never pure black rgba(0,0,0,...)"
+      },
+      "radii": {
+        "--radius-sm":  "8px",
+        "--radius":     "12px",
+        "--radius-lg":  "16px",
+        "--radius-xl":  "20px",
+        "--radius-2xl": "24px"
+      },
+      "typography": {
+        "display": { "family": "'Bricolage Grotesque', sans-serif", "google_font": "Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800", "use": "Page titles, stat values, card headings, auth titles", "letter_spacing": "-0.02em to -0.04em", "line_height": "1.2" },
+        "body":    { "family": "'Instrument Sans', sans-serif",      "google_font": "Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400", "use": "All body text, labels, buttons, inputs, descriptions" },
+        "mono":    { "family": "'JetBrains Mono', monospace",        "google_font": "JetBrains+Mono:wght@400;500", "use": "GPS coordinates, driver tags (e.g. carlos#4821), timestamps, latency readings, code values only" }
+      },
+      "spacing": "8px base grid. Use multiples: 4, 8, 12, 16, 20, 24, 28, 32, 40, 48",
+      "import_line": "@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap');"
+    },
+    "component_patterns": {
+      "card": "bg-surface, 1px border hairline, border-radius-lg (16px), shadow-sm. On hover: shadow-md. Padding 20px 22px.",
+      "card_inset": "bg-base, 1px border hairline, border-radius (12px), padding 16px 18px. Used for data blocks inside cards.",
+      "stat_card": "Same as card + 3px accent bar at top (full width, matches semantic color) + stat-icon 36x36 rounded-sm with color/14 alpha background.",
+      "button_primary": "bg-navy, white text, shadow 0 1px 3px rgba(28,58,94,0.3) + 0 4px 12px rgba(28,58,94,0.2). Hover: bg-navy-md, stronger shadow.",
+      "button_soft": "bg-navy-lt, color navy-md, no border.",
+      "button_ghost": "bg-transparent, color ink-2, border 1px hairline. Hover: bg-base-2.",
+      "button_danger": "bg-terra, white text, shadow 0 2px 8px rgba(184,80,57,0.3).",
+      "button_success": "bg-sage, white text, shadow 0 2px 8px rgba(58,107,82,0.3).",
+      "badge_online": "bg-sage-lt, color sage, with 5x5 dot currentColor.",
+      "badge_sos": "bg-terra-lt, color terra, with pulsing dot.",
+      "badge_idle": "bg-honey-lt, color honey.",
+      "badge_call": "bg-slate-lt, color slate.",
+      "input_field": "bg-base, 1.5px border hairline, border-radius-sm. Focus: border navy 40% opacity + box-shadow 0 0 0 3px rgba(28,58,94,0.07). Font: Instrument Sans 14px.",
+      "page_eyebrow": "font-mono 10px, color navy-md, letter-spacing 0.12em, uppercase, flex row with 16px wide 1.5px navy-md line before text.",
+      "page_title": "Bricolage Grotesque 26px, weight 700, letter-spacing -0.03em, color ink.",
+      "section_title": "Bricolage Grotesque 13px, weight 600, color ink-2, letter-spacing -0.01em.",
+      "avatar": "Circle, bg color/18 alpha, text color full. Sizes: 44px (16px font), 38px (13px), 32px (11px), 28px (10px). Font: Bricolage Grotesque weight 700.",
+      "separator": "1px height, bg hairline.",
+      "online_dot_on_avatar": "8-10px circle, bg sage-md, border 2px surface, absolute bottom-right of avatar.",
+      "progress_bar": "5px height, bg hairline, border-radius 3px. Fill uses semantic color. Animate width with 1.2s cubic-bezier(0.4,0,0.2,1) transition.",
+      "toast": "bg-surface, 1px border hairline, border-radius 10px, shadow-sm, padding 10px 12px. Icon: 32x32 border-radius 8px with color/lt bg. Title: Instrument Sans 12px weight 600. Body: 11px muted."
+    },
+    "animation_rules": {
+      "page_entrance": "opacity 0 → 1, translateY 8px → 0, duration 0.28s, cubic-bezier(0.22,1,0.36,1)",
+      "list_items": "opacity 0 + translateY 4px → opacity 1 + translateY 0, duration 0.18s, stagger 0.04s per item",
+      "hover_lift": "translateY 0 → -1px on card hover, with shadow-sm → shadow-md transition 0.2s",
+      "sos_pulse": "box-shadow grow 0→7px rgba(184,80,57,0.0) with 1.8s ease-in-out infinite",
+      "live_dot": "box-shadow grow and fade on sage color, 2.4s infinite",
+      "ring_expand": "scale 0.65→1.8, opacity 0.5→0, 2.8s ease-out infinite. Multiple rings with 0.9s delay offset.",
+      "waveform": "Per-bar height driven by Math.abs(Math.sin(tick * 0.25 + i * 0.55)) * 26 + 12px base",
+      "progress_fill_entrance": "Width transition 1.2s cubic-bezier(0.4,0,0.2,1) on component mount",
+      "slide_toggle": "max-height + opacity transition 0.35s cubic-bezier(0.4,0,0.2,1) for expanding/collapsing fields",
+      "mobile_slide": "x: -100% → 0 and x: 100% → 0, spring stiffness 260 damping 20 (Framer Motion)",
+      "map_pin_hover": "scale 1 → 1.2, duration 0.2s on map pin hover"
+    }
+  },
+
+  "subagents": [
+
+    {
+      "id": "SA-01",
+      "name": "Foundation Agent",
+      "priority": 1,
+      "title": "Global CSS Variables, Fonts, Reset, Root Layout",
+      "description": "Establish the entire design token system as CSS custom properties available globally. This is the first step — all other subagents depend on these variables existing.",
+      "files_to_modify": [
+        "app/globals.css",
+        "app/layout.tsx",
+        "tailwind.config.ts"
+      ],
+      "tasks": [
+        {
+          "task": "Replace globals.css",
+          "instructions": [
+            "Remove all existing CSS variable declarations in :root",
+            "Add the Google Fonts @import as the very first line of globals.css",
+            "Declare all color, shadow, radius, and font variables from DESIGN_TOKENS.css_variables inside :root",
+            "Set body { font-family: var(--font-body); background: var(--base); color: var(--ink); -webkit-font-smoothing: antialiased; line-height: 1.5; }",
+            "Add scrollbar styling: width 4px, track transparent, thumb var(--hairline), border-radius 4px",
+            "Add .animate-screen-in keyframe: from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) }",
+            "Add .animate-list-item keyframe: same as screen-in but 0.15s duration",
+            "Add .animate-live-pulse keyframe for sage-colored live dot",
+            "Add .animate-sos-beat keyframe: box-shadow 0→7px rgba(184,80,57,0) 1.8s infinite",
+            "Add .animate-ring-expand keyframe: scale 0.65→1.8, opacity 0.5→0, 2.8s ease-out infinite",
+            "Set --font-display, --font-body, --font-mono as CSS vars pointing to the three Google Font families"
+          ]
+        },
+        {
+          "task": "Update tailwind.config.ts",
+          "instructions": [
+            "Extend theme.colors with: navy, sage, terra, honey, slate, ink, muted, subtle, hairline, base, surface — each mapped to their CSS variable using 'var(--name)'",
+            "Extend theme.fontFamily with: display, body, mono pointing to the CSS vars",
+            "Extend theme.boxShadow with: xs, sm, md, lg, nav pointing to CSS vars",
+            "Extend theme.borderRadius with: sm, DEFAULT, lg, xl, '2xl' pointing to CSS vars",
+            "This enables Tailwind classes like bg-navy, text-sage, shadow-md, rounded-lg throughout the project"
+          ]
+        },
+        {
+          "task": "Update app/layout.tsx",
+          "instructions": [
+            "Replace the Inter font import with a next/font/google import for Bricolage Grotesque (weights 400,600,700,800, subsets ['latin']) and Instrument Sans (weights 400,500,600, subsets ['latin'])",
+            "Apply both font CSS variables to the html element className",
+            "Ensure the <Providers> wrapper and <Toaster> remain untouched",
+            "Set Toaster props: richColors position='top-right', toastOptions with style using surface background, hairline border, shadow-md, Instrument Sans font"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-02",
+      "name": "Shared Components Agent",
+      "priority": 2,
+      "title": "Rebuild all shared UI primitives — Button, Badge, Card, Avatar, Input, Separator, Toast",
+      "description": "Rebuild or restyle the reusable design system atoms so every page automatically looks correct once these are in place.",
+      "files_to_modify": [
+        "components/ui/button.tsx",
+        "components/ui/card.tsx",
+        "components/ui/input.tsx",
+        "components/ui/badge.tsx",
+        "components/ui/separator.tsx",
+        "components/ui/avatar.tsx",
+        "components/ui/dialog.tsx",
+        "components/ui/scroll-area.tsx"
+      ],
+      "new_files_to_create": [
+        "components/ui/stat-card.tsx",
+        "components/ui/page-header.tsx",
+        "components/ui/section-title.tsx",
+        "components/ui/progress-bar.tsx",
+        "components/ui/driver-row.tsx"
+      ],
+      "tasks": [
+        {
+          "task": "Button variants",
+          "instructions": [
+            "primary: bg-navy, white text, shadow-sm navy-tinted. Hover: bg-navy-md, shadow-md.",
+            "soft: bg-navy-lt, text-navy-md, no border. Hover: bg [#DDE8F4].",
+            "ghost: bg-transparent, text-ink-2, border hairline. Hover: bg-base-2.",
+            "danger: bg-terra, white text, shadow 0 2px 8px rgba(184,80,57,0.3). Hover: bg-terra-md.",
+            "success: bg-sage, white text, shadow 0 2px 8px rgba(58,107,82,0.3).",
+            "All buttons: font-body, font-weight 600, letter-spacing -0.01em, border-radius-sm (8px).",
+            "Sizes: default (9px 18px, 13px font), sm (6px 14px, 12px font), icon (34x34px square), icon-lg (42x42px).",
+            "All transitions: all 0.18s ease."
+          ]
+        },
+        {
+          "task": "Badge variants",
+          "instructions": [
+            "online: bg-sage-lt, text-sage. With a 5x5 dot (currentColor, border-radius 50%).",
+            "offline: bg-hairline-2, text-muted. No dot.",
+            "sos: bg-terra-lt, text-terra. With animate-sos-beat pulsing dot.",
+            "call: bg-slate-lt, text-slate. With dot.",
+            "idle: bg-honey-lt, text-honey.",
+            "navy: bg-navy-lt, text-navy-md.",
+            "All badges: padding 3px 10px, border-radius 20px, font-size 11px, font-weight 600, inline-flex items-center gap 5px."
+          ]
+        },
+        {
+          "task": "Card component",
+          "instructions": [
+            "Default card: bg-surface, border 1px hairline, border-radius-lg (16px), shadow-sm, padding 20px 22px, position relative, overflow hidden.",
+            "Add ::before pseudo: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, transparent 60%) — this creates a subtle gloss effect that elevates the card.",
+            "Hover: shadow-md, transition 0.2s.",
+            "Inset variant: bg-base, border hairline, border-radius (12px), padding 16px 18px. No gloss. Used for data blocks inside cards."
+          ]
+        },
+        {
+          "task": "Input component",
+          "instructions": [
+            "bg-base, border 1.5px solid hairline, border-radius-sm (8px).",
+            "Padding: 11px 14px. Font: Instrument Sans 14px, color ink.",
+            "Placeholder: color subtle.",
+            "Focus: border-color rgba(28,58,94,0.4), box-shadow 0 0 0 3px rgba(28,58,94,0.07), bg surface.",
+            "Transition: border-color 0.2s, box-shadow 0.2s."
+          ]
+        },
+        {
+          "task": "CREATE components/ui/stat-card.tsx",
+          "instructions": [
+            "Props: icon (string emoji), label (string), value (string), delta (string), deltaType ('up'|'down'|'neutral'), accentColor (string hex).",
+            "Renders: bg-surface card with 3px top accent bar (accentColor, full width, border-radius top corners), 36x36 icon box (accentColor+'14' bg, border-radius-sm), stat value (Bricolage Grotesque 30px weight 700 letter-spacing -0.04em), label (12px muted weight 500), delta badge (11px, bg semantic-lt color depending on deltaType).",
+            "Hover: translateY -1px, shadow-md, transition 0.2s."
+          ]
+        },
+        {
+          "task": "CREATE components/ui/page-header.tsx",
+          "instructions": [
+            "Props: eyebrow (string), title (string), subtitle (string), actions (ReactNode optional).",
+            "Eyebrow: font-mono 10px, color navy-md, letter-spacing 0.12em, uppercase. Flex row with a 16x1.5px navy-md bar before it.",
+            "Title: Bricolage Grotesque 26px weight 700, letter-spacing -0.03em, color ink.",
+            "Subtitle: 14px muted weight 400, margin-top 4px.",
+            "Layout: flex row, items-center, justify-between. Actions slot on right."
+          ]
+        },
+        {
+          "task": "CREATE components/ui/section-title.tsx",
+          "instructions": [
+            "Props: children, count (number optional).",
+            "Title: Bricolage Grotesque 13px weight 600, color ink-2, letter-spacing -0.01em.",
+            "If count provided: render small pill after title — bg hairline-2, font-mono 10px, color muted, padding 2px 7px, border-radius 10px.",
+            "Margin-bottom: 14px default."
+          ]
+        },
+        {
+          "task": "CREATE components/ui/progress-bar.tsx",
+          "instructions": [
+            "Props: value (0-100), color (CSS var string), label (string optional), showValue (boolean optional).",
+            "Track: 5px height, bg hairline, border-radius 3px, overflow hidden.",
+            "Fill: height 100%, border-radius 3px, background color prop, transition width 1.2s cubic-bezier(0.4,0,0.2,1).",
+            "Use useEffect to trigger fill animation on mount (start from 0, animate to value)."
+          ]
+        },
+        {
+          "task": "CREATE components/ui/driver-row.tsx",
+          "instructions": [
+            "Props: driver (name, tag, status, route, color, initials, distKm optional), selected (boolean), onClick.",
+            "Layout: flex items-center gap 14px, padding 12px 14px, border-radius (12px), border 1px transparent.",
+            "Hover: bg-base, border hairline.",
+            "Selected: bg-navy-pale, border rgba(28,58,94,0.15).",
+            "Avatar: circle with status dot bottom-right (sage-md=online, honey-md=idle, terra=sos), border 2px surface.",
+            "Right: distance in font-mono 11px navy fw-500 + status badge.",
+            "Transition: all 0.18s."
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-03",
+      "name": "Layout & Navigation Agent",
+      "priority": 3,
+      "title": "Rebuild Navbar, BottomNav, AdminSidebar, AdminHeader",
+      "description": "Restyle all navigation chrome for both driver and admin layouts.",
+      "files_to_modify": [
+        "components/layout/Navbar.tsx",
+        "components/layout/BottomNav.tsx",
+        "components/layout/LiveConnectionBadge.tsx",
+        "components/admin/AdminSidebar.tsx",
+        "components/admin/AdminHeader.tsx",
+        "app/(protected)/layout.tsx",
+        "app/(admin)/admin/layout.tsx"
+      ],
+      "tasks": [
+        {
+          "task": "Navbar",
+          "instructions": [
+            "Height: 56px, position sticky top-0 z-50.",
+            "Background: rgba(247,245,241,0.88), backdrop-filter blur(20px) saturate(180%).",
+            "Border-bottom: 1px solid hairline.",
+            "Box-shadow: var(--shadow-nav).",
+            "Logo: Bricolage Grotesque 15px weight 700, color navy, letter-spacing -0.02em. Logo mark: 28x28 border-radius 8px bg-navy with white 🚛 emoji, box-shadow 0 2px 8px rgba(28,58,94,0.3).",
+            "Nav links: height 36px, padding 0 14px, border-radius-sm. Active: bg-navy-lt, text-navy, fw-600. Inactive: text-muted, hover bg-hairline-2 text-ink-2.",
+            "Avatar: 32x32 circle, hover ring-2 ring-navy/30.",
+            "LiveConnectionBadge on right: pill shape bg-sage-lt text-sage, animate-live-pulse dot.",
+            "Sign out: ghost button with LogOut icon."
+          ]
+        },
+        {
+          "task": "BottomNav",
+          "instructions": [
+            "Height 64px, fixed bottom-0, md:hidden.",
+            "Background: rgba(247,245,241,0.92), backdrop-filter blur(16px).",
+            "Border-top: 1px solid hairline.",
+            "5-column grid.",
+            "Active non-emergency: text-navy, icon pill bg-navy-lt rounded-xl.",
+            "Active SOS: text-terra, icon pill bg-terra-lt.",
+            "Inactive: text-subtle.",
+            "SOS pulsing dot: 8px bg-terra animate-sos-beat absolute top-right of icon."
+          ]
+        },
+        {
+          "task": "AdminSidebar",
+          "instructions": [
+            "Width: 224px, fixed left, full height.",
+            "Background: var(--surface), border-right 1px hairline, box-shadow var(--shadow-sm).",
+            "Branding: logo mark (same as Navbar) + 'TruckNet' Bricolage Grotesque 15px navy + 'Admin' pill bg-navy-lt text-navy-md font-mono 9px uppercase.",
+            "Nav links: padding 8px 12px, border-radius (12px), margin-bottom 2px. Active: bg-navy-lt, text-navy, fw-600, left border indicator 3px bg-navy border-radius-full using absolute positioned span. Inactive: text-muted hover bg-base.",
+            "SOS badge: bg-terra-lt text-terra, font-mono 10px, rounded-full, animate-sos-beat, shows count.",
+            "Nav items: Overview, Drivers, SOS Alerts (with badge), Messages (with unread count badge bg-navy), Call History.",
+            "Bottom: admin user avatar + name + sign-out ghost button.",
+            "All transitions 0.18s."
+          ]
+        },
+        {
+          "task": "AdminHeader",
+          "instructions": [
+            "Height 56px, border-bottom 1px hairline, bg surface, shadow-nav.",
+            "Left: page title (Bricolage Grotesque 18px weight 700) passed as prop.",
+            "Right: LiveConnectionBadge + avatar circle + name text-13px fw-500.",
+            "Padding 0 28px."
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-04",
+      "name": "Driver Pages Agent",
+      "priority": 4,
+      "title": "Restyle all driver-facing pages: Dashboard, Map, Friends, Profile, Stress",
+      "description": "Apply the design system to every page in app/(protected)/. Use PageHeader, StatCard, DriverRow, Card, Badge, and Button components from SA-02. Add Framer Motion entrance animations.",
+      "files_to_modify": [
+        "app/(protected)/dashboard/page.tsx",
+        "app/(protected)/map/page.tsx",
+        "app/(protected)/friends/page.tsx",
+        "app/(protected)/profile/page.tsx",
+        "app/(protected)/stress/page.tsx"
+      ],
+      "tasks": [
+        {
+          "task": "Dashboard page",
+          "instructions": [
+            "Use <PageHeader eyebrow='Driver Portal' title='Dashboard' subtitle='Broadcasting · X drivers nearby'> with refresh button + LiveConnectionBadge on right.",
+            "My Location card: <Card> with <CardInset> showing lat/lng/accuracy in three columns each with font-mono label + value. 'Broadcasting' badge-online top right. Update Location button btn-primary.",
+            "Shift status card: route, depot, ETA, status in key-value rows. ProgressBar component at bottom showing route completion.",
+            "Nearby Drivers section: <SectionTitle count={n}>. AnimatePresence grid, each DriverRow with Framer Motion stagger 0.04s.",
+            "All page content: initial opacity 0 translateY 8px, animate to visible on mount."
+          ]
+        },
+        {
+          "task": "Stress page",
+          "instructions": [
+            "Emergency button card: background linear-gradient(145deg, terra-lt, surface). Button: 96px circle bg-terra, shadow 0 6px 24px rgba(184,80,57,0.4). Three concentric ring divs with animate-ring-expand, delays 0s/1.3s/2.6s.",
+            "Analytics card: Bricolage Grotesque 36px value, letter-spacing -4px. Bar chart with terra colors (current month full opacity, last 2 months 45%, rest 18%).",
+            "Active alerts list: Card with border rgba(184,80,57,0.15), gradient bg. Alert row: avatar + name + tag + location + coordinates + time. Buttons: Call (btn-soft), View Map (btn-ghost), Resolve (btn-sage).",
+            "Confirmation dialog: AnimatePresence modal, scale 0.95→1 + opacity, spring animation."
+          ]
+        },
+        {
+          "task": "Friends page",
+          "instructions": [
+            "Search/tag input: field-input style with UserPlus icon button btn-primary on right.",
+            "Incoming requests: AnimatePresence list, each item Card with accept (btn-sage btn-icon) + decline (btn-ghost btn-icon), sender name + tag + relative time.",
+            "Friends list: each friend as Card hover-lift with avatar (color/18 bg), name (Bricolage Grotesque 14px), tag (font-mono 11px muted), three action buttons — Message (btn-soft), Map (btn-ghost), Call (btn-soft with phone icon).",
+            "Location expand: AnimatePresence height animation, shows lat/lng in font-mono inside card-inset, plus 'View on Map' link."
+          ]
+        },
+        {
+          "task": "Profile page",
+          "instructions": [
+            "Avatar section: 96x96 circle with color/18 bg or image, change photo on hover (overlay with camera icon bg-navy/70). Upload button btn-soft.",
+            "Info card: tag displayed as badge-navy font-mono. Name, email, created-at in key-value rows. Edit name: field-input inline, save btn-primary btn-sm.",
+            "Page entrance: motion.div opacity 0 y 12 → visible 0.3s."
+          ]
+        },
+        {
+          "task": "Map page",
+          "instructions": [
+            "Floating overlays use glass background: rgba(255,255,255,0.9) backdrop-blur border hairline border-radius-lg shadow-md.",
+            "Current user pin: blue navy color 14px dot, border 3px white, shadow 0 2px 8px rgba(28,58,94,0.3). Three concentric ring-expand animations.",
+            "Driver pins: 12px dots with semantic color, border 2.5px white.",
+            "Pin labels: Instrument Sans 9px weight 600, bg rgba(255,255,255,0.92) padding 2px 6px border-radius 4px border hairline shadow-xs.",
+            "Selected driver popup: bg surface/97, border hairline, border-radius-lg, shadow-lg, padding 16px 18px. Animation screen-in 0.2s.",
+            "Driver list panel: scroll-y with card-inset rows."
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-05",
+      "name": "Messages & Chat Agent",
+      "priority": 5,
+      "title": "Restyle Messages page, FriendsSidebar, ChatPanel, MessageBubble, VoiceMessageBubble",
+      "description": "The messages UI is the highest-interaction surface. It must feel as polished as a native messaging app. Apply the full design system.",
+      "files_to_modify": [
+        "app/(protected)/messages/page.tsx",
+        "components/messages/FriendsSidebar.tsx",
+        "components/messages/ChatPanel.tsx",
+        "components/messages/MessageBubble.tsx",
+        "components/messages/VoiceMessageBubble.tsx",
+        "app/(admin)/admin/messages/page.tsx",
+        "components/admin/AdminConversationList.tsx",
+        "components/admin/AdminConversationThread.tsx",
+        "components/admin/AdminMessageBubble.tsx"
+      ],
+      "tasks": [
+        {
+          "task": "Two-panel container",
+          "instructions": [
+            "Outer container: rounded-xl border hairline shadow-sm bg-surface overflow-hidden.",
+            "Height: calc(100dvh - 7.5rem) mobile, calc(100vh - 80px) desktop.",
+            "No outer padding on mobile — break out of layout padding."
+          ]
+        },
+        {
+          "task": "FriendsSidebar",
+          "instructions": [
+            "Width 276px, border-right 1px hairline, bg-surface-2.",
+            "Header: 'Conversations' Bricolage Grotesque 16px weight 700 letter-spacing -0.02em. Search input: bg-base border hairline border-radius-sm, 🔍 icon absolutely left-10px.",
+            "Conversation item: flex gap 10px, padding 10px, border-radius (12px). Hover: bg-base. Active: bg-navy-lt.",
+            "Active item: left border indicator — absolute 2px wide full-height bg-navy border-radius-full using layoutId Framer Motion for smooth transition between selections.",
+            "Avatar 38px with online dot 9px sage-md border-2px surface-2.",
+            "Name: Instrument Sans 13px weight 600, letter-spacing -0.01em.",
+            "Preview: 12px muted, overflow ellipsis max-width 160px.",
+            "Time: JetBrains Mono 10px subtle.",
+            "Unread badge: bg-navy white text, font-mono 10px weight 700, border-radius 10px, padding 2px 6px.",
+            "List entrance: all items fade + translateY 4px simultaneously in 0.18s (no stagger on mobile per spec)."
+          ]
+        },
+        {
+          "task": "ChatPanel thread header",
+          "instructions": [
+            "Padding 16px 20px, border-bottom hairline-2, bg-surface.",
+            "Avatar 38px + online dot. Name Instrument Sans 14px weight 600. Status: 11px sage color with 5px sage dot.",
+            "Right: Voice call btn-soft icon + Video call btn-soft icon."
+          ]
+        },
+        {
+          "task": "Message bubbles",
+          "instructions": [
+            "Bubble area background: var(--base). Padding 20px. Gap 12px between groups.",
+            "Inbound bubble: bg-surface, color ink, border 1px hairline, shadow-xs. Border-radius: 14px 14px 14px 4px.",
+            "Outbound bubble: bg-navy, color rgba(255,255,255,0.95). No border. Shadow 0 2px 8px rgba(28,58,94,0.25). Border-radius: 14px 14px 4px 14px.",
+            "Font: Instrument Sans 13px line-height 1.55.",
+            "Time: JetBrains Mono 10px subtle, margin-top 4px.",
+            "Max-width 66%."
+          ]
+        },
+        {
+          "task": "VoiceMessageBubble",
+          "instructions": [
+            "Same bubble alignment as text. Waveform: 14 bars, 3px wide, border-radius 2px, navy-md to slate gradient. Play/pause btn-soft btn-icon.",
+            "Progress bar 3px height bg-hairline, fill bg-navy-md.",
+            "Duration: JetBrains Mono 10px muted."
+          ]
+        },
+        {
+          "task": "Message composer",
+          "instructions": [
+            "Padding 14px 18px, border-top hairline-2, bg-surface.",
+            "Textarea: bg-base border hairline border-radius (12px), placeholder 'Write a message…', subtle color.",
+            "Voice button: btn-ghost btn-icon with mic icon.",
+            "Send: btn-primary btn-sm label 'Send'."
+          ]
+        },
+        {
+          "task": "Admin messages (AdminConversationList + AdminConversationThread + AdminMessageBubble)",
+          "instructions": [
+            "Identical styling to driver messages. Reuse the same CSS classes and components.",
+            "The only visual difference: AdminConversationList shows a 'Admin' badge-navy next to the user's own name in the header.",
+            "AdminConversationThread header shows driver name + tag + badge-online or badge-offline status."
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-06",
+      "name": "Call Room Agent",
+      "priority": 6,
+      "title": "Restyle call room, IncomingCallModal, ActiveCallBadge for both driver and admin",
+      "description": "The call room is the most emotionally charged surface. Make it calm, premium, and focused.",
+      "files_to_modify": [
+        "app/(protected)/calls/[roomName]/page.tsx",
+        "app/(admin)/admin/calls/[roomName]/page.tsx",
+        "components/calls/IncomingCallModal.tsx",
+        "components/calls/CallControls.tsx",
+        "components/calls/ActiveCallBadge.tsx",
+        "components/calls/CallButton.tsx"
+      ],
+      "new_files_to_create": [
+        "components/calls/CallRoomView.tsx"
+      ],
+      "tasks": [
+        {
+          "task": "CREATE components/calls/CallRoomView.tsx (shared by both call room pages)",
+          "instructions": [
+            "Max-width 440px, margin auto, text-center.",
+            "Top badge: 'SECURE CALL · E2E ENCRYPTED' — bg-navy-lt, text-navy-md, font-mono 11px weight 600 letter-spacing 0.06em. With 5px sage-md live dot animate-live-pulse.",
+            "Ring system: 3 concentric divs all starting 164x164px, border 1.5px navy-md. animate-ring-expand at delays 0s/0.9s/1.8s.",
+            "Center avatar: 116px circle bg-navy-lt border 3px rgba(28,58,94,0.15), shadow-lg. Bricolage Grotesque 38px weight 700 navy.",
+            "Name: Bricolage Grotesque 22px weight 700, letter-spacing -0.03em.",
+            "Tag: JetBrains Mono 12px muted.",
+            "Timer: JetBrains Mono 13px slate.",
+            "Waveform: 14 bars 3px wide, border-radius 2px, linear-gradient from navy-md to slate. Heights animated via useEffect/setInterval using Math.abs(Math.sin(tick * 0.25 + i * 0.55)) * 26 + 12.",
+            "Controls: 4 buttons in a row — mute, camera, end, speaker. Each 56x56 circle. Mute/cam/spk: bg-base-2 border hairline shadow-xs. End: bg-terra shadow 0 4px 16px rgba(184,80,57,0.35). Label below each button 10px subtle.",
+            "Both /calls/[roomName]/page.tsx and /admin/calls/[roomName]/page.tsx render <CallRoomView> with different onDisconnect destinations (driver→/dashboard, admin→/admin)."
+          ]
+        },
+        {
+          "task": "IncomingCallModal",
+          "instructions": [
+            "Full-screen overlay: bg rgba(247,245,241,0.95) backdrop-blur(20px) z-50.",
+            "Center card: bg-surface border hairline border-radius-2xl (24px) shadow-lg padding 28px, max-width 360px.",
+            "Label: 'Incoming Video Call' font-mono 11px muted letter-spacing 0.08em uppercase.",
+            "Caller: avatar 44px + online dot + name Bricolage Grotesque 16px + tag font-mono 11px muted.",
+            "Buttons: Decline btn-terra flex-1 + Accept btn-sage flex-1. Gap 12px.",
+            "Entrance animation: Framer Motion scale 0.95→1 + opacity 0→1, spring stiffness 400 damping 30."
+          ]
+        },
+        {
+          "task": "ActiveCallBadge",
+          "instructions": [
+            "Fixed bottom-right (above BottomNav on mobile: bottom-20 md:bottom-4), right-4.",
+            "bg-surface border hairline shadow-lg border-radius-xl (20px) padding 12px 16px.",
+            "Left: animated sage live-dot + caller name fw-600 fs-13 + timer font-mono 11px muted.",
+            "Right: green 'Return' btn-sage btn-sm + red 'End' btn-terra btn-sm.",
+            "Entrance: Framer Motion translateY 100%→0 + opacity, spring."
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-07",
+      "name": "Admin Dashboard Agent",
+      "priority": 7,
+      "title": "Restyle all admin pages: Dashboard, Drivers, SOS, Messages, Calls",
+      "description": "Apply the design system to every page in app/(admin)/. The admin interface uses the same warm linen palette as the driver app — NOT a dark theme. Consistent, cohesive product.",
+      "files_to_modify": [
+        "app/(admin)/admin/page.tsx",
+        "app/(admin)/admin/drivers/page.tsx",
+        "app/(admin)/admin/sos/page.tsx",
+        "app/(admin)/admin/calls/page.tsx",
+        "components/admin/StatsBar.tsx",
+        "components/admin/FleetMap.tsx",
+        "components/admin/SosPanel.tsx",
+        "components/admin/SosAlertCard.tsx",
+        "components/admin/DriverTable.tsx",
+        "components/admin/AdminDriverCard.tsx",
+        "components/admin/CallHistoryTable.tsx"
+      ],
+      "tasks": [
+        {
+          "task": "Admin home layout",
+          "instructions": [
+            "PageHeader: eyebrow 'Fleet Management', title dynamic greeting ('Good morning, Admin'), subtitle with date + driver count + alert count.",
+            "StatsBar: 4-column grid using StatCard component. Icons: 🚛 (sage accent), 🚨 (terra accent), 📞 (slate accent), ⚡ (honey accent).",
+            "FleetMap + SosPanelSidebar: flex row. Map flex-1. Sidebar width 264px.",
+            "All sections with SectionTitle component."
+          ]
+        },
+        {
+          "task": "FleetMap",
+          "instructions": [
+            "Map canvas: bg #E8ECF3 (soft blue-grey). Grid: rgba(28,58,94,0.04) lines.",
+            "Roads: rgba(255,255,255,0.8) bars.",
+            "City blocks: rgba(28,58,94,0.07) rounded rectangles.",
+            "Driver pins: 12px circle, border 2.5px white, semantic color fill, shadow 0 2px 8px rgba(28,58,94,0.3).",
+            "SOS pins: add animate-ring-expand ring in terra color.",
+            "Pin labels: Instrument Sans 9px weight 600, bg rgba(255,255,255,0.92), border-radius 4px, border 1px rgba(28,58,94,0.08), shadow-xs.",
+            "Map bottom bar: bg rgba(255,255,255,0.9) backdrop-blur, border-top hairline. Legend dots + 'Updated X ago' in font-mono 10px.",
+            "Driver popup: bg surface/97, border hairline, border-radius-lg (16px), shadow-lg. Avatar + name + tag + route + status badge + 3 action icon buttons.",
+            "Driver count overlay bottom-left: bg rgba(247,245,241,0.90) backdrop-blur border hairline border-radius-lg."
+          ]
+        },
+        {
+          "task": "SosPanel",
+          "instructions": [
+            "SOS alert card: border rgba(184,80,57,0.2), gradient bg linear-gradient(135deg, rgba(184,80,57,0.04), surface). Shadow 0 2px 8px rgba(184,80,57,0.08). Hover shadow stronger.",
+            "SOS pulse ring: 10px circle bg-terra, box-shadow animate-sos-beat.",
+            "Driver name fw-600 fs-13, tag font-mono fs-10 muted, location fs-11 muted, coords font-mono fs-10 subtle.",
+            "Action buttons: 'View Map' btn-soft btn-sm flex-1, 'Resolve' btn-ghost btn-sm.",
+            "Empty state: 🛡️ emoji + 'No active SOS alerts' fw-600 fs-12 muted + 'Fleet is operating normally' fs-11 subtle.",
+            "Quick dispatch section below separator: driver rows with phone + message ghost icon buttons."
+          ]
+        },
+        {
+          "task": "DriverTable",
+          "instructions": [
+            "Search input + status filter pills (All/Online/Offline). Active pill: bg-navy-lt text-navy fw-600. Inactive: bg-hairline-2 text-muted.",
+            "Table: bg-surface border hairline border-radius-lg shadow-sm overflow-hidden.",
+            "Header row: bg-base fs-11 text-muted fw-600 uppercase letter-spacing 0.06em font-mono. Border-bottom hairline.",
+            "Body row: hover bg-base-2. Border-bottom hairline-2.",
+            "Avatar 38px + online status dot.",
+            "Name: Instrument Sans 14px fw-600 letter-spacing -0.01em.",
+            "Tag: font-mono 11px muted.",
+            "Status badge using Badge component.",
+            "Last seen: font-mono 11px subtle.",
+            "Actions: ghost icon buttons (voice 📞, video 📹, message 💬) — show only on row hover.",
+            "Pagination: 'X–Y of Z' font-mono 11px + Previous/Next btn-ghost btn-sm.",
+            "Loading: skeleton rows animate-pulse bg-base-2 height 52px."
+          ]
+        },
+        {
+          "task": "CallHistoryTable",
+          "instructions": [
+            "Same table pattern as DriverTable.",
+            "Call type: voice badge (bg-slate-lt text-slate) or video badge (bg-navy-lt text-navy-md).",
+            "Status badge: ongoing (badge-call), completed (badge-online), missed (badge-idle), declined (badge-offline).",
+            "Duration: font-mono 12px.",
+            "Caller/callee: avatar 32px + name."
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-08",
+      "name": "Auth Pages Agent",
+      "priority": 8,
+      "title": "Restyle Login and Register pages with role-selection UI",
+      "description": "Auth pages are the first thing every user sees. Make them feel premium, warm, and trustworthy. Keep them centered, focused, and calm.",
+      "files_to_modify": [
+        "app/(auth)/login/page.tsx",
+        "app/(auth)/register/page.tsx"
+      ],
+      "tasks": [
+        {
+          "task": "Shared auth page layout",
+          "instructions": [
+            "Full viewport height, flex items-center justify-center, bg-base.",
+            "Optional: subtle radial gradient background pattern — radial-gradient(ellipse 80% 60% at 50% 30%, rgba(28,58,94,0.04) 0%, transparent 70%) over the base color.",
+            "Card: bg-surface border hairline border-radius-2xl (24px) shadow-lg padding 36px, max-width 420px, width full.",
+            "Top: 🚛 emoji 36px + 'TruckNet' font-mono 11px text-navy letter-spacing 0.12em uppercase. Centered."
+          ]
+        },
+        {
+          "task": "Login page",
+          "instructions": [
+            "Title: 'Welcome back' Bricolage Grotesque 22px weight 700 letter-spacing -0.03em.",
+            "Subtitle: 'Sign in to your TruckNet account' 13px muted.",
+            "Inputs: Email and Password using field-input pattern from SA-02.",
+            "Submit: btn-primary full-width padding 11px 20px font-size 14px label 'Sign In →'.",
+            "Footer note: centered 13px subtle 'Admins are automatically redirected to Fleet Dashboard'.",
+            "Divider + 'Create new account' btn-ghost full-width below.",
+            "Form validation errors: bg-terra-lt border rgba(184,80,57,0.2) border-radius (12px) padding 10px 14px text-terra fs-13 margin-bottom 16px."
+          ]
+        },
+        {
+          "task": "Register page",
+          "instructions": [
+            "Title: 'Join TruckNet'. Subtitle: 'Choose your account type to get started'.",
+            "Role selector: 2-column grid. Each card: padding 16px, border-radius (12px), border 1.5px hairline, bg-base, cursor pointer. Hover: border rgba(28,58,94,0.25) bg-navy-pale. Selected: border-navy-md bg-navy-lt box-shadow 0 0 0 3px rgba(28,58,94,0.08). Icon 26px emoji. Label Instrument Sans 13px fw-600. Desc 11px muted. Transition all 0.2s.",
+            "Fields: Full Name, Email, Password using field-input pattern.",
+            "Admin Invite Code field: only visible when 'Fleet Admin' is selected. Animate via max-height + opacity slide: max-height 0→90px, opacity 0→1, duration 0.35s cubic-bezier(0.4,0,0.2,1). Field border-color rgba(201,138,46,0.3) bg-honey-lt. Helper text below: 11px honey '🔒 Required to register as Fleet Admin'.",
+            "Submit: btn-primary full-width label dynamically 'Create Driver Account →' or 'Create Admin Account →'.",
+            "Error handling: same terra error box as login."
+          ]
+        }
+      ]
+    }
+  ],
+
+  "cross_cutting_rules": {
+    "title": "Rules every subagent must follow without exception",
+    "rules": [
+      "NEVER use Inter, Roboto, system-ui, or any font other than Bricolage Grotesque (display), Instrument Sans (body), JetBrains Mono (data/mono). These three fonts are non-negotiable.",
+      "NEVER use pure black shadows rgba(0,0,0,...). All shadows must use rgba(28,58,94,...) — the navy tint.",
+      "NEVER use a dark background on any page or component. The entire app uses the warm linen palette. The previous dark theme is completely replaced.",
+      "NEVER use purple, violet, or generic blue (#3B82F6) as accent colors. Use only the defined palette: navy, sage, terra, honey, slate.",
+      "ALL border-radius values must come from the scale: 8px, 12px, 16px, 20px, 24px. Never use odd values like 6px or 10px.",
+      "ALL spacing must follow the 8px grid: 4, 8, 12, 16, 20, 24, 28, 32, 40, 48px. No 15px, 10px, 25px, etc.",
+      "Framer Motion is already installed. Use it for: page entrances, list item staggering, modal scales, sidebar slides, active indicator transitions (layoutId).",
+      "Sonner toasts must use the new design: surface bg, hairline border, navy-tinted shadow, Instrument Sans font, semantic icon colors.",
+      "Every destructive action (SOS resolve, decline call, reject friend) must use terra color. Every success/confirmation uses sage.",
+      "GPS coordinates, driver tags, timestamps, call duration, and latency values always use JetBrains Mono. Never Instrument Sans for these.",
+      "Agents may add new polish such as: skeleton loading states, empty state illustrations, hover tooltips, micro-animations on click — as long as they follow the design tokens and do not change functionality."
+    ]
+  },
+
+  "agent_may_add": {
+    "description": "The agent is encouraged to add these enhancements if they fit naturally and follow the design system",
+    "suggestions": [
+      "Skeleton loading states for every table and list — use animate-pulse bg-base-2 rounded shapes",
+      "Empty state components with emoji illustration + title + subtitle for: no nearby drivers, no messages, no SOS alerts, no call history",
+      "Hover tooltips on icon-only buttons (position absolute, bg-ink rounded-sm px-2 py-1 text-white fs-11)",
+      "Smooth number count-up animation on StatCard values using a simple useEffect counter",
+      "Subtle noise texture overlay on the linen background: a 0.03 opacity SVG noise filter on the body adds depth",
+      "Focus-visible ring: 3px solid rgba(28,58,94,0.5) offset 2px on all interactive elements for accessibility",
+      "Page transition: AnimatePresence on the route group layout for cross-page transitions",
+      "Pull-to-refresh gesture indicator on mobile map and dashboard"
+    ]
+  }
+}

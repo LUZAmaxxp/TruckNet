@@ -6,9 +6,7 @@ import { Search, MessageSquare } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
+
 import { useSocket } from "@/hooks/useSocket";
 import type { Friend } from "@/components/messages/ChatPanel";
 
@@ -222,34 +220,59 @@ export function FriendsSidebar({ activeFriendId, onSelectFriend, autoOpenId }: F
   }, [friends, debouncedSearch]);
 
   return (
-    <div className="flex h-full flex-col bg-muted/40 border-r border-border overflow-hidden" role="navigation" aria-label="Friends list">
+    <div
+      className="flex h-full flex-col overflow-hidden"
+      style={{
+        width: 276,
+        background: "var(--surface-2)",
+        borderRight: "1px solid var(--hairline)",
+      }}
+      role="navigation"
+      aria-label="Friends list"
+    >
       {/* ── Header ── */}
       <div className="px-4 pt-4 pb-3">
-        <h2 className="mb-3 text-lg font-semibold">Messages</h2>
+        <h2
+          className="font-display text-[16px] font-bold tracking-[-0.02em] mb-3"
+          style={{ color: "var(--ink)" }}
+        >
+          Conversations
+        </h2>
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Search
+            className="absolute left-[10px] top-1/2 h-4 w-4 -translate-y-1/2 pointer-events-none"
+            style={{ color: "var(--muted)" }}
+          />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search friends…"
-            className="pl-9 rounded-xl"
+            placeholder="Search…"
+            className="pl-9"
             aria-label="Search friends"
           />
         </div>
       </div>
 
-      <Separator />
+      <div className="h-px w-full" style={{ background: "var(--hairline)" }} />
 
       {/* ── Friends list ── */}
       <ScrollArea className="flex-1">
         {loading ? (
-          <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-            Loading friends…
+          <div
+            className="flex items-center justify-center py-12 text-[13px]"
+            style={{ color: "var(--muted)" }}
+          >
+            Loading…
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
-            <MessageSquare className="h-8 w-8 opacity-30" />
-            <p className="text-sm">{search ? "No results" : "No friends yet"}</p>
+          <div className="flex flex-col items-center justify-center gap-2 py-12">
+            <MessageSquare
+              className="h-8 w-8 opacity-30"
+              style={{ color: "var(--muted)" }}
+            />
+            <p className="text-[13px]" style={{ color: "var(--muted)" }}>
+              {search ? "No results" : "No friends yet"}
+            </p>
           </div>
         ) : (
           <motion.ul
@@ -270,8 +293,7 @@ export function FriendsSidebar({ activeFriendId, onSelectFriend, autoOpenId }: F
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 4 }}
-                    transition={{ duration: 0.15 }}
-                    whileHover={{ scale: 1.02 }}
+                    transition={{ duration: 0.18 }}
                     role="option"
                     aria-selected={isActive}
                     tabIndex={0}
@@ -279,56 +301,75 @@ export function FriendsSidebar({ activeFriendId, onSelectFriend, autoOpenId }: F
                       if (e.key === "Enter" || e.key === " ") onSelectFriend(f);
                     }}
                     onClick={() => onSelectFriend(f)}
-                    className={cn(
-                      "relative mx-2 flex min-h-[48px] cursor-pointer items-center gap-3 rounded-xl px-3 py-3 transition-colors",
-                      isActive
-                        ? "bg-primary/10 text-foreground"
-                        : "hover:bg-accent/60"
-                    )}
+                    className="relative mx-2 flex cursor-pointer items-center gap-[10px] rounded-[12px] px-[10px] py-[10px] transition-colors duration-[180ms]"
+                    style={{ background: isActive ? "var(--navy-lt)" : "transparent" }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) e.currentTarget.style.background = "var(--base)";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) e.currentTarget.style.background = "transparent";
+                    }}
                   >
-                    {/* Active left-border indicator */}
+                    {/* Active left bar */}
                     {isActive && (
                       <motion.span
-                        layoutId="active-indicator"
-                        className="absolute left-0 top-2 bottom-2 w-1 rounded-full bg-primary"
-                        transition={{ type: "spring", damping: 25, stiffness: 400 }}
+                        layoutId="active-conv-indicator"
+                        className="absolute left-0 top-[6px] bottom-[6px] w-[2px] rounded-full"
+                        style={{ background: "var(--navy)" }}
+                        transition={{ type: "spring", stiffness: 400, damping: 30 }}
                       />
                     )}
 
                     {/* Avatar + online dot */}
                     <div className="relative shrink-0">
-                      <Avatar className="h-10 w-10">
+                      <Avatar className="h-[38px] w-[38px]">
                         {f.profileImageUrl && (
                           <AvatarImage src={f.profileImageUrl} alt={f.name} />
                         )}
                         <AvatarFallback>{initials(f.name)}</AvatarFallback>
                       </Avatar>
-                      <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-background" />
+                      <span
+                        className="absolute bottom-0 right-0 h-[9px] w-[9px] rounded-full border-2"
+                        style={{
+                          background: "var(--sage-md)",
+                          borderColor: "var(--surface-2)",
+                        }}
+                      />
                     </div>
 
                     {/* Text info */}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-1">
-                        <p className="truncate text-sm font-medium leading-tight">
+                        <p
+                          className="truncate font-body text-[13px] font-semibold tracking-[-0.01em]"
+                          style={{ color: "var(--ink)" }}
+                        >
                           {f.name}
                         </p>
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                        <span
+                          className="shrink-0 font-mono text-[10px]"
+                          style={{ color: "var(--subtle)" }}
+                        >
                           {formatRelativeTime(f.lastMessageAt)}
                         </span>
                       </div>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      <p
+                        className="mt-0.5 truncate text-[12px]"
+                        style={{ color: "var(--muted)", maxWidth: 160 }}
+                      >
                         {f.lastMessage ?? f.tag}
                       </p>
                     </div>
 
                     {/* Unread badge */}
                     {f.unreadCount > 0 && (
-                      <Badge
-                        className="ml-1 h-5 min-w-[20px] shrink-0 rounded-full px-1.5 text-[10px]"
+                      <span
+                        className="ml-1 inline-flex min-w-[20px] shrink-0 items-center justify-center rounded-[10px] px-[6px] py-[2px] font-mono text-[10px] font-bold"
+                        style={{ background: "var(--navy)", color: "white" }}
                         aria-label={`${f.unreadCount} unread messages`}
                       >
                         {f.unreadCount > 99 ? "99+" : f.unreadCount}
-                      </Badge>
+                      </span>
                     )}
                   </motion.li>
                 );

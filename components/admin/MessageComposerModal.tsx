@@ -84,15 +84,26 @@ export function MessageComposerModal({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+        className="fixed inset-0 z-40 backdrop-blur-sm"
+        style={{ background: "rgba(28,58,94,0.4)" }}
         onClick={onClose}
       />
 
-      {/* Modal */}
-      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl">
+      <div
+        className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 p-5"
+        style={{
+          borderRadius: "var(--radius-2xl)",
+          border: "1px solid var(--hairline)",
+          background: "var(--surface)",
+          boxShadow: "var(--shadow-lg)",
+        }}
+      >
         {/* Header */}
         <div className="flex items-center gap-3 mb-4">
-          <div className="h-9 w-9 overflow-hidden rounded-full bg-gray-700 flex items-center justify-center text-sm font-bold text-gray-300 shrink-0">
+          <div
+            className="h-9 w-9 overflow-hidden rounded-full flex items-center justify-center font-display text-[13px] font-bold shrink-0"
+            style={{ background: "var(--navy-lt)", color: "var(--navy)" }}
+          >
             {recipient.avatar ? (
               <img src={recipient.avatar} alt={recipient.name} className="h-full w-full object-cover" />
             ) : (
@@ -100,12 +111,15 @@ export function MessageComposerModal({
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white">Message {recipient.name}</p>
-            <p className="text-xs text-gray-500">Sent as admin · visible in their messages</p>
+            <p className="font-body text-[13px] font-semibold" style={{ color: "var(--ink)" }}>Message {recipient.name}</p>
+            <p className="font-mono text-[10px]" style={{ color: "var(--subtle)" }}>Sent as admin · visible in their messages</p>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-700 hover:text-white transition-colors"
+            className="rounded-[8px] p-1.5 transition-colors"
+            style={{ color: "var(--muted)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--hairline-2)"; e.currentTarget.style.color = "var(--ink)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
           >
             <X className="h-4 w-4" />
           </button>
@@ -120,32 +134,43 @@ export function MessageComposerModal({
           placeholder="Type your message…"
           maxLength={MAX_CHARS}
           rows={4}
-          className="w-full resize-none rounded-xl border border-gray-700 bg-gray-800 p-3 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none transition-colors"
+          className="w-full resize-none p-3 font-body text-[13px] focus:outline-none transition-colors"
+          style={{
+            borderRadius: "var(--radius-sm)",
+            border: "1.5px solid var(--hairline)",
+            background: "var(--base)",
+            color: "var(--ink)",
+          }}
         />
 
         {/* Footer */}
         <div className="flex items-center justify-between mt-3">
-          <span className={`text-xs ${remaining < 50 ? "text-yellow-400" : "text-gray-500"}`}>
+          <span
+            className="font-mono text-[10px]"
+            style={{ color: remaining < 50 ? "var(--honey)" : "var(--subtle)" }}
+          >
             {remaining} characters remaining
           </span>
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="rounded-lg px-3 py-2 text-sm text-gray-400 hover:bg-gray-700 transition-colors"
+              className="rounded-[8px] px-3 py-2 font-body text-[12px] font-semibold transition-colors"
+              style={{ color: "var(--muted)", border: "1px solid var(--hairline)" }}
             >
               Cancel
             </button>
             <button
               onClick={() => void handleSend()}
               disabled={!canSend}
-              className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 rounded-[8px] px-4 py-2 font-body text-[12px] font-semibold disabled:opacity-40 transition-colors"
+              style={{ background: "var(--navy)", color: "white" }}
             >
               <Send className="h-3.5 w-3.5" />
               {sending ? "Sending…" : "Send"}
             </button>
           </div>
         </div>
-        <p className="text-[10px] text-gray-600 mt-2">⌘ Enter to send</p>
+        <p className="font-mono text-[10px] mt-2" style={{ color: "var(--subtle)" }}>⌘ Enter to send</p>
       </div>
     </>
   );

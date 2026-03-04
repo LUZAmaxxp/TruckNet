@@ -6,6 +6,9 @@ import { useEffect, useRef, useMemo, memo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import type { NearbyDriverEntry } from "@/sockets/types";
+import { RoutePolyline } from "./RoutePolyline";
+import { DestinationPin } from "./DestinationPin";
+import type { ActiveRoute } from "@/schemas/route.schema";
 
 // ---------------------------------------------------------------------------
 // Custom DivIcon helpers — avoids the broken default Leaflet icon in Next.js
@@ -102,6 +105,10 @@ export interface DriverMapProps {
   selectedDriverId: string | null;
   onSelectDriver: (driver: DriverMapEntry) => void;
   onSendMessage: (driverId: string) => void;
+  /** Active route for the current driver (null = no active route) */
+  activeRoute?: ActiveRoute | null;
+  /** Callback to clear the active route (from DestinationPin popup) */
+  onClearRoute?: () => void;
 }
 
 export const DriverMap = memo(function DriverMap({
@@ -110,6 +117,8 @@ export const DriverMap = memo(function DriverMap({
   selectedDriverId,
   onSelectDriver,
   onSendMessage,
+  activeRoute,
+  onClearRoute,
 }: DriverMapProps) {
   // Default center: geographic centroid if no location yet
   const center: [number, number] = currentDriver
@@ -135,6 +144,23 @@ export const DriverMap = memo(function DriverMap({
 
       {/* Recenter once we have real coords */}
       {currentDriver && <Recenter lat={currentDriver.lat} lng={currentDriver.lng} />}
+
+      {/* Active route overlay */}
+      {activeRoute && activeRoute.routeGeometry.length >= 2 && (
+        <RoutePolyline
+          coordinates={activeRoute.routeGeometry}
+          color="var(--navy, #1e3a5f)"
+          fitBounds
+        />
+      )}
+      {activeRoute && (
+        <DestinationPin
+          lat={activeRoute.destinationLat}
+          lng={activeRoute.destinationLng}
+          label={activeRoute.destinationLabel}
+          onClear={onClearRoute}
+        />
+      )}
 
       {/* Current user marker */}
       {currentDriver && (

@@ -3,33 +3,45 @@
 import { Users, Wifi, AlertTriangle, PhoneCall, MessageSquare, PhoneMissed } from "lucide-react";
 import type { AdminStats } from "@/app/(admin)/admin/page";
 
-const SKELETON = "h-4 w-20 rounded bg-gray-700 animate-pulse";
+const SKELETON = "h-4 w-20 rounded animate-pulse" ;
 
 function StatCard({
   label,
   value,
   icon: Icon,
-  color,
+  accentColor,
   loading,
 }: {
   label: string;
   value: number | undefined;
   icon: React.ElementType;
-  color: string;
+  accentColor: string;
   loading: boolean;
 }) {
   return (
-    <div className="flex flex-1 items-center gap-3 rounded-xl border border-gray-800 bg-gray-900 px-4 py-3">
-      <div className={`rounded-lg p-2 ${color}`}>
+    <div
+      className="flex flex-1 items-center gap-3 rounded-[12px] px-4 py-3 transition-shadow duration-200 hover:shadow-md"
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--hairline)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
+      <div
+        className="rounded-[8px] p-2 shrink-0"
+        style={{ background: accentColor + "20", color: accentColor }}
+      >
         <Icon className="h-4 w-4" />
       </div>
       <div>
         {loading || value === undefined ? (
-          <div className={SKELETON} />
+          <div className={SKELETON} style={{ background: "var(--hairline-2)" }} />
         ) : (
-          <p className="text-xl font-bold text-white">{value.toLocaleString()}</p>
+          <p className="font-display text-[20px] font-bold tracking-[-0.03em]" style={{ color: "var(--ink)" }}>
+            {value.toLocaleString()}
+          </p>
         )}
-        <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+        <p className="font-body text-[11px] mt-0.5" style={{ color: "var(--subtle)" }}>{label}</p>
       </div>
     </div>
   );
@@ -48,12 +60,12 @@ export function StatsBar({ stats }: StatsBarProps) {
 
   return (
     <div className="flex gap-3 flex-wrap">
-      <StatCard label="Total Drivers" value={stats?.totalDrivers} icon={Users} color="bg-blue-600/20 text-blue-400" loading={loading} />
-      <StatCard label="Online Now" value={stats?.onlineDrivers} icon={Wifi} color="bg-green-600/20 text-green-400" loading={loading} />
-      <StatCard label="Active SOS" value={stats?.activeSosAlerts} icon={AlertTriangle} color="bg-red-600/20 text-red-400" loading={loading} />
-      <StatCard label="Ongoing Calls" value={stats?.ongoingCalls} icon={PhoneCall} color="bg-purple-600/20 text-purple-400" loading={loading} />
-      <StatCard label="Calls Today" value={stats?.totalCallsToday} icon={PhoneMissed} color="bg-yellow-600/20 text-yellow-400" loading={loading} />
-      <StatCard label="Messages Today" value={stats?.totalMessagesToday} icon={MessageSquare} color="bg-cyan-600/20 text-cyan-400" loading={loading} />
+      <StatCard label="Total Drivers" value={stats?.totalDrivers} icon={Users} accentColor="var(--navy)" loading={loading} />
+      <StatCard label="Online Now" value={stats?.onlineDrivers} icon={Wifi} accentColor="var(--sage)" loading={loading} />
+      <StatCard label="Active SOS" value={stats?.activeSosAlerts} icon={AlertTriangle} accentColor="var(--terra)" loading={loading} />
+      <StatCard label="Ongoing Calls" value={stats?.ongoingCalls} icon={PhoneCall} accentColor="var(--slate)" loading={loading} />
+      <StatCard label="Calls Today" value={stats?.totalCallsToday} icon={PhoneMissed} accentColor="var(--honey)" loading={loading} />
+      <StatCard label="Messages Today" value={stats?.totalMessagesToday} icon={MessageSquare} accentColor="var(--slate)" loading={loading} />
     </div>
   );
 }

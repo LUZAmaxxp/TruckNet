@@ -1,0 +1,534 @@
+{
+  "feature": {
+    "id": "FEAT-006",
+    "project": "TruckNet",
+    "date": "2026-03-04",
+    "title": "Driver Route Planning & Live Trajectory Visualization",
+    "description": "Before going on route, a driver sets their destination. The map computes and displays the optimized road trajectory using OSRM (free, no API key). The admin can select any driver on the FleetMap and view their active route polyline, destination marker, and ETA in real time.",
+    "priority": "high"
+  },
+
+  "technology_decisions": {
+    "geocoding": {
+      "service": "Nominatim (OpenStreetMap)",
+      "endpoint": "https://nominatim.openstreetmap.org/search?q={query}&format=json&limit=5",
+      "why": "100% free, no API key, already consistent with the OpenStreetMap tile provider used in Leaflet maps",
+      "rate_limit": "1 request/second — debounce input by 500ms before firing",
+      "required_header": "User-Agent: TruckNet/1.0 (contact@yourdomain.com)"
+    },
+    "routing": {
+      "service": "OSRM Public Demo Server (Open Source Routing Machine)",
+      "endpoint": "https://router.project-osrm.org/route/v1/driving/{lng1},{lat1};{lng2},{lat2}?overview=full&geometries=geojson&steps=false",
+      "why": "Free, no API key, returns GeoJSON polyline + duration + distance. Consistent with open-source philosophy of the stack.",
+      "response_fields_used": "routes[0].geometry (GeoJSON LineString), routes[0].duration (seconds), routes[0].distance (meters)",
+      "production_note": "For production at scale (10k+ users), self-host OSRM via Docker or upgrade to Mapbox Directions API. Interface is identical — only the base URL changes."
+    },
+    "map_rendering": {
+      "library": "Leaflet + react-leaflet (already installed)",
+      "polyline": "react-leaflet <Polyline> component with GeoJSON coordinates array",
+      "destination_marker": "Custom Leaflet divIcon with terracotta flag pin",
+      "no_new_packages": true
+    }
+  },
+
+  "database_changes": {
+    "new_table": {
+      "name": "driver_routes",
+      "drizzle_file": "db/schema.ts",
+      "columns": [
+        { "name": "id",                "type": "uuid PK",                     "notes": "default random" },
+        { "name": "driver_id",         "type": "uuid FK → users.id CASCADE",  "notes": "indexed, one active route per driver" },
+        { "name": "origin_lat",        "type": "double precision NOT NULL",    "notes": "departure point latitude" },
+        { "name": "origin_lng",        "type": "double precision NOT NULL",    "notes": "departure point longitude" },
+        { "name": "destination_label", "type": "text NOT NULL",                "notes": "human-readable destination name e.g. 'Lyon Central Depot'" },
+        { "name": "destination_lat",   "type": "double precision NOT NULL",    "notes": "" },
+        { "name": "destination_lng",   "type": "double precision NOT NULL",    "notes": "" },
+        { "name": "route_geometry",    "type": "jsonb NOT NULL",               "notes": "GeoJSON LineString geometry from OSRM — { type: 'LineString', coordinates: [[lng,lat],...] }" },
+        { "name": "distance_meters",   "type": "integer NOT NULL",             "notes": "total route distance in meters" },
+        { "name": "duration_seconds",  "type": "integer NOT NULL",             "notes": "OSRM estimated travel time in seconds at departure" },
+        { "name": "eta",               "type": "timestamptz NOT NULL",         "notes": "computed as created_at + duration_seconds. Refreshed on significant GPS deviation." },
+        { "name": "status",            "type": "enum NOT NULL default active", "notes": "active | completed | cancelled" },
+        { "name": "created_at",        "type": "timestamptz NOT NULL",         "notes": "" },
+        { "name": "updated_at",        "type": "timestamptz NOT NULL",         "notes": "" }
+      ],
+      "indexes": ["driver_id", "(driver_id, status)", "updated_at"],
+      "unique_constraint": "(driver_id) WHERE status = 'active' — only one active route per driver at a time (partial unique index)",
+      "migration_command": "npm run db:generate && npm run db:migrate"
+    }
+  },
+
+  "new_api_routes": [
+    {
+      "method": "POST",
+      "path": "/api/drivers/route",
+      "auth": true,
+      "role": "driver",
+      "description": "Driver sets a new active route. Calls OSRM server-side to compute the trajectory, persists to driver_routes, publishes Ably event.",
+      "request_body": {
+        "destinationLabel": "string — human-readable name of destination",
+        "destinationLat": "number",
+        "destinationLng": "number"
+      },
+      "server_actions": [
+        "1. Validate body with Zod RouteSetSchema (destinationLabel min 2 chars, lat/lng range checks)",
+        "2. Call requireSession() to get driverId",
+        "3. GET current driver GPS from driver_locations table (must have a location — return 422 if null)",
+        "4. Fetch OSRM route server-side: GET https://router.project-osrm.org/route/v1/driving/{originLng},{originLat};{destLng},{destLat}?overview=full&geometries=geojson&steps=false with User-Agent header",
+        "5. Parse response: extract geometry, duration, distance from routes[0]",
+        "6. Upsert driver_routes: UPDATE existing active route to status='cancelled' if exists, then INSERT new row with status='active'",
+        "7. Compute eta = new Date(Date.now() + duration_seconds * 1000)",
+        "8. ablyPublish('fleet:locations', 'driver_route_set', { driverId, driverName, destinationLabel, destinationLat, destinationLng, eta, distanceMeters, durationSeconds, routeGeometry })",
+        "9. Return { routeId, eta, distanceMeters, durationSeconds, routeGeometry }"
+      ],
+      "error_cases": [
+        "422 if driver has no GPS location yet — they must broadcast location first",
+        "502 if OSRM is unreachable — return error 'Could not compute route, please try again'",
+        "400 if OSRM returns no routes (unreachable destination)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/drivers/route",
+      "auth": true,
+      "role": "driver",
+      "description": "Get the current driver's active route. Used by the map page on mount to restore state.",
+      "response": "{ route: DriverRoute | null }"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/drivers/route",
+      "auth": true,
+      "role": "driver",
+      "description": "Driver clears their active route (arrived or cancelled). Updates status to 'completed' or 'cancelled' based on query param ?reason=arrived|cancelled.",
+      "server_actions": [
+        "1. Find active route for driverId",
+        "2. UPDATE status to completed/cancelled, set updated_at",
+        "3. ablyPublish('fleet:locations', 'driver_route_cleared', { driverId, reason })",
+        "4. Return { success: true }"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/drivers/[driverId]/route",
+      "auth": true,
+      "role": "admin",
+      "description": "Admin fetches the active route for a specific driver to display on FleetMap.",
+      "server_actions": [
+        "1. requireAdminSession()",
+        "2. Query driver_routes WHERE driver_id = driverId AND status = 'active'",
+        "3. JOIN users to get driverName, profileImageUrl",
+        "4. Compute remaining_seconds = Math.max(0, Math.floor((eta - Date.now()) / 1000))",
+        "5. Return full route object including routeGeometry, eta, remainingSeconds, destinationLabel, driverName"
+      ],
+      "response": "{ route: AdminDriverRouteView | null }"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/routes/active",
+      "auth": true,
+      "role": "admin",
+      "description": "Returns a lightweight summary of all active driver routes (no geometry). Used for the admin FleetMap driver list sidebar to show which drivers have an active route.",
+      "response": "{ routes: { driverId, driverName, destinationLabel, eta, distanceMeters, status }[] }"
+    }
+  ],
+
+  "new_zod_schemas": [
+    {
+      "file": "schemas/route.schema.ts",
+      "schemas": [
+        {
+          "name": "RouteSetSchema",
+          "zod": "z.object({ destinationLabel: z.string().min(2).max(200), destinationLat: z.number().min(-90).max(90), destinationLng: z.number().min(-180).max(180) })"
+        },
+        {
+          "name": "GeocodeResultSchema",
+          "zod": "z.object({ place_id: z.number(), display_name: z.string(), lat: z.string(), lon: z.string() })"
+        }
+      ]
+    }
+  ],
+
+  "ably_new_events": {
+    "channel": "fleet:locations",
+    "new_events": [
+      {
+        "event": "driver_route_set",
+        "payload": "{ driverId, driverName, destinationLabel, destinationLat, destinationLng, eta (ISO string), distanceMeters, durationSeconds, routeGeometry (GeoJSON) }",
+        "consumers": ["Admin FleetMap — overlays route when the relevant driver is selected"]
+      },
+      {
+        "event": "driver_route_cleared",
+        "payload": "{ driverId, reason ('arrived'|'cancelled') }",
+        "consumers": ["Admin FleetMap — removes route overlay for that driver"]
+      }
+    ]
+  },
+
+  "new_env_variables": [],
+
+  "subagents": [
+
+    {
+      "id": "SA-A",
+      "name": "Backend Route Agent",
+      "priority": 1,
+      "title": "Database schema, API routes, OSRM integration, Ably events",
+      "files_to_create": [
+        "schemas/route.schema.ts",
+        "app/api/drivers/route/route.ts",
+        "app/api/admin/drivers/[driverId]/route/route.ts",
+        "app/api/admin/routes/active/route.ts",
+        "lib/osrm.ts"
+      ],
+      "files_to_modify": [
+        "db/schema.ts",
+        "app/api/drivers/location/route.ts"
+      ],
+      "tasks": [
+        {
+          "task": "CREATE lib/osrm.ts — OSRM client helper",
+          "instructions": [
+            "Export async function fetchOsrmRoute(originLat, originLng, destLat, destLng): Promise<OsrmRouteResult>",
+            "OsrmRouteResult type: { geometry: GeoJSON.LineString, distanceMeters: number, durationSeconds: number }",
+            "Construct URL: `https://router.project-osrm.org/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=false`",
+            "Fetch with headers: { 'User-Agent': 'TruckNet/1.0', 'Accept': 'application/json' }",
+            "Set fetch timeout: 8 seconds using AbortController",
+            "Parse response: if routes.length === 0 throw new Error('NO_ROUTE_FOUND')",
+            "Return routes[0].geometry, routes[0].distance, routes[0].duration",
+            "Wrap in try/catch — rethrow with typed error codes: 'OSRM_TIMEOUT', 'OSRM_UNREACHABLE', 'NO_ROUTE_FOUND'",
+            "Export a second helper: formatEta(durationSeconds: number): Date — returns new Date(Date.now() + durationSeconds * 1000)",
+            "Export formatDistance(meters: number): string — returns '0.4 km' if < 1000m, 'x.x km' if >= 1km",
+            "Export formatDuration(seconds: number): string — returns '14 min' or '1h 23min'"
+          ]
+        },
+        {
+          "task": "ADD driver_routes table to db/schema.ts",
+          "instructions": [
+            "Add routeStatusEnum = pgEnum('route_status', ['active', 'completed', 'cancelled'])",
+            "Add driverRoutes table with all columns listed in database_changes.new_table",
+            "routeGeometry column: json('route_geometry').notNull() — stores GeoJSON object directly",
+            "Add partial unique index in a separate pgIndex export: unique on driver_id WHERE status = 'active'",
+            "Run npm run db:generate && npm run db:migrate after schema change"
+          ]
+        },
+        {
+          "task": "CREATE app/api/drivers/route/route.ts",
+          "instructions": [
+            "Handle GET: requireSession, query driverRoutes WHERE driverId = session.user.id AND status='active', return route or null",
+            "Handle POST: requireSession, parse and validate body with RouteSetSchema, get driver's last GPS from driver_locations (422 if not found), call fetchOsrmRoute from lib/osrm.ts, if throws NO_ROUTE_FOUND return 400 { error: 'No route to this destination' }, if throws OSRM_TIMEOUT/UNREACHABLE return 502 { error: 'Routing service unavailable, please try again' }, on success: UPDATE existing active routes to cancelled, INSERT new driverRoutes row, ablyPublish('fleet:locations', 'driver_route_set', payload), return 201 with route data",
+            "Handle DELETE: requireSession, query param ?reason=arrived|cancelled (default cancelled), UPDATE driverRoutes SET status=reason WHERE driverId AND status=active, ablyPublish driver_route_cleared, return 200"
+          ]
+        },
+        {
+          "task": "CREATE app/api/admin/drivers/[driverId]/route/route.ts",
+          "instructions": [
+            "Handle GET: requireAdminSession(), extract driverId from params, query driverRoutes JOIN users WHERE driver_id=driverId AND status=active, compute remainingSeconds = Math.max(0, Math.floor((eta.getTime() - Date.now()) / 1000)), return full route view or null"
+          ]
+        },
+        {
+          "task": "CREATE app/api/admin/routes/active/route.ts",
+          "instructions": [
+            "Handle GET: requireAdminSession(), query all driverRoutes JOIN users WHERE status=active, return lightweight array (NO routeGeometry in this response — geometry is only fetched when admin selects a specific driver)"
+          ]
+        },
+        {
+          "task": "MODIFY app/api/drivers/location/route.ts",
+          "instructions": [
+            "After the existing GPS upsert and Ably publish, add: query driver's active route from driverRoutes",
+            "If active route exists, check if driver has arrived: haversineDistanceKm(currentLat, currentLng, route.destinationLat, route.destinationLng) < 0.3 (300m threshold)",
+            "If within 300m: auto-complete the route — UPDATE status='completed', ablyPublish driver_route_cleared { driverId, reason: 'arrived' }",
+            "This auto-arrival detection runs on every GPS update without any driver action needed"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-B",
+      "name": "Driver Map & Route UI Agent",
+      "priority": 2,
+      "title": "Route setup modal, destination search, map polyline, ETA display on driver map page",
+      "files_to_create": [
+        "components/map/RouteSetupModal.tsx",
+        "components/map/DestinationSearchInput.tsx",
+        "components/map/RoutePolyline.tsx",
+        "components/map/DestinationPin.tsx",
+        "components/map/RouteInfoBar.tsx"
+      ],
+      "files_to_modify": [
+        "app/(protected)/map/page.tsx",
+        "components/map/DriverMap.tsx"
+      ],
+      "tasks": [
+        {
+          "task": "CREATE components/map/DestinationSearchInput.tsx",
+          "instructions": [
+            "Props: onSelect(result: { label: string, lat: number, lng: number }) => void, placeholder, autoFocus",
+            "Controlled input with local query state",
+            "Debounce: useEffect with 500ms timeout before firing Nominatim fetch",
+            "Fetch: GET https://nominatim.openstreetmap.org/search?q={encodeURIComponent(query)}&format=json&limit=5&countrycodes= with User-Agent header (pass via /api/geocode proxy to avoid CORS)",
+            "Create app/api/geocode/route.ts: simple GET proxy that forwards ?q= to Nominatim with the required User-Agent header and returns results",
+            "Show dropdown results list: each result shows display_name truncated. On click: call onSelect with { label: display_name, lat: parseFloat(lat), lng: parseFloat(lon) }",
+            "Loading spinner while fetching. Empty state 'No results found'. Keyboard: ArrowUp/ArrowDown/Enter navigation.",
+            "Design: field-input style from design system, dropdown bg-surface border hairline border-radius shadow-md, result items hover bg-base, font Instrument Sans 13px"
+          ]
+        },
+        {
+          "task": "CREATE components/map/RouteSetupModal.tsx",
+          "instructions": [
+            "Props: isOpen, onClose, onRouteSet(route: ActiveRoute) => void",
+            "Framer Motion AnimatePresence: backdrop opacity 0→1 (rgba(26,26,36,0.5)), card scale 0.95→1 + opacity + translateY, spring stiffness 400 damping 30",
+            "Card: bg-surface border-radius-xl (20px) shadow-lg padding 28px max-width 440px margin auto",
+            "Header: page-eyebrow 'Set Your Route', title 'Where are you headed?'",
+            "DestinationSearchInput component inside",
+            "Preview section (shown after destination selected): card-inset showing — Destination label, Estimated distance (formatDistance), Estimated time (formatDuration), ETA time string. All values fetched client-side from a preview call to POST /api/drivers/route with a preview query param (add ?preview=true which skips DB write and just returns OSRM data)",
+            "Action buttons: Cancel (btn-ghost) + 'Start Route →' (btn-primary). Loading state on Start Route while API call pending.",
+            "Error: show terra-lt error box if route computation fails",
+            "Design follows Warm Maritime Precision: hairline borders, navy accent, Bricolage Grotesque title, Instrument Sans body"
+          ]
+        },
+        {
+          "task": "CREATE components/map/RoutePolyline.tsx",
+          "instructions": [
+            "Client component, must be inside react-leaflet <MapContainer>",
+            "Props: geometry (GeoJSON LineString — { type: 'LineString', coordinates: [[lng, lat], ...] }), color (string, default var(--navy))",
+            "Convert GeoJSON coordinates [lng, lat] to Leaflet LatLng array [lat, lng] (note coordinate reversal)",
+            "Render react-leaflet <Polyline> with: positions={latLngs}, color={color}, weight={4}, opacity={0.75}, smoothFactor={1.5}, lineCap='round', lineJoin='round'",
+            "Add a dashed inner line for contrast: second <Polyline> with weight={2}, color white, opacity={0.3}, dashArray='8 8'",
+            "On mount: use useMap() hook to fitBounds to the polyline extent with padding [40, 40]"
+          ]
+        },
+        {
+          "task": "CREATE components/map/DestinationPin.tsx",
+          "instructions": [
+            "Client component inside MapContainer",
+            "Props: lat, lng, label (destination name)",
+            "Custom Leaflet divIcon: 24x32px terra-colored flag SVG shape with a white circle at the pin point",
+            "SVG: a teardrop/balloon shape in terra color (#B85039) with a subtle white border",
+            "Render react-leaflet <Marker> at {lat, lng} with the custom icon",
+            "Render <Popup>: destination label Instrument Sans 13px fw-600, coords font-mono 10px muted below"
+          ]
+        },
+        {
+          "task": "CREATE components/map/RouteInfoBar.tsx",
+          "instructions": [
+            "Props: route (ActiveRoute), onClearRoute () => void",
+            "Floating panel — positioned absolute bottom-20 left-1/2 -translate-x-1/2 z-[1000] on the map",
+            "Design: bg-surface border hairline border-radius-lg (16px) shadow-lg padding 12px 18px",
+            "Layout: flex items-center gap 16px",
+            "Left: terra-colored flag icon + destination label fw-600 fs-13",
+            "Middle: three data pills — distance (font-mono 12px navy), duration (font-mono 12px), ETA (font-mono 12px sage if on time)",
+            "Right: 'Clear Route' btn-ghost btn-sm",
+            "Entrance: Framer Motion translateY 100% → 0 + opacity, spring"
+          ]
+        },
+        {
+          "task": "MODIFY app/(protected)/map/page.tsx",
+          "instructions": [
+            "Add activeRoute state: { geometry, destinationLat, destinationLng, destinationLabel, eta, distanceMeters, durationSeconds } | null",
+            "On mount: fetch GET /api/drivers/route to restore active route state",
+            "Add 'Set Destination' button top-right of map: btn-primary btn-sm with a flag icon. Opens RouteSetupModal.",
+            "If activeRoute exists: change button to 'On Route →' badge-navy style, clicking opens a confirmation to clear route",
+            "Pass activeRoute to DriverMap component via props",
+            "Handle RouteSetupModal.onRouteSet: set activeRoute state",
+            "Handle RouteInfoBar.onClearRoute: DELETE /api/drivers/route?reason=cancelled, clear state"
+          ]
+        },
+        {
+          "task": "MODIFY components/map/DriverMap.tsx",
+          "instructions": [
+            "Add props: activeRoute (ActiveRoute | null)",
+            "If activeRoute is not null, render inside MapContainer: <RoutePolyline geometry={activeRoute.geometry} color='var(--navy)' /> + <DestinationPin lat={activeRoute.destinationLat} lng={activeRoute.destinationLng} label={activeRoute.destinationLabel} />",
+            "If activeRoute is not null, render <RouteInfoBar> (outside MapContainer, as overlay)",
+            "Current user GPS pin: keep the existing pulsing navy dot. Add a thin dashed line from current GPS to route start if driver is off-route by more than 200m (optional enhancement)."
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-C",
+      "name": "Admin Route Visibility Agent",
+      "priority": 3,
+      "title": "Admin FleetMap route overlay — select a driver, see their route, destination, and ETA",
+      "files_to_create": [
+        "components/admin/DriverRouteOverlay.tsx",
+        "components/admin/RouteInfoPanel.tsx"
+      ],
+      "files_to_modify": [
+        "components/admin/FleetMap.tsx",
+        "app/(admin)/admin/page.tsx"
+      ],
+      "tasks": [
+        {
+          "task": "MODIFY components/admin/FleetMap.tsx",
+          "instructions": [
+            "Add selectedRouteDriverId state: string | null",
+            "Add activeRouteData state: AdminDriverRouteView | null (fetched from /api/admin/drivers/{id}/route)",
+            "In driver pin popup: add 'View Route' button — btn-soft btn-sm with a route icon (or 🗺️). Only show this button if the driver has an active route (check against the lightweight routes list from /api/admin/routes/active fetched on mount).",
+            "On 'View Route' click: setSelectedRouteDriverId(driverId), fetch GET /api/admin/drivers/{driverId}/route, set activeRouteData",
+            "If another driver is already selected with route: fetch new driver's route, replace",
+            "Add 'Clear Route View' button in popup if that driver's route is currently displayed: btn-ghost btn-sm 'Hide Route'",
+            "Subscribe to Ably driver_route_set: if driverId === selectedRouteDriverId, update activeRouteData.routeGeometry + eta in real time",
+            "Subscribe to Ably driver_route_cleared: if driverId === selectedRouteDriverId, clear activeRouteData",
+            "Pass activeRouteData to DriverRouteOverlay component"
+          ]
+        },
+        {
+          "task": "CREATE components/admin/DriverRouteOverlay.tsx",
+          "instructions": [
+            "Props: routeData (AdminDriverRouteView | null)",
+            "If routeData is null, render nothing",
+            "Render inside MapContainer: <RoutePolyline geometry={routeData.routeGeometry} color='var(--slate)' /> (slate color to differentiate from driver's own navy route) + <DestinationPin lat={routeData.destinationLat} lng={routeData.destinationLng} label={routeData.destinationLabel} />",
+            "Import RoutePolyline and DestinationPin from components/map/ (shared components)",
+            "On routeData change: use useMap().fitBounds to show full route"
+          ]
+        },
+        {
+          "task": "CREATE components/admin/RouteInfoPanel.tsx",
+          "instructions": [
+            "Props: routeData (AdminDriverRouteView | null), onClose () => void",
+            "Shown in admin FleetMap as a floating card — positioned absolute top-4 right-4 z-[1000] (inside the map container div, not inside MapContainer)",
+            "Design: bg-surface border hairline border-radius-lg shadow-lg padding 16px 18px width 260px",
+            "Entrance: Framer Motion opacity + translateX 20px → 0, duration 0.25s",
+            "Content: page-eyebrow 'ACTIVE ROUTE', driver name Bricolage Grotesque 16px fw-700, driver tag font-mono 11px muted, horizontal separator",
+            "Destination: flag icon + label fw-600 fs-13",
+            "Stats grid (2 col): Distance (formatDistance), ETA time string, Remaining time (formatDuration of remainingSeconds), Status badge-online 'On Route'",
+            "Progress bar: showing (totalDuration - remaining) / totalDuration * 100 as route completion %. ProgressBar component sage color.",
+            "Close button: btn-ghost btn-icon top-right absolute",
+            "Real-time ETA countdown: useEffect setInterval every 30s to recompute remainingSeconds from eta timestamp"
+          ]
+        },
+        {
+          "task": "MODIFY app/(admin)/admin/page.tsx",
+          "instructions": [
+            "Fetch GET /api/admin/routes/active on mount alongside stats and drivers",
+            "Pass activeRoutesSummary to FleetMap as prop",
+            "In StatsBar: add 'On Route' stat card (honey accent) showing count of drivers with active routes",
+            "Subscribe to fleet:locations Ably channel for driver_route_set and driver_route_cleared events to update activeRoutesSummary count in real time"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-D",
+      "name": "Geocoding Proxy & Preview Agent",
+      "priority": 1,
+      "title": "Geocoding proxy API route and route preview endpoint",
+      "files_to_create": [
+        "app/api/geocode/route.ts"
+      ],
+      "files_to_modify": [
+        "app/api/drivers/route/route.ts"
+      ],
+      "tasks": [
+        {
+          "task": "CREATE app/api/geocode/route.ts",
+          "instructions": [
+            "Handle GET with query param ?q=",
+            "Validate: q must be at least 3 characters",
+            "Forward to Nominatim: fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5`) with headers: { 'User-Agent': 'TruckNet/1.0', 'Accept-Language': 'en' }",
+            "Parse response array, map to: { placeId, label (display_name), lat (parseFloat), lng (parseFloat) }",
+            "Return NextResponse.json({ results })",
+            "Add rate limiting: max 10 requests/minute per IP using existing RateLimiter from lib/rate-limit.ts",
+            "Cache response for 60s with Cache-Control header to avoid duplicate Nominatim calls for the same query"
+          ]
+        },
+        {
+          "task": "ADD preview mode to POST /api/drivers/route",
+          "instructions": [
+            "Check for query param ?preview=true",
+            "If preview: validate body, get driver GPS, call fetchOsrmRoute, return { eta, distanceMeters, durationSeconds, routeGeometry } WITHOUT writing to DB and WITHOUT publishing Ably event",
+            "This powers the RouteSetupModal preview before the driver confirms"
+          ]
+        }
+      ]
+    }
+  ],
+
+  "ui_flows": {
+    "driver_sets_route": {
+      "steps": [
+        "1. Driver opens /map page",
+        "2. Top-right: 'Set Destination' btn-primary with flag icon",
+        "3. Click opens RouteSetupModal with AnimatePresence entrance",
+        "4. Driver types destination in DestinationSearchInput (debounced, calls /api/geocode?q=)",
+        "5. Results dropdown appears — driver clicks their destination",
+        "6. Modal auto-calls POST /api/drivers/route?preview=true to fetch OSRM data",
+        "7. Preview panel shows: destination name, distance, estimated time, ETA timestamp",
+        "8. Driver clicks 'Start Route →' — POST /api/drivers/route (without preview flag)",
+        "9. Modal closes, RoutePolyline appears on map (navy color), DestinationPin placed",
+        "10. RouteInfoBar floats at bottom of map with route stats",
+        "11. Button changes to 'On Route →' badge",
+        "12. On GPS update: if within 300m of destination → auto-complete, route cleared, toast.success 'Arrived at destination'"
+      ]
+    },
+    "driver_clears_route": {
+      "steps": [
+        "1. Driver clicks 'On Route →' button or 'Clear Route' in RouteInfoBar",
+        "2. Confirmation: AnimatePresence dialog — 'Clear your active route? This cannot be undone.'",
+        "3. Confirm: DELETE /api/drivers/route?reason=cancelled",
+        "4. Polyline, pin, and RouteInfoBar removed from map",
+        "5. Button returns to 'Set Destination'"
+      ]
+    },
+    "admin_views_driver_route": {
+      "steps": [
+        "1. Admin on /admin fleet map",
+        "2. Drivers with active routes have a small honey-colored route indicator on their pin (a tiny line segment icon overlaid)",
+        "3. Admin clicks a driver pin — popup shows driver info + 'View Route' btn-soft (only shown if driver has active route)",
+        "4. Click: fetches GET /api/admin/drivers/{driverId}/route",
+        "5. RoutePolyline rendered in slate color on the map",
+        "6. DestinationPin placed at destination",
+        "7. RouteInfoPanel card appears top-right of map: driver name, destination, distance, ETA, progress bar",
+        "8. Map fitBounds to show full route",
+        "9. Admin can click another driver with a route — old route cleared, new one shown",
+        "10. 'Hide Route' btn-ghost btn-sm in popup or RouteInfoPanel ✕ closes overlay",
+        "11. Real-time: if driver updates route, overlay updates automatically via Ably driver_route_set"
+      ]
+    }
+  },
+
+  "design_system_additions": {
+    "note": "All new components follow Warm Maritime Precision design system exactly",
+    "new_colors_used": {
+      "route_polyline_driver": "var(--navy) #1C3A5E — driver sees their own route in navy",
+      "route_polyline_admin": "var(--slate) #6678A0 — admin sees selected driver route in slate",
+      "destination_pin": "var(--terra) #B85039 — terracotta flag for destination marker",
+      "on_route_badge": "var(--honey-lt) bg + var(--honey) text — 'On Route' status indicator"
+    },
+    "new_components_style": {
+      "RouteSetupModal": "bg-surface, border-radius-xl, shadow-lg — same as IncomingCallModal pattern",
+      "DestinationSearchInput": "field-input base + dropdown bg-surface border hairline shadow-md border-radius-lg",
+      "RouteInfoBar": "floating glass bar — bg-surface border hairline shadow-lg, same language as map overlays",
+      "RouteInfoPanel": "admin panel card — bg-surface border hairline shadow-md, same as SosPanel cards"
+    }
+  },
+
+  "cross_cutting_rules": [
+    "OSRM is called server-side only (in API routes) — never directly from the browser, to avoid CORS and to keep the User-Agent header consistent",
+    "Nominatim is called via the /api/geocode proxy — never directly from browser",
+    "GeoJSON coordinates from OSRM are [longitude, latitude] — always reverse to [latitude, longitude] for Leaflet",
+    "Route geometry stored as jsonb in PostgreSQL — never stringify before insert, Drizzle handles serialization",
+    "Only ONE active route per driver enforced by partial unique index — the API must cancel previous route before inserting",
+    "Admin can only VIEW routes — they cannot create, modify, or cancel a driver's route",
+    "Auto-arrival detection runs in POST /api/drivers/location — no separate cron or worker needed",
+    "RoutePolyline and DestinationPin are shared components in components/map/ — imported by both driver DriverMap and admin DriverRouteOverlay",
+    "The preview endpoint must NOT write to DB or publish Ably events — it is read-only",
+    "formatDistance, formatDuration, formatEta helpers live in lib/osrm.ts and are importable by both server and client code"
+  ],
+
+  "verification_steps": [
+    "Driver opens map with no active route — 'Set Destination' button visible, no polyline shown",
+    "Driver searches 'Lyon' — Nominatim results appear in dropdown within 1 second of stopping typing",
+    "Driver selects destination — preview shows distance, duration, ETA before confirming",
+    "Driver clicks 'Start Route' — polyline appears on map, RouteInfoBar shows stats, button changes to 'On Route'",
+    "Driver refreshes page — GET /api/drivers/route restores route state, polyline redrawn",
+    "Admin opens /admin, clicks driver pin — 'View Route' button visible only for drivers with active routes",
+    "Admin clicks 'View Route' — slate polyline drawn, RouteInfoPanel card appears with ETA countdown",
+    "Admin clicks a different driver with a route — first route cleared, second route shown",
+    "Driver arrives within 300m of destination — route auto-completes, admin sees route_cleared event, overlay disappears",
+    "Driver manually clears route — polyline removed, button resets, admin overlay cleared via Ably"
+  ]
+}

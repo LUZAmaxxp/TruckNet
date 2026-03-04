@@ -1,0 +1,178 @@
+{
+  "addendum": {
+    "id": "FEAT-006-REDIS",
+    "parent_feature": "FEAT-006",
+    "title": "Redis Route Cache Layer for OSRM Results",
+    "date": "2026-03-04",
+    "description": "Addendum to FEAT-006. Adds a Redis cache layer in front of every OSRM call. When two or more drivers share the same origin grid cell and destination, the route geometry and duration are served from Redis instead of hitting OSRM again. Sub-5ms cache hits replace 300-800ms OSRM roundtrips.",
+    "execution": "Run BEFORE or alongside SA-A. SA-A must import from lib/route-cache.ts instead of calling fetchOsrmRoute directly."
+  },
+
+  "why_redis_fits_here": {
+    "problem": "OSRM is a public free server with no SLA. At 10k concurrent drivers, redundant calls for identical or near-identical routes (same highway depot, same city) waste latency and risk rate-limiting.",
+    "cache_hit_scenarios": [
+      "Multiple drivers departing from the same depot district heading to the same city",
+      "A driver previewing a route (?preview=true) and then confirming — same OSRM call fired twice without cache",
+      "Admin route previews from the dashboard triggering duplicate lookups"
+    ],
+    "what_gets_cached": "{ geometry (GeoJSON LineString), distanceMeters, durationSeconds } — the pure OSRM result, NOT the ETA. ETA is always computed fresh per driver using Date.now() + durationSeconds so it is never stale.",
+    "what_is_NOT_cached": "ETA timestamps, driver identity, DB writes, Ably publishes — only the road geometry and travel time between two coordinate pairs.",
+    "ttl_rationale": "Road networks change rarely. 1 hour TTL is safe for inter-city routes. 15 minutes for short urban routes (higher chance of roadworks)."
+  },
+
+  "cache_key_design": {
+    "strategy": "Snap both origin and destination coordinates to a ~500m grid before building the cache key. This dramatically increases hit rate — two drivers 200m apart heading to the same depot get the same cache key.",
+    "grid_precision": 3,
+    "grid_explanation": "Round lat/lng to 3 decimal places = ~111m precision. Good balance between hit rate and route accuracy for truck-scale navigation.",
+    "key_format": "osrm:route:{originLat3}:{originLng3}:{destLat3}:{destLng3}",
+    "key_examples": [
+      "osrm:route:48.856:2.352:45.760:4.835  — Paris area → Lyon area",
+      "osrm:route:48.856:2.352:45.760:4.835  — different driver, same grid cells, CACHE HIT"
+    ],
+    "ttl_seconds": 3600,
+    "implementation_note": "Math.round(coord * 1000) / 1000 — three decimal places, simple, no extra library"
+  },
+
+  "redis_setup": {
+    "package": "ioredis",
+    "install": "npm install ioredis",
+    "env_variable": {
+      "name": "REDIS_URL",
+      "example": "redis://localhost:6379",
+      "docker_example": "redis://redis:6379",
+      "add_to": ["schemas/env.schema.ts EnvSchema", ".env.local", "docker-compose.yml"]
+    },
+    "docker_service": {
+      "add_to": "docker-compose.yml",
+      "service": {
+        "redis": {
+          "image": "redis:7-alpine",
+          "ports": ["6379:6379"],
+          "command": "redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru",
+          "volumes": ["redis_data:/data"],
+          "healthcheck": "redis-cli ping"
+        }
+      },
+      "volume": "redis_data: driver: local"
+    }
+  },
+
+  "files": [
+    {
+      "action": "CREATE",
+      "file": "lib/redis.ts",
+      "instructions": [
+        "Import Redis from 'ioredis'",
+        "Export a singleton: let client: Redis | null = null",
+        "Export function getRedis(): Redis — lazy init, creates client on first call using process.env.REDIS_URL",
+        "Set client options: lazyConnect: true, maxRetriesPerRequest: 2, enableOfflineQueue: false, connectTimeout: 3000",
+        "On connection error: log warning but DO NOT throw — Redis failure must never break the API route",
+        "Export isRedisAvailable(): boolean — returns client?.status === 'ready'",
+        "Export async safeGet(key: string): Promise<string | null> — wraps client.get in try/catch, returns null on any error",
+        "Export async safeSet(key: string, value: string, ttlSeconds: number): Promise<void> — wraps client.setex in try/catch, silently ignores errors",
+        "Export async safeDel(key: string): Promise<void> — wraps client.del in try/catch, silently ignores errors",
+        "The 'safe' wrappers are critical: Redis is a performance optimization, not a hard dependency. Every operation degrades gracefully to a cache miss."
+      ]
+    },
+    {
+      "action": "CREATE",
+      "file": "lib/route-cache.ts",
+      "instructions": [
+        "Import fetchOsrmRoute, OsrmRouteResult from lib/osrm.ts",
+        "Import safeGet, safeSet from lib/redis.ts",
+        "Export type CachedRouteResult = OsrmRouteResult (same shape — no ETA here)",
+        "Export function buildRouteCacheKey(originLat: number, originLng: number, destLat: number, destLng: number): string",
+        "  — snap each coordinate: const snap = (n: number) => Math.round(n * 1000) / 1000",
+        "  — return `osrm:route:${snap(originLat)}:${snap(originLng)}:${snap(destLat)}:${snap(destLng)}`",
+        "Export async function getCachedRoute(originLat, originLng, destLat, destLng): Promise<CachedRouteResult | null>",
+        "  — key = buildRouteCacheKey(...)",
+        "  — raw = await safeGet(key)",
+        "  — if raw is null return null (cache miss)",
+        "  — return JSON.parse(raw) as CachedRouteResult",
+        "Export async function setCachedRoute(originLat, originLng, destLat, destLng, result: CachedRouteResult): Promise<void>",
+        "  — key = buildRouteCacheKey(...)",
+        "  — await safeSet(key, JSON.stringify(result), 3600)",
+        "Export async function fetchRouteWithCache(originLat, originLng, destLat, destLng): Promise<CachedRouteResult>",
+        "  — 1. Try getCachedRoute → if hit, return immediately (log '[RouteCache] HIT')",
+        "  — 2. On miss: call fetchOsrmRoute(originLat, originLng, destLat, destLng) from lib/osrm.ts",
+        "  — 3. On OSRM success: call setCachedRoute to store result",
+        "  — 4. Return OSRM result",
+        "  — 5. On OSRM error: rethrow — do not cache errors",
+        "NOTE: fetchRouteWithCache is the ONLY function SA-A should call. It replaces all direct calls to fetchOsrmRoute."
+      ]
+    },
+    {
+      "action": "MODIFY",
+      "file": "lib/osrm.ts",
+      "instructions": [
+        "No changes to the OSRM fetch logic itself",
+        "Add a JSDoc comment to fetchOsrmRoute: '@internal — call fetchRouteWithCache from lib/route-cache.ts instead of this function directly'",
+        "This makes the cache layer the canonical entry point"
+      ]
+    },
+    {
+      "action": "MODIFY",
+      "file": "app/api/drivers/route/route.ts",
+      "instructions": [
+        "Replace: import { fetchOsrmRoute } from 'lib/osrm'",
+        "With:    import { fetchRouteWithCache } from 'lib/route-cache'",
+        "Replace all calls to fetchOsrmRoute(...) with fetchRouteWithCache(...)",
+        "This applies to both the POST (confirm route) and POST?preview=true (preview) handlers",
+        "No other changes — the function signature and return type are identical"
+      ]
+    },
+    {
+      "action": "MODIFY",
+      "file": "schemas/env.schema.ts",
+      "instructions": [
+        "Add to EnvSchema: REDIS_URL: z.string().url().optional() — optional so local dev without Redis still works",
+        "Note: when REDIS_URL is undefined, lib/redis.ts getRedis() returns a client that immediately enters error state, safeGet always returns null, safeSet is a no-op — full graceful degradation"
+      ]
+    }
+  ],
+
+  "cache_flow_diagram": {
+    "POST /api/drivers/route (confirm or preview)": [
+      "1. Get driver GPS from driver_locations",
+      "2. Call fetchRouteWithCache(originLat, originLng, destLat, destLng)",
+      "   ├── Redis GET osrm:route:{snapped key}",
+      "   │    ├── HIT  → return cached { geometry, distanceMeters, durationSeconds } — ~1ms",
+      "   │    └── MISS → call OSRM HTTP → store in Redis TTL 3600s → return result — ~400ms",
+      "3. Compute eta = new Date(Date.now() + durationSeconds * 1000)  ← always fresh",
+      "4. DB write (skip if preview=true)",
+      "5. Ably publish (skip if preview=true)",
+      "6. Return response"
+    ]
+  },
+
+  "performance_impact": {
+    "cold_request": "~400ms (OSRM roundtrip + Redis SET + DB write)",
+    "warm_cache_hit": "~8ms (Redis GET + DB write, no OSRM call)",
+    "preview_cold": "~400ms (OSRM only, no DB/Ably)",
+    "preview_warm": "~2ms (Redis only, no DB/Ably/OSRM)",
+    "note": "The preview → confirm flow (driver searches, sees preview, then confirms) is the most common path. Preview warms the cache. Confirm is a guaranteed cache hit — near-instant."
+  },
+
+  "graceful_degradation": {
+    "redis_down": "safeGet returns null → treated as cache miss → OSRM called normally → response is slower but correct. Zero user-facing errors.",
+    "redis_timeout": "connectTimeout 3000ms — if Redis does not respond within 3s, falls through to OSRM. enableOfflineQueue: false ensures no queued requests pile up.",
+    "osrm_down": "fetchOsrmRoute throws OSRM_UNREACHABLE — 502 returned to client. Redis cannot help here since it only caches successful responses."
+  },
+
+  "monitoring_hooks": {
+    "log_lines_to_add": [
+      "console.log('[RouteCache] HIT', key) — on cache hit",
+      "console.log('[RouteCache] MISS', key, 'osrm_ms:', elapsed) — on cache miss, log OSRM latency",
+      "console.warn('[Redis] Connection error:', err.message) — in lib/redis.ts error handler"
+    ],
+    "future_metric": "Add a Redis INCR counter on osrm:stats:hits and osrm:stats:misses for cache hit rate monitoring (optional, add only if metrics infra exists)"
+  },
+
+  "verification_steps": [
+    "First driver sets destination Lyon — Redis MISS, OSRM called, result cached at osrm:route:48.856:2.352:45.760:4.835",
+    "Second driver 150m away sets same destination Lyon — Redis HIT, response in <10ms, OSRM not called",
+    "Preview then confirm (same driver) — preview warms cache, confirm hits cache instantly",
+    "Redis container stopped — safeGet returns null, API continues working via OSRM, no errors thrown",
+    "REDIS_URL not set in .env — EnvSchema passes (optional), getRedis() never called, pure OSRM fallback"
+  ]
+}

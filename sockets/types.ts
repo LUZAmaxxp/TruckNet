@@ -101,6 +101,26 @@ export interface FleetDriverUpdate {
   updatedAt: string;
 }
 
+export interface DriverRouteSetPayload {
+  driverId: string;
+  routeId: string;
+  name: string | null;
+  profileImageUrl: string | null;
+  destinationLabel: string;
+  destinationLat: number;
+  destinationLng: number;
+  distanceMeters: number;
+  durationSeconds: number;
+  distanceLabel: string;
+  durationLabel: string;
+  etaIso: string;
+}
+
+export interface DriverRouteClearedPayload {
+  driverId: string;
+  reason: "arrived" | "cancelled";
+}
+
 export interface ServerToClientEvents {
   nearby_driver_update: (drivers: NearbyDriverEntry[]) => void;
   voice_message_received: (message: VoiceMessageAlert) => void;
@@ -113,6 +133,8 @@ export interface ServerToClientEvents {
   call_missed: (payload: CallMissedAlert) => void;
   call_ended: (payload: CallEndedAlert) => void;
   driver_location_updated: (driver: FleetDriverUpdate) => void;
+  driver_route_set: (payload: DriverRouteSetPayload) => void;
+  driver_route_cleared: (payload: DriverRouteClearedPayload) => void;
   error: (payload: { error: string; details?: ZodIssue[] }) => void;
 }
 

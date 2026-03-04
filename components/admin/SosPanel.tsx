@@ -53,13 +53,22 @@ export function SosPanel({ alerts, onResolve, onNewAlert, onViewOnMap }: SosPane
   }, [on, onNewAlert]);
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-gray-800 bg-gray-900">
+    <div
+      className="flex h-full flex-col rounded-[12px]"
+      style={{ border: "1px solid var(--hairline)", background: "var(--surface)" }}
+    >
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-gray-800 px-4 py-3">
-        <AlertTriangle className="h-4 w-4 text-red-400" />
-        <h2 className="text-sm font-semibold text-white">Active SOS Alerts</h2>
+      <div
+        className="flex items-center gap-2 px-4 py-3"
+        style={{ borderBottom: "1px solid var(--hairline)" }}
+      >
+        <AlertTriangle className="h-4 w-4" style={{ color: "var(--terra)" }} />
+        <h2 className="font-display text-[13px] font-bold" style={{ color: "var(--ink)" }}>Active SOS Alerts</h2>
         {alerts.length > 0 && (
-          <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+          <span
+            className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-[10px] px-[6px] font-mono text-[10px] font-bold animate-sos-beat"
+            style={{ background: "var(--terra)", color: "white" }}
+          >
             {alerts.length}
           </span>
         )}
@@ -68,9 +77,9 @@ export function SosPanel({ alerts, onResolve, onNewAlert, onViewOnMap }: SosPane
       {/* Alert list */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {alerts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-gray-500">
-            <AlertTriangle className="h-8 w-8 mb-2 opacity-30" />
-            <p className="text-sm">No active SOS alerts</p>
+          <div className="flex flex-col items-center justify-center py-10">
+            <AlertTriangle className="h-8 w-8 mb-2 opacity-30" style={{ color: "var(--muted)" }} />
+            <p className="font-body text-[13px]" style={{ color: "var(--muted)" }}>No active SOS alerts</p>
           </div>
         ) : (
           alerts.map((alert) => (

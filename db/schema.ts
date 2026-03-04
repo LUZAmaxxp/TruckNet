@@ -10,6 +10,7 @@ import {
   index,
   unique,
   boolean,
+  json,
 } from "drizzle-orm/pg-core";
 import { type InferSelectModel, type InferInsertModel } from "drizzle-orm";
 
@@ -202,6 +203,12 @@ export const callStatusEnum = pgEnum("call_status", [
   "declined",
 ]);
 
+export const routeStatusEnum = pgEnum("route_status", [
+  "active",
+  "completed",
+  "cancelled",
+]);
+
 export const callHistory = pgTable(
   "call_history",
   {
@@ -248,3 +255,42 @@ export type NewTextMessage = InferInsertModel<typeof textMessages>;
 
 export type CallHistory = InferSelectModel<typeof callHistory>;
 export type NewCallHistory = InferInsertModel<typeof callHistory>;
+
+// ---------------------------------------------------------------------------
+// driver_routes
+// ---------------------------------------------------------------------------
+
+export const driverRoutes = pgTable(
+  "driver_routes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    driverId: uuid("driver_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    originLat: doublePrecision("origin_lat").notNull(),
+    originLng: doublePrecision("origin_lng").notNull(),
+    destinationLat: doublePrecision("destination_lat").notNull(),
+    destinationLng: doublePrecision("destination_lng").notNull(),
+    destinationLabel: text("destination_label").notNull(),
+    /** GeoJSON LineString coordinates array [[lng,lat], ...] stored as JSON */
+    routeGeometry: json("route_geometry").notNull().$type<[number, number][]>(),
+    distanceMeters: doublePrecision("distance_meters").notNull(),
+    durationSeconds: doublePrecision("duration_seconds").notNull(),
+    status: routeStatusEnum("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => ({
+    driverIdStatusIdx: index("driver_routes_driver_id_status_idx").on(
+      table.driverId,
+      table.status
+    ),
+    statusCreatedAtIdx: index("driver_routes_status_created_at_idx").on(
+      table.status,
+      table.createdAt
+    ),
+  })
+);
+
+export type DriverRoute = InferSelectModel<typeof driverRoutes>;
+export type NewDriverRoute = InferInsertModel<typeof driverRoutes>;

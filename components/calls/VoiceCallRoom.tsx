@@ -43,25 +43,37 @@ export default function VoiceCallRoom({
     : "Connected";
 
   const statusColor = connectionError
-    ? "text-destructive"
+    ? "var(--terra)"
     : isReconnecting
-    ? "text-yellow-400"
-    : "text-zinc-400";
+    ? "var(--honey)"
+    : "var(--muted)"
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950 text-white">
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "var(--base)" }}>
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8">
-        <div className="w-28 h-28 rounded-full bg-zinc-800 flex items-center justify-center border-4 border-zinc-700 shadow-2xl">
-          <span className="text-5xl">👤</span>
+        {/* Avatar with ring-expand animation */}
+        <div className="relative flex items-center justify-center">
+          <div className="animate-ring-expand absolute w-[164px] h-[164px] rounded-full border-2" style={{ borderColor: "rgba(28,58,94,0.15)" }} />
+          <div className="animate-ring-expand-delay-1 absolute w-[164px] h-[164px] rounded-full border-2" style={{ borderColor: "rgba(28,58,94,0.10)" }} />
+          <div className="animate-ring-expand-delay-2 absolute w-[164px] h-[164px] rounded-full border-2" style={{ borderColor: "rgba(28,58,94,0.06)" }} />
+          <div
+            className="relative w-28 h-28 rounded-full flex items-center justify-center border-4 shadow-lg"
+            style={{ background: "var(--navy-lt)", borderColor: "var(--navy-pale)" }}
+          >
+            <span className="font-display text-5xl font-bold" style={{ color: "var(--navy)" }}>👤</span>
+          </div>
         </div>
 
         <div className="text-center">
-          <p className={`text-sm mb-1 ${statusColor}`}>{statusText}</p>
-          <h1 className="text-2xl font-semibold">Voice Call</h1>
+          <p className="font-mono text-[11px] mb-1" style={{ color: statusColor }}>{statusText}</p>
+          <h1 className="font-display text-[24px] font-bold tracking-[-0.02em]" style={{ color: "var(--ink)" }}>Voice Call</h1>
         </div>
 
         {isMicMuted && (
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-destructive/20 text-destructive text-sm">
+          <div
+            className="flex items-center gap-2 px-4 py-2 rounded-[20px] font-body text-[13px] font-medium"
+            style={{ background: "var(--terra-lt)", color: "var(--terra)" }}
+          >
             <MicOff className="w-4 h-4" />
             Microphone muted
           </div>
@@ -70,22 +82,32 @@ export default function VoiceCallRoom({
 
       {/* Connecting / reconnecting overlay */}
       {(!isConnected || isReconnecting) && !connectionError && (
-        <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 z-10">
+        <div
+          className="absolute inset-0 flex items-center justify-center z-10"
+          style={{ background: "rgba(247,245,241,0.85)", backdropFilter: "blur(8px)" }}
+        >
           <div className="flex flex-col items-center gap-4">
-            <Loader2 className="w-10 h-10 animate-spin text-primary" />
-            <p className="text-sm text-zinc-300">{statusText}</p>
+            <Loader2 className="w-10 h-10 animate-spin" style={{ color: "var(--navy)" }} />
+            <p className="font-mono text-[11px]" style={{ color: "var(--subtle)" }}>{statusText}</p>
           </div>
         </div>
       )}
 
       {/* Hard failure overlay */}
       {connectionError && (
-        <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/90 z-10">
-          <div className="flex flex-col items-center gap-4 px-8 text-center">
-            <p className="text-destructive text-base font-medium">{connectionError}</p>
+        <div
+          className="absolute inset-0 flex items-center justify-center z-10"
+          style={{ background: "rgba(247,245,241,0.92)", backdropFilter: "blur(8px)" }}
+        >
+          <div
+            className="flex flex-col items-center gap-4 px-8 py-6 text-center"
+            style={{ background: "var(--surface)", borderRadius: "var(--radius-xl)", border: "1px solid var(--hairline)", boxShadow: "var(--shadow-lg)" }}
+          >
+            <p className="font-body text-[14px] font-medium" style={{ color: "var(--terra)" }}>{connectionError}</p>
             <button
               onClick={onEnd}
-              className="px-6 py-2 bg-destructive text-white rounded-lg text-sm font-medium"
+              className="px-5 py-[9px] font-body text-[13px] font-semibold rounded-[8px] transition-colors"
+              style={{ background: "var(--terra)", color: "white" }}
             >
               Go back
             </button>

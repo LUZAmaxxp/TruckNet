@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
 /* Leaflet CSS — must be global so it loads before the dynamic map component */
 @import 'leaflet/dist/leaflet.css';
 
@@ -7,48 +8,88 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
-  }
+    /* ── Warm Maritime Precision Design Tokens ─────────────────────── */
+    /* Backgrounds */
+    --base:          #F7F5F1;
+    --base-2:        #EFECE6;
+    --surface:       #FFFFFF;
+    --surface-2:     #FDFCFB;
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    /* Navy */
+    --navy:          #1C3A5E;
+    --navy-md:       #2C527F;
+    --navy-lt:       #EEF3F9;
+    --navy-pale:     #F4F7FB;
+
+    /* Sage */
+    --sage:          #3A6B52;
+    --sage-lt:       #EBF4EF;
+    --sage-md:       #5A9474;
+
+    /* Terra */
+    --terra:         #B85039;
+    --terra-lt:      #FBF0EE;
+    --terra-md:      #D4614A;
+
+    /* Honey */
+    --honey:         #C98A2E;
+    --honey-lt:      #FBF5E8;
+    --honey-md:      #E0A93E;
+
+    /* Slate */
+    --slate:         #6678A0;
+    --slate-lt:      #EEF1F9;
+
+    /* Text */
+    --ink:           #1A1A24;
+    --ink-2:         #3D3D4E;
+    --muted:         #7A7A8C;
+    --subtle:        #ABABBA;
+
+    /* Borders */
+    --hairline:      #E8E5DF;
+    --hairline-2:    #F0EDE8;
+
+    /* Shadows */
+    --shadow-xs:     0 1px 2px rgba(28,58,94,0.06);
+    --shadow-sm:     0 1px 4px rgba(28,58,94,0.07), 0 4px 12px rgba(28,58,94,0.05);
+    --shadow-md:     0 4px 6px rgba(28,58,94,0.07), 0 10px 30px rgba(28,58,94,0.08);
+    --shadow-lg:     0 8px 16px rgba(28,58,94,0.08), 0 24px 48px rgba(28,58,94,0.1);
+    --shadow-nav:    0 1px 0 var(--hairline), 0 4px 24px rgba(28,58,94,0.05);
+
+    /* Radii */
+    --radius-sm:     8px;
+    --radius:        12px;
+    --radius-lg:     16px;
+    --radius-xl:     20px;
+    --radius-2xl:    24px;
+
+    /* Fonts */
+    --font-display:  'Bricolage Grotesque', sans-serif;
+    --font-body:     'Instrument Sans', sans-serif;
+    --font-mono:     'JetBrains Mono', monospace;
+
+    /* ── shadcn compatibility (HSL format kept for Radix primitives) ─ */
+    --background:      40 14% 97%;
+    --foreground:      240 16% 12%;
+    --card:            0 0% 100%;
+    --card-foreground: 240 16% 12%;
+    --popover:         0 0% 100%;
+    --popover-foreground: 240 16% 12%;
+    --primary:         212 54% 23%;
+    --primary-foreground: 0 0% 100%;
+    --secondary:       212 36% 95%;
+    --secondary-foreground: 212 54% 23%;
+    --muted-bg:        40 14% 94%;
+    --muted-foreground: 240 6% 48%;
+    --accent:          212 36% 95%;
+    --accent-foreground: 212 54% 23%;
+    --destructive:     9 51% 47%;
+    --destructive-foreground: 0 0% 100%;
+    --border:          36 13% 88%;
+    --input:           36 13% 88%;
+    --ring:            212 54% 23%;
+    --radius:          0.75rem;
   }
 }
 
@@ -57,6 +98,52 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    background: var(--base);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.5;
   }
+
+  /* Thin warm scrollbar */
+  ::-webkit-scrollbar       { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--subtle); }
 }
+
+/* ── Custom animation keyframes ────────────────────────────────────── */
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes list-item-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(90,148,116,0.5); }
+  50%       { box-shadow: 0 0 0 4px rgba(90,148,116,0); }
+}
+@keyframes sos-beat {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(184,80,57,0.5); }
+  50%       { box-shadow: 0 0 0 7px rgba(184,80,57,0); }
+}
+@keyframes ring-expand {
+  0%   { transform: scale(0.65); opacity: 0.5; }
+  100% { transform: scale(1.8);  opacity: 0; }
+}
+
+.animate-screen-in  { animation: screen-in  0.28s cubic-bezier(0.22,1,0.36,1) both; }
+.animate-list-item  { animation: list-item-in 0.15s cubic-bezier(0.22,1,0.36,1) both; }
+.animate-live-pulse { animation: live-pulse 2.4s ease-in-out infinite; }
+.animate-sos-beat   { animation: sos-beat   1.8s ease-in-out infinite; }
+.animate-ring-expand { animation: ring-expand 2.8s ease-out infinite; }
+.animate-ring-expand-delay-1 { animation: ring-expand 2.8s ease-out 0.9s infinite; }
+.animate-ring-expand-delay-2 { animation: ring-expand 2.8s ease-out 1.8s infinite; }
+
+/* Font helpers */
+.font-display { font-family: var(--font-display); }
+.font-body    { font-family: var(--font-body); }
+.font-mono    { font-family: var(--font-mono); }

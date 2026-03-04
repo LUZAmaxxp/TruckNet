@@ -1,0 +1,491 @@
+{
+  "project": "TruckNet",
+  "purpose": "Real-time communication and fleet management platform for truck drivers and fleet administrators.",
+  "stack": {
+    "framework": "Next.js 14 (App Router)",
+    "language": "TypeScript",
+    "styling": "Tailwind CSS + shadcn/ui (Radix primitives)",
+    "animation": "Framer Motion",
+    "realtime": "Ably Pub/Sub (Realtime SDK)",
+    "maps": "Leaflet + React-Leaflet (driver-side), Leaflet (admin FleetMap)",
+    "calls": "LiveKit (WebRTC)",
+    "auth": "Auth.js v5 beta (next-auth) — JWT strategy",
+    "fonts": "Inter (Google Fonts, loaded via next/font)",
+    "icons": "lucide-react",
+    "toasts": "sonner (richColors, top-right position)",
+    "formValidation": "Zod schemas (client-side .safeParse before fetch)",
+    "themeMode": "Light/dark via Tailwind CSS variables (bg-background, text-foreground, etc.)"
+  },
+
+  "routeGroups": {
+    "(auth)": "Unauthenticated pages — login, register. No Navbar/BottomNav. Centered card layout.",
+    "(protected)": "Driver-facing authenticated pages. Wrapped by Navbar + BottomNav + CallStateWrapper + SosAlertListener.",
+    "(admin)": "Admin-facing authenticated pages. Wrapped by AdminSidebar + AdminHeader. Completely separate layout from driver.",
+    "api": "Next.js Route Handlers only — no UI rendered here."
+  },
+
+  "globalLayout": {
+    "file": "app/layout.tsx",
+    "description": "Root layout. Wraps entire app in <Providers> (SessionProvider + SocketProvider) and renders Sonner <Toaster richColors position='top-right'>. Font: Inter."
+  },
+
+  "rootPage": {
+    "file": "app/page.tsx",
+    "description": "Server component. Reads session via auth(). If authenticated → redirect('/dashboard'). If not → redirect('/login'). Acts as a smart entry point."
+  },
+
+  "realtime": {
+    "provider": "SocketProvider in hooks/useSocket.ts",
+    "mechanism": "Single Ably.Realtime instance created per authenticated session (keyed on userId). Authenticates via authUrl: '/api/auth/ably-token'.",
+    "channels": {
+      "user:{userId}": "Private per-user channel. Receives: nearby_driver_update, voice_message_received, text_message_received, friend_request_received, friend_request_accepted, call_incoming, call_declined, call_missed, call_ended, error.",
+      "stress:alerts": "Shared broadcast channel. Receives: stress_signal_alert.",
+      "fleet:locations": "Shared admin channel. Receives: driver_location_updated (FleetDriverUpdate payload)."
+    },
+    "api": {
+      "on(event, handler)": "Subscribe to an Ably event. Returns unsubscribe function. Uses a listener registry (Map<EventName, Set<handler>>) so multiple components can subscribe to the same event without creating duplicate Ably subscriptions.",
+      "emit(event, ...args)": "Intentional no-op. All client→server data goes through REST API routes, not WebSockets.",
+      "onConnect(cb)": "Register a callback that fires immediately if already connected, or queues for next connect event. Used by dashboard to re-broadcast GPS on reconnect.",
+      "isConnected": "Boolean state. True when Ably connection state is 'connected'."
+    },
+    "connectionIndicator": "LiveConnectionBadge component in the Navbar shows green Wifi icon + 'Live' text when connected, amber pulsing WifiOff + 'Reconnecting…' otherwise."
+  },
+
+  "authFlow": {
+    "roles": ["driver", "admin"],
+    "login": {
+      "file": "app/(auth)/login/page.tsx",
+      "ui": "Centered Card (max-w-sm). Truck icon header. Email + Password inputs. Client-side Zod validation (UserLoginSchema) before calling signIn('credentials'). Error shown inline in destructive/10 bg box. On success → router.push('/') which triggers middleware redirect matrix. Footer note: 'Admins are redirected to the fleet dashboard automatically.'"
+    },
+    "register": {
+      "file": "app/(auth)/register/page.tsx",
+      "ui": "Centered Card (max-w-sm). Role selector at top: two clickable button cards side by side — 'Truck Driver' (Truck icon) and 'Fleet Admin' (LayoutDashboard icon). Selected card gets border-primary + bg-primary/10. Full Name, Email, Password fields. When 'Fleet Admin' is selected, an additional password-type 'Admin Invite Code' field appears. On submit: Zod validation, then POST /api/auth/register. 409 conflict / 403 forbidden errors shown as inline server error. On success → redirect /login?registered=1."
+    },
+    "middlewareRedirects": {
+      "admin on / /login /register /dashboard": "redirect('/admin')",
+      "driver on /admin/*": "redirect('/dashboard')",
+      "unauthenticated on protected route": "redirect('/login')"
+    }
+  },
+
+  "driverLayout": {
+    "file": "app/(protected)/layout.tsx",
+    "wrappers": [
+      "CallStateWrapper — provides call state context, watches for incoming call_incoming Ably events, shows incoming call UI overlay",
+      "SosAlertListener — globally listens to stress_signal_alert, fires toast.error with 🚨 message for any driver page",
+      "Navbar — sticky top bar",
+      "BottomNav — fixed bottom bar, mobile only"
+    ],
+    "mainContainer": "flex-1 container mx-auto px-4 py-6 max-w-5xl pb-20 md:pb-6 (pb-20 leaves room for BottomNav on mobile)"
+  },
+
+  "navbar": {
+    "file": "components/layout/Navbar.tsx",
+    "description": "Sticky top-0 z-50. Blurred glass background: bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60.",
+    "left": "Truck icon + 'TruckConnect' brand text (text hidden on mobile via hidden sm:inline). Links to /dashboard.",
+    "center": "Nav links — hidden md:hidden, shown md:flex. Links: Dashboard, Map, Messages, Friends, Stress. Active link gets bg-accent text-accent-foreground. Inactive: text-muted-foreground.",
+    "right": "LiveConnectionBadge + Avatar (circle, 32x32, shows profile image if loaded else initials, hover ring-2 ring-primary, links to /profile) + LogOut ghost button (calls signOut with callbackUrl:/login). Avatar fetched from /api/profile on mount."
+  },
+
+  "bottomNav": {
+    "file": "components/layout/BottomNav.tsx",
+    "description": "Fixed bottom-0, md:hidden. 5-column grid, 64px tall. Glass background + border-t.",
+    "items": [
+      { "href": "/dashboard", "label": "Home", "icon": "LayoutDashboard" },
+      { "href": "/map", "label": "Map", "icon": "Map" },
+      { "href": "/messages", "label": "Messages", "icon": "MessageSquare" },
+      { "href": "/friends", "label": "Friends", "icon": "Users" },
+      { "href": "/stress", "label": "SOS", "icon": "AlertTriangle", "emergency": true }
+    ],
+    "activeStyle": "text-primary (non-emergency) or text-destructive (emergency). Active icon background: rounded-xl pill, bg-primary/10 or bg-destructive/10. Active icon stroke-[2.5] (bolder).",
+    "emergencyDot": "Pulsing 8x8 red dot (bg-destructive animate-pulse) in the top-right of the SOS icon."
+  },
+
+  "pages": {
+    "dashboard": {
+      "file": "app/(protected)/dashboard/page.tsx",
+      "route": "/dashboard",
+      "description": "Driver home page. Real-time nearby driver list + GPS broadcast.",
+      "sections": [
+        {
+          "name": "Header",
+          "content": "Title 'Dashboard' + subtitle. Right side: LiveConnectionBadge (Wifi/WifiOff icon + 'Live'/'Reconnecting…' colored text) + 'Refresh Location' outline button (Navigation icon)."
+        },
+        {
+          "name": "My Location Card",
+          "content": "shadcn Card. Shows lat/lng in font-mono when acquired. 'Broadcasting' badge (green dot + 'Broadcasting' text in secondary badge) when active. Loader spinner while acquiring. Error text (text-destructive) on geolocation failure."
+        },
+        {
+          "name": "Nearby Drivers",
+          "content": "Section header with 'Nearby Drivers' + animated Badge (count). Empty state: motion.div fade-in Card with 'No drivers within 50 km' message. Populated: 2-column grid (sm:grid-cols-2) using AnimatePresence with popLayout mode. Each driver is a motion.div (layout, initial scale+opacity, exit). Contains DriverCard."
+        }
+      ],
+      "realtime": [
+        "nearby_driver_update → replaces nearbyDrivers list",
+        "stress_signal_alert → toast.error with 🚨",
+        "voice_message_received → toast.info with 🎙️ + 'Listen' action → /messages?from={senderId}",
+        "text_message_received → toast.info with 💬 preview + 'Reply' action → /messages?from={senderId}"
+      ],
+      "gps": "navigator.geolocation.getCurrentPosition → POST /api/drivers/location every 20 seconds via setInterval. Also re-fires on Ably reconnect (onConnect callback)."
+    },
+
+    "map": {
+      "file": "app/(protected)/map/page.tsx",
+      "route": "/map",
+      "description": "Full-screen Leaflet map showing nearby drivers. Dynamically imported (ssr:false) via Next.js dynamic(). Supports ?focus=userId query param to auto-select a driver.",
+      "layout": "Edge-to-edge map with floating overlays. Map takes full remaining viewport height.",
+      "features": [
+        "GPS broadcast + /api/drivers/nearby fetch every 20 seconds",
+        "Real-time nearby_driver_update replaces driver list",
+        "Clicking a driver pin → shows info panel below map (or side panel on desktop) with name, coords, distance, Message/Call buttons",
+        "?focus=userId auto-focuses that driver's marker on map if within range, else toast.info 'Friend not visible'",
+        "Loading spinner while DriverMap chunk loads"
+      ]
+    },
+
+    "messages": {
+      "file": "app/(protected)/messages/page.tsx",
+      "route": "/messages",
+      "description": "Two-panel messaging page. Left: FriendsSidebar. Right: ChatPanel. Fully split-panel on desktop, slide animation on mobile.",
+      "desktopLayout": "Hidden md:hidden wrapper shows both panels side-by-side. Sidebar: fixed 340px wide. Chat panel: flex-1.",
+      "mobileLayout": "Slide transition via AnimatePresence. Sidebar slides in from left (x: -100% → 0), chat slides in from right (x: 100% → 0). Spring animation (stiffness:260, damping:20). Only one panel visible at a time.",
+      "outerContainer": "relative -mx-4 -mt-6 -mb-20 md:m-0 — breaks out of the layout padding on mobile to fill full height between Navbar and BottomNav. h-[calc(100dvh-7.5rem)] on mobile, md:h-[calc(100vh-80px)] on desktop.",
+      "queryParam": "?from=userId — auto-opens that conversation via autoOpenId prop passed to FriendsSidebar",
+      "wrappedIn": "Suspense (required by useSearchParams in App Router)",
+      "realtime": [
+        "text_message_received → skip if sender is currently open → toast.info 💬 + 'Open chat' → /messages?from={senderId}",
+        "voice_message_received → skip if sender is currently open → toast.info 🎙️ + 'Open chat' → /messages?from={senderId}"
+      ]
+    },
+
+    "friends": {
+      "file": "app/(protected)/friends/page.tsx",
+      "route": "/friends",
+      "description": "Friend management: list, send request, receive/accept/decline requests, view friend location, call/message.",
+      "sections": [
+        {
+          "name": "Send Friend Request",
+          "content": "Input with label 'Friend Tag'. Format validated client-side: /^[a-zA-Z0-9_]+#[0-9]{4}$/. POST /api/friends/request. UserPlus icon button."
+        },
+        {
+          "name": "Incoming Requests",
+          "content": "AnimatePresence list. Each request shows sender name + tag + relative time. Green accept button (Check icon, POST /api/friends/request/{id}/accept) + red decline button (X icon, DELETE). On accept: appended to friends list, request removed."
+        },
+        {
+          "name": "Friends List",
+          "content": "AnimatePresence list. Each friend card: name, tag, 3 action buttons — Message (→ /messages?to={id}), Map (→ /map?focus={id}), Call (CallButton component). Location toggle button (MapPin icon): fetches /api/friends/{id}/location, shows lat/lng inline or 'hasn't shared location' toast."
+        }
+      ],
+      "realtime": [
+        "friend_request_received → toast.info + prepend to requests list",
+        "friend_request_accepted → toast.success + prepend to friends list"
+      ]
+    },
+
+    "stress": {
+      "file": "app/(protected)/stress/page.tsx",
+      "route": "/stress",
+      "description": "Emergency SOS page. Large animated button to send stress signal + list of active + live-incoming signals.",
+      "sections": [
+        {
+          "name": "Emergency Button Card",
+          "content": "Card with CardHeader. Center: breathing glow ring (motion.div: scale 1→1.25→1, opacity 0.6→0→0.6, 2.4s infinite) + round 112x112 destructive button. Button state: idle (AlertTriangle icon + 'SOS' text), loading (Loader2 spinner), sent (CheckCircle2 icon). whileTap scale:0.94 + whileHover scale:1.04. Requires confirmation dialog before sending."
+        },
+        {
+          "name": "Confirmation Dialog",
+          "content": "AnimatePresence modal card slides down. Two buttons: Confirm (destructive) + Cancel."
+        },
+        {
+          "name": "Active Signals List",
+          "content": "Fetched from /api/stress-signals/active. StressSignalBadge components per signal."
+        },
+        {
+          "name": "Live Alerts",
+          "content": "Real-time signals received via Ably. Prepended to top, capped at 10. Each triggers toast.error."
+        }
+      ],
+      "flow": "Button click → setConfirmOpen(true) → confirmation → navigator.geolocation.getCurrentPosition → POST /api/stress-signals + emit('send_stress_signal') → justSent state (CheckCircle2 shows for 4s) → fetchActive()"
+    },
+
+    "profile": {
+      "file": "app/(protected)/profile/page.tsx",
+      "route": "/profile",
+      "description": "Driver profile page with avatar management.",
+      "sections": [
+        {
+          "name": "Avatar Card",
+          "content": "96x96 circle. Shows current profileImageUrl via next/image (fill + object-cover) or initials fallback. Hidden file input (accepts image/jpeg,png,webp,gif). 'Change Photo' button triggers file picker. Selecting a file shows blob: URL preview immediately (local preview ring: border-primary + ring-4 ring-primary/30). 'Upload' button: POST /api/profile/upload-avatar multipart (field: avatar). On success updates profile state."
+        },
+        {
+          "name": "Info Card",
+          "content": "Name, email, tag (displayed as badge), account creation date. Static display, no inline editing."
+        }
+      ],
+      "animation": "Page entrance: motion.div opacity:0,y:12 → opacity:1,y:0 over 0.3s"
+    },
+
+    "calls": {
+      "file": "app/(protected)/calls/[roomName]/page.tsx",
+      "route": "/calls/[roomName]",
+      "description": "LiveKit call room for drivers. Reads call token from sessionStorage key 'trucknet_active_call' (JSON: roomName, type, token, liveKitUrl, role). Renders @livekit/components-react <LiveKitRoom> with <VideoConference> or voice-only preset. On disconnect → router.push('/dashboard')."
+    },
+
+    "adminDashboard": {
+      "file": "app/(admin)/admin/page.tsx",
+      "route": "/admin",
+      "description": "Admin home. StatsBar + FleetMap + SosPanel side-by-side.",
+      "layout": "flex-col. Top: StatsBar (flex-wrap row). Bottom: flex-row with flex-1 map + w-80 SosPanel sidebar.",
+      "dataFetch": "fetchStats (every 30s auto-refresh), fetchLiveDrivers (once on mount), fetchSosAlerts (once on mount). No polling for map — real-time via Ably fleet:locations.",
+      "interactions": [
+        "SosPanel onViewOnMap(driverId) → sets focusDriverId → FleetMap.MapFocuser flies to driver",
+        "SosPanel onResolve(alertId) → PATCH /api/admin/sos/{id}/resolve → removes from list",
+        "SosPanel onNewAlert → prepend to alerts list + refresh stats"
+      ]
+    },
+
+    "adminDrivers": {
+      "file": "app/(admin)/admin/drivers/page.tsx",
+      "route": "/admin/drivers",
+      "description": "Paginated driver management table.",
+      "controls": "Search input + status filter (all/online/offline). Resetting to page 1 on filter change.",
+      "table": "DriverTable component. Shows 20 drivers per page. Pagination with prev/next."
+    },
+
+    "adminSos": {
+      "file": "app/(admin)/admin/sos/page.tsx",
+      "route": "/admin/sos",
+      "description": "Full SOS alert log with filter tabs.",
+      "filters": "All / Active / Resolved — pill buttons. Active filter gets bg-red-600 text-white.",
+      "loading": "5x skeleton cards (animate-pulse h-24 rounded-xl bg-gray-800).",
+      "pagination": "20 per page.",
+      "actions": "Inline resolve button per card → PATCH → optimistic UI sets status to 'resolved', decrements activeCount."
+    },
+
+    "adminMessages": {
+      "file": "app/(admin)/admin/messages/page.tsx",
+      "route": "/admin/messages",
+      "description": "Two-column admin messaging UI.",
+      "layout": "Rounded-xl bordered container. Left: AdminConversationList (w-72, border-r). Right: AdminConversationThread (flex-1). Empty right state: centered 'Select a conversation' text.",
+      "deepLink": "app/(admin)/admin/messages/[driverId]/page.tsx — pre-selects the thread by matching driverId from URL param against conversations list."
+    },
+
+    "adminCalls": {
+      "file": "app/(admin)/admin/calls/page.tsx",
+      "route": "/admin/calls",
+      "description": "Call history log table. Filterable by call type (voice/video) and status (ongoing/completed/missed/declined). 25 entries per page.",
+      "table": "CallHistoryTable component."
+    },
+
+    "adminCallRoom": {
+      "file": "app/(admin)/admin/calls/[roomName]/page.tsx",
+      "route": "/admin/calls/[roomName]",
+      "description": "LiveKit call room for admins. Same pattern as driver call room but on disconnect → router.push('/admin')."
+    }
+  },
+
+  "components": {
+    "FriendsSidebar": {
+      "file": "components/messages/FriendsSidebar.tsx",
+      "props": {
+        "activeFriendId": "string | null — currently selected friend, used for active styling and unread suppression",
+        "onSelectFriend": "(friend: Friend) => void",
+        "autoOpenId": "string | null | undefined — if set, auto-clicks the matching contact once loaded (used by ?from= query param)"
+      },
+      "dataFetch": "Parallel: GET /api/friends/list + GET /api/text-messages/conversations. Merges non-friend conversation partners (e.g. admins) from conversations into the contacts list. For friends without conversation history, fetches GET /api/text-messages?friendId={id} for preview. Sorts all contacts by lastMessageAt descending.",
+      "realtime": "on('text_message_received'): if sender exists → update lastMessage/unreadCount. If sender unknown → append new entry to sidebar (handles admin→driver first message).",
+      "autoOpen": "useEffect watching [autoOpenId, loading, friends]. Fires once (autoOpenFired ref) when loading=false and friends contains the target id.",
+      "unreadReset": "useEffect watching [activeFriendId] — sets unreadCount:0 for the active friend.",
+      "ui": {
+        "header": "h2 'Messages' + search Input with Search icon (pl-9). Rounded-xl input.",
+        "loadingState": "Centered 'Loading friends…' text in py-12.",
+        "emptyState": "MessageSquare icon (opacity-30) + 'No results' or 'No friends yet'.",
+        "list": "motion.ul (opacity:0→1 fade-in over 0.18s). Each li: motion.li with simultaneous opacity:0,y:4 → opacity:1,y:0 over 0.15s. No stagger (prevents invisible-but-tappable items on mobile).",
+        "item": "min-h-[48px], flex, gap-3, rounded-xl px-3 py-3. Active: bg-primary/10 + left border indicator (motion.span layoutId='active-indicator', absolute left-0 w-1 rounded-full bg-primary). Avatar 40x40 with green online dot (bottom-right, ring-2 ring-background). Name + relative time on first row. Last message preview on second row. Unread Badge (rounded-full, min-w-[20px], h-5, '99+' cap).",
+        "whileHover": "scale: 1.02"
+      }
+    },
+
+    "ChatPanel": {
+      "file": "components/messages/ChatPanel.tsx",
+      "props": {
+        "friend": "Friend {id, name, tag, profileImageUrl?}",
+        "currentUserId": "string",
+        "onBack": "() => void | undefined — mobile back navigation",
+        "showBackButton": "boolean"
+      },
+      "dataFetch": "On mount/friend change: parallel GET /api/text-messages?friendId={id} + GET /api/voice-messages. Auto-marks all unread messages from this friend as read (PATCH /api/text-messages/{id}/read for each).",
+      "messageTypes": "Combines text messages (TextMessageData) and voice messages (VoiceMessageData) into a single sorted CombinedMessage[] array by createdAt.",
+      "autoScroll": "useEffect on [textMessages.length, voiceMessages.length]. Finds Radix ScrollArea viewport ([data-radix-scroll-area-viewport]) and sets scrollTop = scrollHeight. Fallback to scrollIntoView.",
+      "realtime": [
+        "text_message_received → if senderId matches → append + PATCH read",
+        "voice_message_received → if senderId matches → append + toast.info"
+      ],
+      "header": "Friend avatar + name + tag + CallButton (voice + video).",
+      "messageList": "ScrollArea flex-1. Each item: MessageBubble (text) or VoiceMessageBubble (audio). Grouped by sender (isSelf = senderId === currentUserId).",
+      "input": "MessageInput component at bottom: text textarea + RecordButton for voice. Submit on Enter (not Shift+Enter). Voice: records via useVoiceRecorder hook, uploads to /api/upload/audio, then POST /api/voice-messages."
+    },
+
+    "MessageBubble": {
+      "file": "components/messages/MessageBubble.tsx",
+      "description": "Single text message. isSelf → right-aligned, primary color background. Other → left-aligned, muted background. Shows sender name if not self, timestamp bottom-right, status indicator (read/delivered tick)."
+    },
+
+    "VoiceMessageBubble": {
+      "file": "components/messages/VoiceMessageBubble.tsx",
+      "description": "Audio player bubble. Play/pause button + waveform visualization + duration. Styled same alignment as MessageBubble."
+    },
+
+    "DriverCard": {
+      "file": "components/drivers/DriverCard.tsx",
+      "description": "shadcn Card showing a nearby driver. Name as CardTitle + distance badge (MapPin icon, format: 'm' if <1km else 'x.x km'). Lat/lng in small mono text. Message + Alert buttons (flex-1 each, outline and destructive variants)."
+    },
+
+    "AdminSidebar": {
+      "file": "components/admin/AdminSidebar.tsx",
+      "description": "Fixed w-56 left sidebar for admin layout. Dark: bg-gray-900, border border-gray-800.",
+      "branding": "TruckIcon (text-blue-400) + 'TruckNet' bold white + 'Admin' pill (text-gray-500 uppercase tracking-widest).",
+      "nav": "5 links: Overview, Drivers, SOS Alerts, Messages, Call History. Active: bg-blue-600/20 text-blue-400. Inactive: text-gray-400 hover:bg-gray-800 hover:text-white.",
+      "sosBadge": "Pulsing red rounded badge on 'SOS Alerts' link showing count. Incremented in real-time via stress_signal_alert Ably event. Initial count from /api/admin/stats."
+    },
+
+    "AdminHeader": {
+      "file": "components/admin/AdminHeader.tsx",
+      "description": "Top bar of admin layout. Shows logged-in admin name + avatar + sign out button."
+    },
+
+    "StatsBar": {
+      "file": "components/admin/StatsBar.tsx",
+      "description": "Horizontal flex-wrap row of stat cards. 6 cards: Total Drivers (blue), Online Now (green), Active SOS (red), Ongoing Calls (purple), Calls Today (yellow), Messages Today (cyan). Each: icon in colored rounded-lg bg + bold white value + small gray label. While stats===null: skeleton (h-4 w-20 bg-gray-700 animate-pulse)."
+    },
+
+    "FleetMap": {
+      "file": "components/admin/FleetMap.tsx",
+      "description": "Leaflet map for admin fleet overview. SSR-safe (client component with 'use client').",
+      "pins": {
+        "withAvatar": "34x34 divIcon: circular avatar image with colored border.",
+        "withoutAvatar": "18x18 divIcon: solid circle.",
+        "green": "Seen within last 60 seconds (fresh).",
+        "yellow": "Seen within last 5 minutes."
+      },
+      "popup": "On pin click: avatar + name + 'online'/'recently active' + time ago. Voice button (blue), Video button (purple), Message button (gray). Calling: POST /api/calls/initiate → sessionStorage 'trucknet_active_call' → router.push('/admin/calls/{roomName}'). Message: router.push('/admin/messages/{driverId}').",
+      "realtime": "on('driver_location_updated'): update existing driver coords or append new driver.",
+      "focuser": "MapFocuser child component: useMap() hook, flies to focusDriverId's coords (flyTo zoom:14, animate:true duration:1).",
+      "overlay": "Bottom-left: '{n} driver(s) online' badge (bg-gray-900/90 backdrop-blur)."
+    },
+
+    "SosPanel": {
+      "file": "components/admin/SosPanel.tsx",
+      "description": "Right sidebar panel on admin home. Lists active SOS alerts.",
+      "header": "AlertTriangle icon + 'Active SOS Alerts' + red count badge.",
+      "emptyState": "AlertTriangle opacity-30 + 'No active SOS alerts'.",
+      "realtime": "on('stress_signal_alert'): builds SosAdminEntry and calls onNewAlert prop.",
+      "cards": "SosAlertCard per alert: sender name/tag/avatar, lat/lng, time ago, 'View on Map' button (calls onViewOnMap → triggers FleetMap focus), 'Resolve' button (PATCH + callback to remove)."
+    },
+
+    "DriverTable": {
+      "file": "components/admin/DriverTable.tsx",
+      "description": "Paginated admin driver table with search and status filter.",
+      "columns": "Avatar, Name, Tag, Email, Status (Online/Offline badge), Last Seen, Actions.",
+      "actions": "Voice call, Video call (both → /api/calls/initiate → sessionStorage → /admin/calls/{roomName}), Message (→ /admin/messages/{id}).",
+      "filters": "Text search input + All/Online/Offline pill buttons. Status pills: active = bg-blue-600/20 text-blue-400, inactive = bg-gray-800 text-gray-400.",
+      "loading": "Skeleton rows (animate-pulse bg-gray-800).",
+      "pagination": "Previous/Next buttons + 'X–Y of Z' count text."
+    },
+
+    "AdminConversationList": {
+      "file": "components/admin/AdminConversationList.tsx",
+      "description": "Left panel conversation list for /admin/messages. Fetches GET /api/text-messages/conversations.",
+      "items": "Avatar, partner name, last message truncated, relative time, unread count badge. Selected: highlighted with bg-blue-600/10 border-l-2 border-blue-500.",
+      "realtime": "Updates last message preview and unread count on text_message_received."
+    },
+
+    "AdminConversationThread": {
+      "file": "components/admin/AdminConversationThread.tsx",
+      "description": "Right panel message thread for /admin/messages. Loads GET /api/text-messages?friendId={driverId}.",
+      "header": "Driver avatar + name.",
+      "messages": "AdminMessageBubble per message. Self (admin) right-aligned. Other (driver) left-aligned.",
+      "input": "Textarea + Send button. Keyboard: Cmd/Ctrl+Enter to send. POST /api/text-messages.",
+      "realtime": "on('text_message_received'): filter by driverId, append to thread."
+    },
+
+    "AdminConversationList_deepLink": {
+      "file": "app/(admin)/admin/messages/[driverId]/page.tsx",
+      "description": "Deep-link route. On load: fetches conversations list, finds matching driverId, pre-selects the thread. Falls back to stub from /api/admin/drivers/{driverId} if no conversation yet."
+    },
+
+    "SosAlertListener": {
+      "file": "components/stress/SosAlertListener.tsx",
+      "description": "Invisible component mounted in protected layout. Subscribes to stress_signal_alert, fires global toast.error with 🚨."
+    },
+
+    "CallButton": {
+      "description": "Reusable call initiation button. Calls POST /api/calls/initiate with calleeId + type. On success: sessionStorage 'trucknet_active_call' + router.push to call room. Shows loading state while awaiting."
+    },
+
+    "CallHistoryTable": {
+      "file": "components/admin/CallHistoryTable.tsx",
+      "description": "Admin call log table. Columns: Caller, Callee, Type (Voice/Video badge), Status (colored badge: ongoing/completed/missed/declined), Duration, Date. Filter buttons for type and status. Pagination."
+    }
+  },
+
+  "designSystem": {
+    "colorScheme": "CSS variable-based Tailwind theme. bg-background, text-foreground, border-border, text-muted-foreground, bg-accent, text-primary, text-destructive, etc.",
+    "adminColors": "Hardcoded dark palette: bg-gray-950 body, bg-gray-900 sidebar/cards, border-gray-800 borders, text-white headings, text-gray-400 body text. Blue accent: text-blue-400, bg-blue-600/20.",
+    "borderRadius": "rounded-xl used pervasively for cards, inputs, buttons, list items. rounded-full for avatars, badges, pings.",
+    "spacing": "Consistent space-y-6 section spacing. gap-3/gap-4 for grids. px-4 py-3 for card padding.",
+    "typography": {
+      "page headings": "text-2xl font-bold",
+      "section headings": "text-lg font-semibold",
+      "card titles": "text-base font-semibold",
+      "body": "text-sm",
+      "micro": "text-xs text-muted-foreground",
+      "mono coordinates": "font-mono text-sm"
+    },
+    "shadows": "shadow-lg on call button, shadow-sm on cards. Map pins use box-shadow rgba.",
+    "animations": {
+      "pageEntrance": "opacity:0,y:12 → opacity:1,y:0 over 0.3s",
+      "listItems": "opacity:0,y:4 → opacity:1,y:0 over 0.15s (all simultaneously, no stagger on mobile)",
+      "mobileSlide": "x:-100%→0 and x:100%→0 spring (stiffness:260, damping:20)",
+      "emergencyButton": "breathing ring scale:1→1.25→1, opacity:0.6→0→0.6, 2.4s infinite",
+      "skeletons": "animate-pulse",
+      "spinner": "animate-spin on Loader2",
+      "sosBadge": "animate-pulse on red dot"
+    }
+  },
+
+  "accessibilityNotes": [
+    "FriendsSidebar uses role='navigation', role='listbox', aria-label, role='option', aria-selected, tabIndex=0, onKeyDown Enter/Space",
+    "Emergency button has aria-label='Send emergency stress signal' and focus-visible:ring-4",
+    "Avatar images have alt text",
+    "Buttons have sr-only text where icon-only (LogOut button in Navbar)",
+    "Unread count badges have aria-label='{n} unread messages'"
+  ],
+
+  "mobileSpecificBehaviors": [
+    "Messages page: sidebar and chat panel are never shown simultaneously — slide transition only",
+    "BottomNav replaces Navbar links on mobile (md:hidden)",
+    "Messages page container breaks out of layout padding (-mx-4 -mt-6 -mb-20) to fill edge-to-edge",
+    "Bottom nav has 80px height allowance (pb-20 in layout)",
+    "FriendsSidebar list animates all items together (no stagger) to prevent tapping invisible items during enter animation",
+    "Map loaded with dynamic() + ssr:false, shows Loader2 spinner while chunk loads"
+  ],
+
+  "sessionStorageKeys": {
+    "trucknet_active_call": "JSON: { roomName, type ('voice'|'video'), token (LiveKit JWT), liveKitUrl, role ('caller'|'callee') }. Written before navigating to call room. Read by call room page to initialize LiveKitRoom."
+  },
+
+  "toastPatterns": {
+    "success": "toast.success — friend accepted, location updated, signal sent, avatar uploaded",
+    "error": "toast.error — 🚨 stress alerts, call failures, upload failures, geolocation errors",
+    "info": "toast.info — 💬 text message preview, 🎙️ voice message, friend request, friend not on map",
+    "duration": "6000–12000ms for notification toasts. action button navigates to relevant page."
+  },
+
+  "errorHandlingPatterns": [
+    "Field-level Zod errors shown inline below each input as <p class='text-xs text-destructive'>",
+    "Server errors shown at top of form in bg-destructive/10 rounded box",
+    "API failures generally surface via toast.error",
+    "Loading states: Loader2 animate-spin centered or skeleton placeholders in tables/cards",
+    "Empty states: icon (opacity-30) + descriptive text"
+  ]
+}

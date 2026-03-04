@@ -8,7 +8,6 @@ import { UserLoginSchema } from "@/schemas/user.schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Truck } from "lucide-react";
 
 export default function LoginPage() {
@@ -53,67 +52,152 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-2">
-            <Truck className="h-10 w-10 text-primary" />
-          </div>
-          <CardTitle className="text-2xl">TruckConnect</CardTitle>
-          <CardDescription>Sign in to your account</CardDescription>
-        </CardHeader>
+    <div
+      className="relative min-h-screen flex items-center justify-center px-4 py-12 overflow-hidden"
+      style={{ background: "var(--base)" }}
+    >
+      {/* Subtle radial glow */}
+      <div
+        className="absolute top-0 right-0 w-[640px] h-[640px] rounded-full pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(circle at 70% 20%, rgba(28,58,94,0.07) 0%, transparent 60%)",
+        }}
+      />
+      <div
+        className="absolute bottom-0 left-0 w-[480px] h-[480px] rounded-full pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(circle at 20% 90%, rgba(58,107,82,0.05) 0%, transparent 60%)",
+        }}
+      />
 
-        <form onSubmit={handleSubmit}>
-          <CardContent className="space-y-4">
-            {serverError && (
-              <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">
+      {/* Card */}
+      <div
+        className="relative w-full max-w-[420px] p-8"
+        style={{
+          background: "var(--surface)",
+          borderRadius: "var(--radius-2xl)",
+          border: "1px solid var(--hairline)",
+          boxShadow: "var(--shadow-lg)",
+        }}
+      >
+        {/* Logo */}
+        <div className="flex items-center gap-2.5 mb-8">
+          <div
+            className="h-9 w-9 rounded-[8px] flex items-center justify-center"
+            style={{ background: "var(--navy)", boxShadow: "var(--shadow-sm)" }}
+          >
+            <Truck className="h-5 w-5 text-white" />
+          </div>
+          <span
+            className="font-display text-[16px] font-bold tracking-[-0.02em]"
+            style={{ color: "var(--navy)" }}
+          >
+            TruckConnect
+          </span>
+        </div>
+
+        {/* Heading */}
+        <p
+          className="font-mono text-[11px] uppercase tracking-wider mb-1"
+          style={{ color: "var(--slate)" }}
+        >
+          Welcome back
+        </p>
+        <h1
+          className="font-display text-[28px] font-bold tracking-[-0.03em] mb-6"
+          style={{ color: "var(--ink)" }}
+        >
+          Sign In
+        </h1>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {serverError && (
+            <div
+              className="rounded-[10px] px-4 py-3"
+              style={{
+                background: "var(--terra-lt)",
+                border: "1px solid rgba(184,80,57,0.25)",
+              }}
+            >
+              <p className="font-body text-[13px]" style={{ color: "var(--terra)" }}>
                 {serverError}
               </p>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="email"
+              className="font-body text-[13px] font-medium"
+              style={{ color: "var(--ink)" }}
+            >
+              Email
+            </Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="driver@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            {errors.email && (
+              <p className="font-body text-[12px]" style={{ color: "var(--terra)" }}>
+                {errors.email}
+              </p>
             )}
+          </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                placeholder="driver@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
-            </div>
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="password"
+              className="font-body text-[13px] font-medium"
+              style={{ color: "var(--ink)" }}
+            >
+              Password
+            </Label>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            {errors.password && (
+              <p className="font-body text-[12px]" style={{ color: "var(--terra)" }}>
+                {errors.password}
+              </p>
+            )}
+          </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
-            </div>
-          </CardContent>
-
-          <CardFooter className="flex flex-col gap-3">
-            <Button type="submit" className="w-full" disabled={loading}>
+          <div className="pt-1 space-y-3">
+            <Button type="submit" variant="primary" className="w-full" disabled={loading}>
               {loading ? "Signing in…" : "Sign In"}
             </Button>
-            <p className="text-xs text-muted-foreground text-center">
+
+            <p
+              className="font-mono text-[10px] text-center uppercase tracking-wide"
+              style={{ color: "var(--subtle)" }}
+            >
               Admins are redirected to the fleet dashboard automatically.
             </p>
-            <p className="text-sm text-muted-foreground text-center">
+
+            <p className="font-body text-[13px] text-center" style={{ color: "var(--muted)" }}>
               No account?{" "}
-              <Link href="/register" className="text-primary hover:underline">
-                Register
+              <Link
+                href="/register"
+                className="font-semibold hover:underline"
+                style={{ color: "var(--navy)" }}
+              >
+                Create one
               </Link>
             </p>
-          </CardFooter>
+          </div>
         </form>
-      </Card>
+      </div>
     </div>
   );
 }

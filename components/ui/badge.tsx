@@ -3,14 +3,22 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center gap-[5px] px-[10px] py-[3px] rounded-[20px] text-[11px] font-semibold transition-colors leading-none",
   {
     variants: {
       variant: {
-        default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
-        secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        destructive: "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
-        outline: "text-foreground",
+        /* ── Warm Maritime semantic badges ── */
+        online:      "bg-sage-lt text-sage",
+        offline:     "bg-hairline-2 text-muted",
+        sos:         "bg-terra-lt text-terra",
+        call:        "bg-slate-lt text-slate",
+        idle:        "bg-honey-lt text-honey",
+        navy:        "bg-navy-lt text-navy-md",
+        /* ── Backward-compatible aliases ── */
+        default:     "bg-navy text-white",
+        secondary:   "bg-navy-lt text-navy-md",
+        destructive: "bg-terra-lt text-terra",
+        outline:     "border border-hairline text-ink-2",
       },
     },
     defaultVariants: {
@@ -21,10 +29,27 @@ const badgeVariants = cva(
 
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
+    VariantProps<typeof badgeVariants> {
+  /** Show status dot before children */
+  dot?: boolean;
+}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return <div className={cn(badgeVariants({ variant }), className)} {...props} />;
+function Badge({ className, variant, dot, children, ...props }: BadgeProps) {
+  const autoDot = dot ?? (variant === "online" || variant === "sos" || variant === "call");
+  return (
+    <div className={cn(badgeVariants({ variant }), className)} {...props}>
+      {autoDot && (
+        <span
+          className={cn(
+            "inline-block h-[5px] w-[5px] rounded-full bg-current flex-shrink-0",
+            variant === "sos" && "animate-sos-beat",
+            variant === "online" && "animate-live-pulse",
+          )}
+        />
+      )}
+      {children}
+    </div>
+  );
 }
 
 export { Badge, badgeVariants };

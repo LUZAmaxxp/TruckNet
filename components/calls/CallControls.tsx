@@ -33,10 +33,14 @@ export function CallControls({
   return (
     <div
       className={cn(
-        "flex items-center justify-center gap-6 px-8 py-6",
-        "bg-background/80 backdrop-blur-md rounded-t-2xl border-t border-border",
+        "flex items-center justify-center gap-6 px-8 py-6 rounded-t-2xl",
         className
       )}
+      style={{
+        background: "rgba(247,245,241,0.92)",
+        backdropFilter: "blur(20px)",
+        borderTop: "1px solid var(--hairline)",
+      }}
     >
       {/* Mute/Unmute mic */}
       <ControlButton
@@ -66,12 +70,13 @@ export function CallControls({
       <div className="flex flex-col items-center gap-1.5">
         <button
           onClick={onEndCall}
-          className="w-14 h-14 rounded-full bg-destructive hover:bg-destructive/90 active:scale-95 transition-all flex items-center justify-center shadow-md"
+          className="w-14 h-14 rounded-full active:scale-95 transition-all flex items-center justify-center shadow-md"
+          style={{ background: "var(--terra)", color: "white" }}
           aria-label="End call"
         >
-          <PhoneOff className="w-6 h-6 text-white" />
+          <PhoneOff className="w-6 h-6" />
         </button>
-        <span className="text-[10px] text-muted-foreground">End</span>
+        <span className="font-mono text-[10px]" style={{ color: "var(--subtle)" }}>End</span>
       </div>
     </div>
   );
@@ -107,14 +112,19 @@ function ControlButton({
         className={cn(
           "w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-md",
           active && destructive
-            ? "bg-destructive/20 text-destructive hover:bg-destructive/30"
-            : "bg-muted text-foreground hover:bg-muted/80"
+            ? undefined
+            : undefined
         )}
         aria-label={active ? activeLabel : inactiveLabel}
+        style={
+          active && destructive
+            ? { background: "var(--terra-lt)", color: "var(--terra)" }
+            : { background: "var(--base)", border: "1px solid var(--hairline)", color: "var(--ink)" }
+        }
       >
         {active ? activeIcon : inactiveIcon}
       </button>
-      <span className="text-[10px] text-muted-foreground">
+      <span className="font-mono text-[10px]" style={{ color: "var(--subtle)" }}>
         {active ? activeLabel : inactiveLabel}
       </span>
     </div>

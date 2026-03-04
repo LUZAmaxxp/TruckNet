@@ -6,9 +6,13 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { AnimatePresence } from "framer-motion";
 import { useSocket } from "@/hooks/useSocket";
 import type { LiveDriverEntry } from "@/app/(admin)/admin/page";
-import type { FleetDriverUpdate } from "@/sockets/types";
+import type { FleetDriverUpdate, DriverRouteSetPayload, DriverRouteClearedPayload } from "@/sockets/types";
+import type { ActiveRoute } from "@/schemas/route.schema";
+import { DriverRouteOverlay } from "./DriverRouteOverlay";
+import { RouteInfoPanel } from "./RouteInfoPanel";
 
 // ---------------------------------------------------------------------------
 // Icon helpers
@@ -71,6 +75,8 @@ export interface FleetMapProps {
   initialDrivers: LiveDriverEntry[];
   /** If set, fly to this driver's position */
   focusDriverId?: string | null;
+  /** Set of driverIds that currently have an active route */
+  activeRoutesSummary?: { driverId: string }[];
 }
 
 /**
@@ -81,12 +87,25 @@ export interface FleetMapProps {
  * Green pin  = seen within last 1 minute
  * Yellow pin = seen within last 5 minutes
  */
-export function FleetMap({ initialDrivers, focusDriverId }: FleetMapProps) {
+export function FleetMap({ initialDrivers, focusDriverId, activeRoutesSummary = [] }: FleetMapProps) {
   const router = useRouter();
   const { on } = useSocket();
   const [drivers, setDrivers] = useState<LiveDriverEntry[]>(initialDrivers);
   const [callingId, setCallingId] = useState<string | null>(null);
   const initialSet = useRef(false);
+  /** driverId whose route is currently shown in the overlay */
+  const [selectedRouteDriverId, setSelectedRouteDriverId] = useState<string | null>(null);
+  const [activeRouteData, setActiveRouteData] = useState<ActiveRoute | null>(null);
+  /** Mutable set of driverIds that currently have active routes (updated via Ably) */
+  const [onRouteIds, setOnRouteIds] = useState<Set<string>>(
+    () => new Set(activeRoutesSummary.map((r) => r.driverId))
+  );
+
+  // Keep onRouteIds in sync when prop changes (initial SSR hydration)
+  useEffect(() => {
+    setOnRouteIds(new Set(activeRoutesSummary.map((r) => r.driverId)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoutesSummary.length]);
 
   // Accept updated initialDrivers (e.g. after parent SSR/first load)
   useEffect(() => {
@@ -125,6 +144,53 @@ export function FleetMap({ initialDrivers, focusDriverId }: FleetMapProps) {
     const unsub = on("driver_location_updated", handler);
     return unsub;
   }, [on]);
+
+  // Real-time route events
+  useEffect(() => {
+    const unsubSet = on("driver_route_set", (payload: DriverRouteSetPayload) => {
+      setOnRouteIds((prev) => new Set(Array.from(prev).concat(payload.driverId)));
+    });
+    const unsubCleared = on("driver_route_cleared", (payload: DriverRouteClearedPayload) => {
+      setOnRouteIds((prev) => {
+        const next = new Set(prev);
+        next.delete(payload.driverId);
+        return next;
+      });
+      // If the overlay is showing this driver, dismiss it
+      setSelectedRouteDriverId((cur) => {
+        if (cur === payload.driverId) {
+          setActiveRouteData(null);
+          return null;
+        }
+        return cur;
+      });
+    });
+    return () => {
+      unsubSet();
+      unsubCleared();
+    };
+  }, [on]);
+
+  async function handleViewRoute(driverId: string) {
+    if (selectedRouteDriverId === driverId) {
+      // Toggle off
+      setSelectedRouteDriverId(null);
+      setActiveRouteData(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/drivers/${driverId}/route`);
+      if (!res.ok) {
+        toast.error("Could not load route data");
+        return;
+      }
+      const json = (await res.json()) as { route: ActiveRoute };
+      setActiveRouteData(json.route);
+      setSelectedRouteDriverId(driverId);
+    } catch {
+      toast.error("Failed to fetch route");
+    }
+  }
 
   async function handleCall(driverId: string, type: "voice" | "video") {
     try {
@@ -175,6 +241,11 @@ export function FleetMap({ initialDrivers, focusDriverId }: FleetMapProps) {
 
         <MapFocuser focusDriverId={focusDriverId ?? null} drivers={drivers} />
 
+        {/* Active route overlay for selected driver */}
+        {activeRouteData && selectedRouteDriverId && (
+          <DriverRouteOverlay route={activeRouteData} />
+        )}
+
         {drivers.map((driver) => {
           const age = now - new Date(driver.updatedAt).getTime();
           const fresh = age < 60_000;
@@ -222,6 +293,14 @@ export function FleetMap({ initialDrivers, focusDriverId }: FleetMapProps) {
                     >
                       Message
                     </button>
+                    {onRouteIds.has(driver.id) && (
+                      <button
+                        onClick={() => void handleViewRoute(driver.id)}
+                        className="w-full text-center rounded bg-slate-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-slate-500 transition-colors mt-0.5"
+                      >
+                        {selectedRouteDriverId === driver.id ? "Hide Route" : "View Route"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </Popup>
@@ -234,6 +313,24 @@ export function FleetMap({ initialDrivers, focusDriverId }: FleetMapProps) {
       <div className="absolute bottom-3 left-3 z-10 rounded-lg bg-gray-900/90 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm">
         {drivers.length} driver{drivers.length !== 1 ? "s" : ""} online
       </div>
+
+      {/* Route info panel for selected driver */}
+      <AnimatePresence>
+        {activeRouteData && selectedRouteDriverId && (() => {
+          const driver = drivers.find((d) => d.id === selectedRouteDriverId);
+          return (
+            <RouteInfoPanel
+              route={activeRouteData}
+              driverName={driver?.name ?? "Driver"}
+              driverAvatar={driver?.profileImageUrl}
+              onClose={() => {
+                setSelectedRouteDriverId(null);
+                setActiveRouteData(null);
+              }}
+            />
+          );
+        })()}
+      </AnimatePresence>
     </div>
   );
 }

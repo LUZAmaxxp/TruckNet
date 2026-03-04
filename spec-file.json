@@ -2,14 +2,60 @@
   "project": {
     "name": "TruckNet",
     "type": "Real-Time Web Communication Platform",
-    "description": "A real-time interpersonal communication system for truck drivers enabling geolocation-based discovery, voice/video calling, voice and text messaging, emergency SOS alerts with Kafka-powered fan-out, friend management, and driver profiles with avatars."
+    "description": "A real-time interpersonal communication system for truck drivers enabling geolocation-based discovery, voice/video calling, voice and text messaging, emergency SOS alerts with Kafka-powered fan-out, friend management, driver profiles with avatars, and a fleet admin panel for monitoring drivers, SOS alerts, call history, and conversations."
+  },
+
+  "design_system": {
+    "name": "Warm Maritime Precision",
+    "palette": {
+      "--base": "#F7F5F1 (linen background)",
+      "--surface": "#FFFFFF (card surfaces)",
+      "--surface-2": "#F2F0EC (sidebar/inset surfaces)",
+      "--navy": "#1C3A5E",
+      "--navy-lt": "#EBF0F7",
+      "--navy-pale": "#D6E0EE",
+      "--navy-md": "#2E5F9A",
+      "--sage": "#3A6B52",
+      "--sage-lt": "#EAF2ED",
+      "--sage-md": "#4D8B6A",
+      "--terra": "#B85039",
+      "--terra-lt": "#F9EDEA",
+      "--honey": "#C98A2E",
+      "--honey-lt": "#FDF4E3",
+      "--slate": "#6678A0",
+      "--slate-lt": "#EEF0F7",
+      "--ink": "#1A1A24",
+      "--ink-2": "#3A3A4A",
+      "--subtle": "#8A8FA8",
+      "--muted": "#A0A5BC",
+      "--hairline": "#E6E3DC",
+      "--hairline-2": "#F0EDE6"
+    },
+    "typography": {
+      "font-display": "Bricolage Grotesque (headings, values, logos)",
+      "font-body": "Instrument Sans (labels, body text, UI copy)",
+      "font-mono": "JetBrains Mono (tags, timestamps, status badges, eyebrows)"
+    },
+    "shadows": {
+      "--shadow-xs": "0 1px 3px rgba(28,58,94,0.06)",
+      "--shadow-sm": "0 2px 8px rgba(28,58,94,0.08)",
+      "--shadow-md": "0 4px 16px rgba(28,58,94,0.10)",
+      "--shadow-lg": "0 8px 32px rgba(28,58,94,0.14)",
+      "--shadow-nav": "0 1px 0 rgba(28,58,94,0.06)"
+    },
+    "animations": {
+      "animate-live-pulse": "sage green dot for online status",
+      "animate-sos-beat": "terra red beat for active SOS alerts",
+      "animate-ring-expand / -delay-1 / -delay-2": "3-ring concentric expansion for voice call rooms (0 / 0.9s / 1.8s delay)"
+    }
   },
 
   "tech_stack": {
     "frontend": [
       "Next.js 14 (App Router)",
       "Tailwind CSS",
-      "shadcn/ui",
+      "shadcn/ui (Radix primitives)",
+      "Framer Motion (layout animations)",
       "Ably Realtime SDK (client)",
       "LiveKit Components React (voice/video rooms)",
       "MediaRecorder API",
@@ -51,7 +97,8 @@
     "schemas": {
       "UserRegisterSchema": {
         "file": "schemas/user.schema.ts",
-        "zod": "z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(8) })"
+        "zod": "z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(8), role: z.enum(['driver','admin']).default('driver'), adminInviteCode: z.string().optional() })",
+        "note": "role defaults to 'driver'. adminInviteCode is validated server-side against ADMIN_INVITE_CODE env var when role='admin'."
       },
       "UserLoginSchema": {
         "file": "schemas/user.schema.ts",
@@ -77,15 +124,21 @@
       },
       "EnvSchema": {
         "file": "schemas/env.schema.ts",
-        "zod": "z.object({ DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, SOCKET_PORT, ABLY_API_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, KAFKA_BROKERS, KAFKA_ENABLED })"
+        "zod": "z.object({ DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, SOCKET_PORT, ABLY_API_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, KAFKA_BROKERS, KAFKA_ENABLED, ADMIN_INVITE_CODE })"
       }
     }
   },
 
   "roles": [
     {
-      "name": "Driver",
-      "permissions": "Full access to all features"
+      "name": "driver",
+      "permissions": "Full access to all driver features: dashboard, map, messages, friends, profile, stress signals, voice/video calls"
+    },
+    {
+      "name": "admin",
+      "permissions": "Full access to fleet admin panel: driver monitoring, SOS management, conversation monitoring, call history, fleet map. Admin accounts require an ADMIN_INVITE_CODE at registration.",
+      "redirect_on_login": "/admin",
+      "api_guard": "requireAdminSession() — throws 401/403 on any non-admin session"
     }
   ],
 
@@ -94,12 +147,13 @@
     "authentication": {
       "provider": "Auth.js v5 Credentials",
       "session_strategy": "JWT",
-      "registration": "POST /api/auth/register — hashes password with bcrypt, auto-assigns unique tag (name#XXXX)",
+      "registration": "POST /api/auth/register — hashes password with bcrypt, auto-assigns unique tag (name#XXXX), supports role='driver'|'admin'. Admin registration requires matching ADMIN_INVITE_CODE env var.",
+      "login_redirect": "Middleware reads session.user.role and redirects: admin → /admin, driver → /dashboard",
       "ably_token": "GET /api/auth/ably-token — issues signed Ably TokenRequest; client never receives raw API key"
     },
 
     "user_profile": {
-      "fields": ["name", "email", "tag (e.g. john#1234)", "profileImageUrl"],
+      "fields": ["name", "email", "role", "tag (e.g. john#1234)", "profileImageUrl"],
       "api_get": "GET /api/profile",
       "api_update": "PATCH /api/profile (name)",
       "avatar_upload": "POST /api/profile/upload-avatar — multipart, stores file, updates profileImageUrl",
@@ -143,6 +197,7 @@
     "text_messaging": {
       "send": "POST /api/text-messages",
       "list": "GET /api/text-messages?with=<userId>",
+      "conversations": "GET /api/text-messages/conversations — returns unique conversation partners ordered by most recent message. Used by FriendsSidebar and AdminConversationList.",
       "real_time_notify": "Ably event text_message_received on user:<receiverId>",
       "status_enum": ["delivered", "read"]
     },
@@ -192,6 +247,44 @@
         "Ably event friend_request_accepted to original sender on accept"
       ],
       "status_enum": ["pending", "accepted", "rejected"]
+    },
+
+    "admin_panel": {
+      "description": "Fleet management panel accessible only to admin-role users. Secured by requireAdminSession() on all API routes and middleware redirect guard on all /admin pages.",
+      "layout": "AdminSidebar (56px logo + nav) + AdminHeader (14px title + user info) + page content area on bg-base",
+      "pages": {
+        "/admin": {
+          "description": "Fleet Overview dashboard",
+          "components": ["StatsBar (6 stat cards)", "FleetMap (Leaflet live driver positions, polled every 20s from /api/admin/drivers/live)", "SosPanel (real-time active SOS list)"]
+        },
+        "/admin/drivers": {
+          "description": "Driver roster management",
+          "components": ["DriverTable (search, online/offline filter, paginated, ghost action buttons for voice/video/message/map)"]
+        },
+        "/admin/sos": {
+          "description": "SOS alert monitoring",
+          "components": ["SosAlertCard list (active/resolved filter, resolve button, pagination)"]
+        },
+        "/admin/messages": {
+          "description": "Conversation monitoring — admin can read all conversations and compose messages",
+          "components": ["AdminConversationList (sidebar, conversations from /api/text-messages/conversations)", "AdminConversationThread (message thread)", "MessageComposerModal (admin → driver direct message)"]
+        },
+        "/admin/messages/[driverId]": {
+          "description": "Direct link to a specific driver conversation thread"
+        },
+        "/admin/calls": {
+          "description": "Call history table with type/status filters and pagination",
+          "components": ["CallHistoryTable"]
+        }
+      },
+      "stat_cards": [
+        "Total Drivers (navy)",
+        "Online Now (sage)",
+        "Active SOS (terra)",
+        "Ongoing Calls (honey)",
+        "Calls Today (slate)",
+        "Messages Today (slate)"
+      ]
     }
   },
 
@@ -229,7 +322,7 @@
       ]
     },
     "channel_topology": {
-      "user:<userId>": ["nearby_driver_update", "voice_message_received", "text_message_received", "friend_request_received", "friend_request_accepted", "call_incoming", "call_declined", "call_missed", "call_ended", "error"],
+      "user:<userId>": ["nearby_driver_update", "voice_message_received", "text_message_received", "friend_request_received", "friend_request_accepted", "call_incoming", "call_declined", "call_missed", "call_ended", "sos_resolved", "error"],
       "stress:alerts": ["stress_signal_alert"]
     },
     "server_events": {
@@ -237,6 +330,7 @@
       "voice_message_received": "VoiceMessageAlert — id, senderId, senderName, audioUrl, durationSeconds, createdAt",
       "text_message_received": "TextMessageAlert — id, senderId, senderName, content, createdAt",
       "stress_signal_alert": "StressSignalAlert — id, userId, senderName, latitude, longitude, createdAt",
+      "sos_resolved": "{ signalId } — sent to sender when an admin resolves their SOS alert",
       "friend_request_received": "FriendRequestAlert — requestId, fromUserId, fromUserName, fromUserTag",
       "friend_request_accepted": "FriendRequestAcceptedAlert — requestId, friendId, friendName, friendTag",
       "call_incoming": "CallIncomingAlert — roomName, type, callerName, callerAvatar, callerUserId, liveKitUrl, calleeToken",
@@ -273,7 +367,8 @@
     ],
     "text_messages": [
       "POST /api/text-messages",
-      "GET /api/text-messages"
+      "GET /api/text-messages?with=<userId>",
+      "GET /api/text-messages/conversations"
     ],
     "upload": [
       "POST /api/upload/audio"
@@ -296,6 +391,14 @@
       "DELETE /api/calls/[roomName]",
       "POST /api/calls/[roomName]/decline"
     ],
+    "admin": [
+      "GET /api/admin/stats",
+      "GET /api/admin/drivers",
+      "GET /api/admin/drivers/live",
+      "GET /api/admin/sos",
+      "PATCH /api/admin/sos/[id]/resolve",
+      "GET /api/admin/calls"
+    ],
     "health": [
       "GET /api/health"
     ]
@@ -303,17 +406,25 @@
 
   "pages": {
     "public": [
-      "/login",
-      "/register"
+      "/login — warm maritime sign-in card with role-based redirect note",
+      "/register — warm maritime card with driver/admin role selector and honey-styled admin invite code field"
     ],
-    "protected": [
+    "protected_driver": [
       "/dashboard — location broadcast, nearby drivers list, real-time alerts",
       "/map — Leaflet interactive map; ?focus=<userId> auto-selects a specific driver",
-      "/messages — voice message inbox + send; text message conversations",
+      "/messages — FriendsSidebar conversation list + ChatPanel (text + voice messages)",
       "/friends — friend list with call/message/location actions; pending requests",
       "/profile — view/edit name, upload avatar, view tag",
       "/stress — send SOS signal, view and resolve active signals",
       "/calls/[roomName] — LiveKit voice/video call room; ?type=voice|video"
+    ],
+    "protected_admin": [
+      "/admin — Fleet Overview: StatsBar + FleetMap + SosPanel",
+      "/admin/drivers — DriverTable with search, status filter, pagination, action buttons",
+      "/admin/sos — SOS alerts list with active/resolved filter, resolve action, pagination",
+      "/admin/messages — AdminConversationList + AdminConversationThread + MessageComposerModal",
+      "/admin/messages/[driverId] — Direct conversation thread with a specific driver",
+      "/admin/calls — CallHistoryTable with type/status filters and pagination"
     ]
   },
 
@@ -324,10 +435,12 @@
       "name": "text not null",
       "email": "text unique not null",
       "password_hash": "text not null",
+      "role": "enum(driver, admin) not null default 'driver'",
       "tag": "varchar(20) unique not null",
       "tag_number": "integer not null",
       "profile_image_url": "varchar(255) nullable",
-      "created_at": "timestamp with timezone"
+      "created_at": "timestamp with timezone",
+      "indexes": ["role"]
     },
 
     "driver_locations": {
@@ -394,7 +507,8 @@
   },
 
   "security_requirements": [
-    "All API routes protected by Auth.js session check",
+    "All driver API routes protected by requireAuth() — returns 401 if unauthenticated",
+    "All admin API routes protected by requireAdminSession() — returns 401/403 for non-admin sessions",
     "All API inputs validated with Zod before processing",
     "Passwords hashed with bcrypt",
     "HTTPS only in production",
@@ -402,7 +516,8 @@
     "Ably Token Auth — clients never receive the raw Ably API key",
     "LiveKit JWT tokens scoped to a single room with 8-hour TTL",
     "Friend-only call restriction — POST /api/calls/initiate verifies accepted friendship",
-    "Friend-only location restriction — GET /api/friends/[id]/location returns 403 if not friends"
+    "Friend-only location restriction — GET /api/friends/[id]/location returns 403 if not friends",
+    "Admin invite code required for admin registration — validated against ADMIN_INVITE_CODE env var"
   ],
 
   "non_functional_requirements": {

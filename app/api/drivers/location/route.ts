@@ -4,8 +4,8 @@ import { validateOrThrow } from "@/lib/validate";
 import { successResponse } from "@/lib/api";
 import { LocationUpdateSchema } from "@/schemas/location.schema";
 import { db } from "@/db";
-import { driverLocations, users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { driverLocations, users, driverRoutes } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 import { setDriverLocation, getAllDriverLocations } from "@/sockets/store/location.store";
 import { haversineDistanceKm } from "@/lib/haversine";
 import { ablyPublish } from "@/lib/ably-server";
@@ -116,6 +116,45 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("[location] Fleet channel Ably publish failed:", err);
+  }
+
+  // ── 7. Auto-arrival: mark route complete if within 300 m of destination ──
+  try {
+    const [activeRoute] = await db
+      .select({
+        id: driverRoutes.id,
+        destinationLat: driverRoutes.destinationLat,
+        destinationLng: driverRoutes.destinationLng,
+      })
+      .from(driverRoutes)
+      .where(and(eq(driverRoutes.driverId, userId), eq(driverRoutes.status, "active")))
+      .limit(1);
+
+    if (activeRoute) {
+      const distKm = haversineDistanceKm(
+        latitude,
+        longitude,
+        activeRoute.destinationLat,
+        activeRoute.destinationLng
+      );
+
+      if (distKm <= 0.3) {
+        await db
+          .update(driverRoutes)
+          .set({ status: "completed", completedAt: new Date() })
+          .where(eq(driverRoutes.id, activeRoute.id));
+
+        await ablyPublish("fleet:locations", "driver_route_cleared", {
+          driverId: userId,
+          reason: "arrived",
+        });
+
+        console.log(`[location] Auto-arrival: route ${activeRoute.id} completed for driver ${userId}`);
+      }
+    }
+  } catch (err) {
+    // Non-critical — location update still succeeds even if route check fails
+    console.error("[location] Auto-arrival check failed:", err);
   }
 
   return successResponse({ latitude, longitude }, 200);

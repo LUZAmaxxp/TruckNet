@@ -7,8 +7,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useSocket } from "@/hooks/useSocket";
 import { StressSignalBadge, type StressSignalData } from "@/components/stress/StressSignalBadge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 export default function StressPage() {
   const { on, emit } = useSocket();
 
@@ -96,36 +94,66 @@ export default function StressPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <motion.div
+      className="space-y-6"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold">Stress Signal</h1>
-        <p className="text-muted-foreground text-sm">
+        <div className="mb-2 flex items-center gap-3">
+          <span className="inline-block h-[1.5px] w-4 rounded-full" style={{ background: "var(--navy-md)" }} />
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--navy-md)" }}>
+            Safety
+          </span>
+        </div>
+        <h1 className="font-display text-[26px] font-bold leading-tight tracking-[-0.03em]" style={{ color: "var(--ink)" }}>
+          Stress Signal
+        </h1>
+        <p className="mt-1 text-[14px]" style={{ color: "var(--muted)" }}>
           Alert nearby drivers within 50 km in case of emergency.
         </p>
       </div>
 
-      {/* Animated emergency button card */}
-      <Card className="border-destructive/30 overflow-hidden">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Shield className="h-4 w-4 text-destructive" />
+      {/* Emergency button card */}
+      <div
+        className="rounded-lg border p-6 overflow-hidden"
+        style={{
+          background: "linear-gradient(145deg, var(--terra-lt), var(--surface))",
+          borderColor: "rgba(184,80,57,0.15)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="h-4 w-4" style={{ color: "var(--terra)" }} />
+          <span className="font-display text-[14px] font-semibold tracking-[-0.01em]" style={{ color: "var(--ink)" }}>
             Emergency Alert
-          </CardTitle>
-          <CardDescription>
-            Sends an immediate alert to all connected drivers within 50 km.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center py-6 gap-4">
-          {/* Breathing glow ring + button */}
-          <div className="relative flex items-center justify-center">
-            {/* Outer breathing ring — animates only when idle */}
+          </span>
+        </div>
+        <p className="text-[12px] mb-6" style={{ color: "var(--muted)" }}>
+          Sends an immediate alert to all connected drivers within 50 km. Limited to 3 alerts per 10 minutes.
+        </p>
+
+        {/* Ring system + SOS button */}
+        <div className="flex flex-col items-center gap-6">
+          <div className="relative flex items-center justify-center" style={{ width: 200, height: 200 }}>
+            {/* Concentric expanding rings */}
             {!sendingSignal && !justSent && (
-              <motion.div
-                className="absolute inset-0 rounded-full bg-destructive/20"
-                animate={{ scale: [1, 1.25, 1], opacity: [0.6, 0, 0.6] }}
-                transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-                style={{ width: 120, height: 120, borderRadius: "50%" }}
-              />
+              <>
+                <div
+                  className="absolute rounded-full border-[1.5px] animate-ring-expand"
+                  style={{ width: 164, height: 164, borderColor: "var(--terra-md)" }}
+                />
+                <div
+                  className="absolute rounded-full border-[1.5px] animate-ring-expand-delay-1"
+                  style={{ width: 164, height: 164, borderColor: "var(--terra-md)" }}
+                />
+                <div
+                  className="absolute rounded-full border-[1.5px] animate-ring-expand-delay-2"
+                  style={{ width: 164, height: 164, borderColor: "var(--terra-md)" }}
+                />
+              </>
             )}
 
             <motion.button
@@ -135,7 +163,13 @@ export default function StressPage() {
               whileHover={{ scale: 1.04 }}
               transition={{ type: "spring", stiffness: 350, damping: 20 }}
               aria-label="Send emergency stress signal"
-              className="relative z-10 flex flex-col items-center justify-center w-28 h-28 rounded-full bg-destructive text-destructive-foreground font-bold text-sm shadow-lg shadow-destructive/40 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-4 focus-visible:ring-destructive/50"
+              className="relative z-10 flex flex-col items-center justify-center rounded-full text-white font-bold disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none"
+              style={{
+                width: 96,
+                height: 96,
+                background: "var(--terra)",
+                boxShadow: "0 6px 24px rgba(184,80,57,0.4)",
+              }}
             >
               <AnimatePresence mode="wait">
                 {sendingSignal ? (
@@ -148,33 +182,38 @@ export default function StressPage() {
                   </motion.span>
                 ) : (
                   <motion.span key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-1">
-                    <AlertTriangle className="h-8 w-8" />
-                    <span className="text-[11px] leading-tight text-center">SEND SOS</span>
+                    <AlertTriangle className="h-7 w-7" />
+                    <span className="text-[10px] leading-tight font-mono tracking-[0.06em]">SOS</span>
                   </motion.span>
                 )}
               </AnimatePresence>
             </motion.button>
           </div>
-          <p className="text-xs text-muted-foreground text-center max-w-xs">
-            Tap the button to alert all nearby drivers. Limited to 3 alerts per 10 minutes.
-          </p>
 
-          {/* Inline confirmation — fades in when SOS tapped */}
+          {/* Confirmation inline */}
           <AnimatePresence>
             {confirmOpen && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.22 }}
+                transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
                 className="overflow-hidden w-full max-w-xs"
               >
-                <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex flex-col gap-3 text-center">
-                  <p className="text-sm font-medium text-destructive">This will alert all drivers within 50 km. Confirm?</p>
+                <div
+                  className="rounded-[12px] p-4 flex flex-col gap-3 text-center"
+                  style={{
+                    background: "rgba(184,80,57,0.05)",
+                    border: "1px solid rgba(184,80,57,0.2)",
+                  }}
+                >
+                  <p className="text-[13px] font-medium" style={{ color: "var(--terra)" }}>
+                    This will alert all drivers within 50 km. Confirm?
+                  </p>
                   <div className="flex gap-2 justify-center">
                     <Button variant="ghost" size="sm" onClick={() => setConfirmOpen(false)}>Cancel</Button>
-                    <Button variant="destructive" size="sm" onClick={triggerStressSignal}>
-                      <AlertTriangle className="h-4 w-4 mr-1" />
+                    <Button variant="danger" size="sm" onClick={triggerStressSignal}>
+                      <AlertTriangle className="h-3.5 w-3.5 mr-1.5" />
                       Send Alert
                     </Button>
                   </div>
@@ -182,10 +221,10 @@ export default function StressPage() {
               </motion.div>
             )}
           </AnimatePresence>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {/* Live alerts — animated */}
+      {/* Live alerts from this session */}
       <AnimatePresence>
         {liveAlerts.length > 0 && (
           <motion.div
@@ -193,7 +232,17 @@ export default function StressPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
           >
-            <h2 className="text-lg font-semibold mb-3">Live Alerts (This Session)</h2>
+            <div className="mb-[14px] flex items-center gap-2">
+              <span className="font-display text-[13px] font-semibold leading-none tracking-[-0.01em]" style={{ color: "var(--ink-2)" }}>
+                Live Alerts
+              </span>
+              <span
+                className="inline-flex items-center rounded-[10px] px-[7px] py-[2px] font-mono text-[10px] font-semibold animate-sos-beat"
+                style={{ background: "var(--terra-lt)", color: "var(--terra)" }}
+              >
+                {liveAlerts.length}
+              </span>
+            </div>
             <div className="space-y-2">
               <AnimatePresence mode="popLayout">
                 {liveAlerts.map((alert) => (
@@ -213,28 +262,34 @@ export default function StressPage() {
         )}
       </AnimatePresence>
 
-      {liveAlerts.length > 0 && <Separator />}
-
       {/* Active signals from API */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold">Active Signals (50 km, 30 min window)</h2>
+        <div className="flex items-center justify-between mb-[14px]">
+          <div className="flex items-center gap-2">
+            <span className="font-display text-[13px] font-semibold leading-none tracking-[-0.01em]" style={{ color: "var(--ink-2)" }}>
+              Active Signals
+            </span>
+            <span className="font-mono text-[10px]" style={{ color: "var(--muted)" }}>50 km · 30 min window</span>
+          </div>
           <Button variant="ghost" size="sm" onClick={fetchActive} disabled={loadingSignals}>
-            <RefreshCw className={`h-4 w-4 mr-1 ${loadingSignals ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loadingSignals ? "animate-spin" : ""}`} />
             Refresh
           </Button>
         </div>
 
         {loadingSignals ? (
           <div className="flex justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <Loader2 className="h-6 w-6 animate-spin" style={{ color: "var(--muted)" }} />
           </div>
         ) : activeSignals.length === 0 ? (
-          <Card>
-            <CardContent className="py-8 text-center text-muted-foreground text-sm">
-              No active stress signals in your area.
-            </CardContent>
-          </Card>
+          <div
+            className="rounded-lg border py-10 text-center"
+            style={{ background: "var(--surface)", borderColor: "var(--hairline)", boxShadow: "var(--shadow-sm)" }}
+          >
+            <p className="text-[32px] mb-2">🛡️</p>
+            <p className="font-display text-[13px] font-semibold" style={{ color: "var(--ink-2)" }}>No active SOS alerts</p>
+            <p className="mt-1 text-[12px]" style={{ color: "var(--muted)" }}>Fleet is operating normally</p>
+          </div>
         ) : (
           <div className="space-y-2">
             {activeSignals.map((signal) => (
@@ -243,6 +298,6 @@ export default function StressPage() {
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }

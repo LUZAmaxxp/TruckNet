@@ -44,6 +44,7 @@ export default function AdminDashboardPage() {
   const [liveDrivers, setLiveDrivers] = useState<LiveDriverEntry[]>([]);
   const [sosAlerts, setSosAlerts] = useState<SosAdminEntry[]>([]);
   const [focusDriverId, setFocusDriverId] = useState<string | null>(null);
+  const [activeRoutesSummary, setActiveRoutesSummary] = useState<{ driverId: string }[]>([]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -78,12 +79,26 @@ export default function AdminDashboardPage() {
     }
   }, []);
 
+  const fetchActiveRoutes = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/routes/active");
+      if (res.ok) {
+        const json = await res.json();
+        const routes = (json.routes ?? []) as { driverId: string }[];
+        setActiveRoutesSummary(routes.map((r) => ({ driverId: r.driverId })));
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
   // Initial fetch
   useEffect(() => {
     void fetchStats();
     void fetchLiveDrivers();
     void fetchSosAlerts();
-  }, [fetchStats, fetchLiveDrivers, fetchSosAlerts]);
+    void fetchActiveRoutes();
+  }, [fetchStats, fetchLiveDrivers, fetchSosAlerts, fetchActiveRoutes]);
 
   // Stats auto-refresh every 30 seconds
   useEffect(() => {
@@ -117,10 +132,11 @@ export default function AdminDashboardPage() {
 
       {/* Main content: map + SOS sidebar */}
       <div className="flex flex-1 gap-4 overflow-hidden min-h-0">
-        <div className="flex-1 rounded-xl overflow-hidden border border-gray-800">
+        <div className="flex-1 overflow-hidden" style={{ borderRadius: 12, border: "1px solid var(--hairline)" }}>
           <FleetMap
             initialDrivers={liveDrivers}
             focusDriverId={focusDriverId}
+            activeRoutesSummary={activeRoutesSummary}
           />
         </div>
         <div className="w-80 shrink-0 overflow-y-auto">

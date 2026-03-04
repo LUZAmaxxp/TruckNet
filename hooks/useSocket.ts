@@ -24,7 +24,7 @@ type AnyHandler   = (data: any) => void;
 const STRESS_EVENTS = new Set<EventName>(["stress_signal_alert"]);
 
 /** Events delivered on the shared "fleet:locations" channel (admin map) */
-const FLEET_EVENTS = new Set<EventName>(["driver_location_updated"]);
+const FLEET_EVENTS = new Set<EventName>(["driver_location_updated", "driver_route_set", "driver_route_cleared"]);
 
 interface SocketContextValue {
   on:          <E extends EventName>(event: E, handler: ServerToClientEvents[E]) => () => void;
@@ -80,6 +80,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       "call_missed",
       "call_ended",
       "driver_location_updated",
+      "driver_route_set",
+      "driver_route_cleared",
       "error",
     ];
 

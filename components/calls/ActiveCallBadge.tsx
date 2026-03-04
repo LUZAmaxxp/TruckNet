@@ -68,18 +68,19 @@ export function ActiveCallBadge() {
           className="fixed top-14 left-0 right-0 z-40 flex justify-center px-4 pointer-events-none"
         >
           <div
-            className={cn(
-              "pointer-events-auto",
-              "flex items-center gap-3 px-4 py-2 rounded-full",
-              "bg-green-500/95 text-white shadow-xl backdrop-blur-sm",
-              "max-w-sm w-full"
-            )}
+            className="pointer-events-auto flex items-center gap-3 px-4 py-[10px] max-w-sm w-full"
+            style={{
+              background: "var(--surface)",
+              border: "1px solid var(--hairline)",
+              borderRadius: "var(--radius-xl)",
+              boxShadow: "var(--shadow-lg)",
+            }}
           >
-            {/* Pulsing dot */}
-            <span className="relative flex h-3 w-3 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-40" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-white" />
-            </span>
+            {/* Live sage dot */}
+            <span
+              className="h-[9px] w-[9px] rounded-full shrink-0 animate-live-pulse"
+              style={{ background: "var(--sage-md)" }}
+            />
 
             {/* Return to call — takes up the flex space */}
             <button
@@ -87,18 +88,19 @@ export function ActiveCallBadge() {
               className="flex-1 flex items-center gap-2 text-left"
               aria-label="Return to call"
             >
-              <Phone className="w-4 h-4 shrink-0" />
-              <span className="text-sm font-medium truncate">Active call</span>
-              <span className="text-sm font-mono ml-auto pr-2">{formatElapsed(elapsed)}</span>
+              <Phone className="w-4 h-4 shrink-0" style={{ color: "var(--sage)" }} />
+              <span className="font-body text-[13px] font-semibold truncate" style={{ color: "var(--ink)" }}>Active call</span>
+              <span className="font-mono text-[11px] ml-auto pr-2" style={{ color: "var(--slate)" }}>{formatElapsed(elapsed)}</span>
             </button>
 
             {/* End call */}
             <button
               onClick={() => void endCall()}
-              className="shrink-0 p-1.5 rounded-full hover:bg-white/20 transition-colors"
+              className="shrink-0 p-1.5 rounded-[8px] transition-colors"
+              style={{ color: "var(--terra)" }}
               aria-label="End call"
             >
-              <PhoneOff className="w-4 h-4" />
+              <PhoneOff className="w-4 h-4" style={{ color: "var(--terra)" }} />
             </button>
           </div>
         </motion.div>

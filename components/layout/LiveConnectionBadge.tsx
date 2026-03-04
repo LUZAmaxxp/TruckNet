@@ -21,20 +21,20 @@ export function LiveConnectionBadge() {
   return (
     <span
       title={isOnline ? "Connected" : "Offline"}
-      className="flex items-center gap-1.5 text-xs font-medium"
+      className={cn(
+        "inline-flex items-center gap-[6px] rounded-[20px] px-[10px] py-[4px] text-[11px] font-semibold transition-colors duration-300",
+        isOnline
+          ? "bg-sage-lt text-sage"
+          : "bg-terra-lt text-terra"
+      )}
     >
       <span
         className={cn(
-          "inline-block h-2 w-2 rounded-full transition-colors",
-          isOnline
-            ? "bg-green-500 shadow-[0_0_6px_2px_rgba(34,197,94,0.4)]"
-            : "bg-red-500 animate-pulse"
+          "inline-block h-[5px] w-[5px] rounded-full bg-current flex-shrink-0",
+          isOnline ? "animate-live-pulse" : "animate-sos-beat"
         )}
       />
-      <span className={cn(
-        "hidden sm:inline transition-colors",
-        isOnline ? "text-green-600 dark:text-green-400" : "text-red-500"
-      )}>
+      <span className="hidden sm:inline">
         {isOnline ? "Live" : "Offline"}
       </span>
     </span>

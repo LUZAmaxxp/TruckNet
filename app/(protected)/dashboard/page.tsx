@@ -3,11 +3,10 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, MapPin, Navigation, Users, Wifi, WifiOff } from "lucide-react";
+import { Loader2, Navigation } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSocket } from "@/hooks/useSocket";
 import { DriverCard } from "@/components/drivers/DriverCard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { NearbyDriverEntry } from "@/sockets/types";
@@ -133,69 +132,128 @@ export default function DashboardPage() {
   }, [on, router]);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <motion.div
+      className="space-y-6 animate-screen-in"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {/* Page header */}
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground text-sm">Real-time driver network overview</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Socket connection indicator */}
-          <span className="flex items-center gap-1.5 text-xs font-medium">
-            {isConnected
-              ? <Wifi className="h-3.5 w-3.5 text-green-500" />
-              : <WifiOff className="h-3.5 w-3.5 text-amber-500 animate-pulse" />}
-            <span className={isConnected ? "text-green-600 dark:text-green-400" : "text-amber-500"}>
-              {isConnected ? "Live" : "Reconnecting…"}
+          <div className="mb-2 flex items-center gap-3">
+            <span
+              className="inline-block h-[1.5px] w-4 rounded-full"
+              style={{ background: "var(--navy-md)" }}
+            />
+            <span
+              className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]"
+              style={{ color: "var(--navy-md)" }}
+            >
+              Driver Portal
             </span>
+          </div>
+          <h1
+            className="font-display text-[26px] font-bold leading-tight tracking-[-0.03em]"
+            style={{ color: "var(--ink)" }}
+          >
+            Dashboard
+          </h1>
+          <p className="mt-1 text-[14px]" style={{ color: "var(--muted)" }}>
+            {broadcasting
+              ? `Broadcasting · ${nearbyDrivers.length} driver${nearbyDrivers.length !== 1 ? "s" : ""} nearby`
+              : "Acquiring location…"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Connection status */}
+          <span
+            className="inline-flex items-center gap-[6px] rounded-[20px] px-[10px] py-[4px] text-[11px] font-semibold"
+            style={
+              isConnected
+                ? { background: "var(--sage-lt)", color: "var(--sage)" }
+                : { background: "var(--honey-lt)", color: "var(--honey)" }
+            }
+          >
+            <span
+              className={`inline-block h-[5px] w-[5px] rounded-full bg-current ${isConnected ? "animate-live-pulse" : "animate-sos-beat"}`}
+            />
+            {isConnected ? "Live" : "Reconnecting…"}
           </span>
-          <Button onClick={updateLocation} variant="outline" size="sm">
-            <Navigation className="h-4 w-4 mr-2" />
-            Refresh Location
+          <Button onClick={updateLocation} variant="soft" size="sm">
+            <Navigation className="mr-1.5 h-3.5 w-3.5" />
+            Refresh
           </Button>
         </div>
       </div>
 
-      {/* Location status */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <MapPin className="h-4 w-4" /> My Location
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {geoError ? (
-            <p className="text-sm text-destructive">{geoError}</p>
-          ) : myLocation ? (
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-mono">
-                {myLocation.lat.toFixed(5)}, {myLocation.lng.toFixed(5)}
-              </p>
-              {broadcasting && (
-                <Badge variant="secondary" className="text-xs">
-                  <span className="h-2 w-2 rounded-full bg-green-500 inline-block mr-1" />
-                  Broadcasting
-                </Badge>
-              )}
+      {/* Location card */}
+      <div
+        className="relative overflow-hidden rounded-lg border p-5"
+        style={{
+          background: "var(--surface)",
+          borderColor: "var(--hairline)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div
+              className="flex h-8 w-8 items-center justify-center rounded-sm text-[16px]"
+              style={{ background: "var(--navy-lt)" }}
+            >
+              📍
             </div>
-          ) : (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Acquiring location…</span>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            <span
+              className="font-display text-[14px] font-semibold tracking-[-0.01em]"
+              style={{ color: "var(--ink)" }}
+            >
+              My Location
+            </span>
+          </div>
+          {broadcasting && <Badge variant="online">Broadcasting</Badge>}
+        </div>
+
+        {geoError ? (
+          <div
+            className="rounded-sm px-[14px] py-[10px] text-[13px]"
+            style={{ background: "var(--terra-lt)", color: "var(--terra)" }}
+          >
+            {geoError}
+          </div>
+        ) : myLocation ? (
+          <div
+            className="rounded-sm px-[14px] py-3"
+            style={{ background: "var(--base)", border: "1px solid var(--hairline)" }}
+          >
+            <p className="font-mono text-[13px] font-medium" style={{ color: "var(--navy)" }}>
+              {myLocation.lat.toFixed(5)},&nbsp;{myLocation.lng.toFixed(5)}
+            </p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2" style={{ color: "var(--muted)" }}>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-[13px]">Acquiring location…</span>
+          </div>
+        )}
+      </div>
 
       {/* Nearby drivers */}
       <div>
-        <div className="flex items-center gap-2 mb-3">
-          <h2 className="text-lg font-semibold">Nearby Drivers</h2>
-          <Badge variant={nearbyDrivers.length > 0 ? "default" : "secondary"}>
-            <Users className="h-3 w-3 mr-1" />
+        {/* Section title */}
+        <div className="mb-[14px] flex items-center gap-2">
+          <span
+            className="font-display text-[13px] font-semibold leading-none tracking-[-0.01em]"
+            style={{ color: "var(--ink-2)" }}
+          >
+            Nearby Drivers
+          </span>
+          <span
+            className="inline-flex items-center rounded-[10px] px-[7px] py-[2px] font-mono text-[10px]"
+            style={{ background: "var(--hairline-2)", color: "var(--muted)" }}
+          >
             {nearbyDrivers.length}
-          </Badge>
+          </span>
         </div>
 
         {nearbyDrivers.length === 0 ? (
@@ -204,23 +262,37 @@ export default function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
           >
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground text-sm">
-                No drivers within 50 km. Position is broadcasting every 20 seconds.
-              </CardContent>
-            </Card>
+            <div
+              className="rounded-lg border py-10 text-center"
+              style={{
+                background: "var(--surface)",
+                borderColor: "var(--hairline)",
+                boxShadow: "var(--shadow-sm)",
+              }}
+            >
+              <p className="text-[32px] mb-2">🚛</p>
+              <p
+                className="font-display text-[13px] font-semibold"
+                style={{ color: "var(--ink-2)" }}
+              >
+                No drivers within 50 km
+              </p>
+              <p className="mt-1 text-[12px]" style={{ color: "var(--muted)" }}>
+                Position is broadcasting every 20 seconds
+              </p>
+            </div>
           </motion.div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             <AnimatePresence mode="popLayout">
-              {nearbyDrivers.map((driver) => (
+              {nearbyDrivers.map((driver, i) => (
                 <motion.div
                   key={driver.userId}
                   layout
-                  initial={{ opacity: 0, scale: 0.95, y: 12 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.92, y: -8 }}
-                  transition={{ duration: 0.25, ease: "easeOut" }}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                  transition={{ duration: 0.18, delay: i * 0.04, ease: "easeOut" }}
                 >
                   <DriverCard
                     driver={driver}
@@ -232,6 +304,6 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -4,12 +4,15 @@ import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Navigation, Loader2, MessageSquare, X, Users } from "lucide-react";
+import { Navigation, Loader2, MessageSquare, X, Users, Flag } from "lucide-react";
 import { useSocket } from "@/hooks/useSocket";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { NearbyDriverEntry } from "@/sockets/types";
+import { RouteSetupModal } from "@/components/map/RouteSetupModal";
+import { RouteInfoBar } from "@/components/map/RouteInfoBar";
+import type { ActiveRoute } from "@/schemas/route.schema";
 
 // ---------------------------------------------------------------------------
 // Dynamically import the Leaflet map — must be ssr:false (Leaflet needs window)
@@ -49,8 +52,36 @@ function MapPageInner() {
   const [loading, setLoading] = useState(false);
   /** Full driver object persisted on click — survives socket-driven drivers list replacements. */
   const [selectedDriver, setSelectedDriver] = useState<DriverWithMeta | null>(null);
+  /** Active route for this driver (null = none) */
+  const [activeRoute, setActiveRoute] = useState<ActiveRoute | null>(null);
+  const [routeModalOpen, setRouteModalOpen] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Fetch active route on mount to restore state after page reload
+  useEffect(() => {
+    async function fetchActiveRoute() {
+      try {
+        const res = await fetch("/api/drivers/route");
+        if (res.ok) {
+          const json = (await res.json()) as { route: ActiveRoute | null };
+          setActiveRoute(json.route ?? null);
+        }
+      } catch {
+        // non-critical
+      }
+    }
+    void fetchActiveRoute();
+  }, []);
+
+  const handleClearRoute = useCallback(async () => {
+    try {
+      await fetch("/api/drivers/route?reason=cancelled", { method: "DELETE" });
+    } catch {
+      // silent
+    }
+    setActiveRoute(null);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Core location broadcast + DB fetch (same contract as before)
@@ -179,6 +210,14 @@ function MapPageInner() {
           {geoError && (
             <span className="text-xs text-destructive hidden sm:block">{geoError}</span>
           )}
+          <Button
+            onClick={() => setRouteModalOpen(true)}
+            variant="outline"
+            size="sm"
+          >
+            <Flag className="h-4 w-4 mr-2 text-[var(--terra)]" />
+            {activeRoute ? "Change Destination" : "Set Destination"}
+          </Button>
           <Button onClick={broadcastAndFetch} variant="outline" size="sm" disabled={loading}>
             {loading ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -206,7 +245,14 @@ function MapPageInner() {
           selectedDriverId={selectedDriver?.userId ?? null}
           onSelectDriver={handleSelectDriver}
           onSendMessage={(id) => router.push(`/messages?to=${id}`)}
+          activeRoute={activeRoute}
+          onClearRoute={handleClearRoute}
         />
+
+        {/* Route info bar — shown when driver has an active route */}
+        {activeRoute && (
+          <RouteInfoBar route={activeRoute} onClearRoute={handleClearRoute} />
+        )}
 
         {/* Selected driver overlay card */}
         {selectedDriver !== null && (
@@ -259,6 +305,17 @@ function MapPageInner() {
       <p className="text-xs text-muted-foreground text-center">
         Tap a marker to view driver info • Updates every 20 s via WebSocket
       </p>
+
+      {/* Route setup modal */}
+      <RouteSetupModal
+        open={routeModalOpen}
+        onClose={() => setRouteModalOpen(false)}
+        currentPosition={myLocation}
+        onRouteSet={(route) => {
+          setActiveRoute(route);
+          setRouteModalOpen(false);
+        }}
+      />
     </div>
   );
 }

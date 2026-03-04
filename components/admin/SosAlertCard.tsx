@@ -38,11 +38,13 @@ export function SosAlertCard({ alert, onResolve, onViewOnMap }: SosAlertCardProp
 
   return (
     <div
-      className={`rounded-xl border p-3 transition-colors ${
-        isActive
-          ? "border-red-800/60 bg-red-950/30"
-          : "border-gray-800 bg-gray-900/50"
-      }`}
+      className="rounded-[12px] p-3 transition-colors"
+      style={{
+        border: isActive ? "1px solid rgba(184,80,57,0.3)" : "1px solid var(--hairline)",
+        background: isActive
+          ? "linear-gradient(145deg, var(--terra-lt), var(--surface))"
+          : "var(--base)",
+      }}
     >
       <div className="flex items-start gap-3">
         {/* Avatar / icon */}
@@ -54,26 +56,29 @@ export function SosAlertCard({ alert, onResolve, onViewOnMap }: SosAlertCardProp
               className="h-9 w-9 rounded-full object-cover"
             />
           ) : (
-            <div className="h-9 w-9 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-sm font-bold">
+            <div
+              className="h-9 w-9 rounded-full flex items-center justify-center font-display text-[13px] font-bold"
+              style={{ background: "var(--navy-lt)", color: "var(--navy)" }}
+            >
               {alert.senderName[0]?.toUpperCase() ?? "?"}
             </div>
           )}
           {isActive && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
-            </span>
+            <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full animate-sos-beat" style={{ background: "var(--terra)" }} />
           )}
         </div>
 
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <AlertTriangle className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-red-400" : "text-gray-500"}`} />
-            <p className="text-sm font-semibold text-white truncate">{alert.senderName}</p>
-            <span className="text-[11px] text-gray-500">@{alert.senderTag}</span>
+            <AlertTriangle
+              className="h-3.5 w-3.5 shrink-0"
+              style={{ color: isActive ? "var(--terra)" : "var(--muted)" }}
+            />
+            <p className="font-body text-[13px] font-semibold truncate" style={{ color: "var(--ink)" }}>{alert.senderName}</p>
+            <span className="font-mono text-[10px]" style={{ color: "var(--subtle)" }}>@{alert.senderTag}</span>
           </div>
-          <p className="text-[11px] text-gray-400 mt-0.5">
+          <p className="font-mono text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>
             {alert.latitude.toFixed(5)}, {alert.longitude.toFixed(5)} · {formatElapsed(alert.createdAt)}
           </p>
 
@@ -83,7 +88,8 @@ export function SosAlertCard({ alert, onResolve, onViewOnMap }: SosAlertCardProp
               <button
                 onClick={() => void handleResolve()}
                 disabled={resolving}
-                className="flex items-center gap-1 rounded-md bg-green-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-600 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1 rounded-[8px] px-2.5 py-1 font-body text-[12px] font-semibold transition-colors disabled:opacity-50"
+                style={{ background: "var(--sage)", color: "white" }}
               >
                 <CheckCircle className="h-3 w-3" />
                 {resolving ? "Resolving…" : "Resolve"}
@@ -92,14 +98,15 @@ export function SosAlertCard({ alert, onResolve, onViewOnMap }: SosAlertCardProp
             {onViewOnMap && (
               <button
                 onClick={() => onViewOnMap(alert.userId)}
-                className="flex items-center gap-1 rounded-md bg-gray-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-gray-600 transition-colors"
+                className="flex items-center gap-1 rounded-[8px] px-2.5 py-1 font-body text-[12px] font-semibold transition-colors"
+                style={{ background: "var(--base)", border: "1px solid var(--hairline)", color: "var(--ink)" }}
               >
                 <MapPin className="h-3 w-3" />
                 View on Map
               </button>
             )}
             {!isActive && (
-              <span className="text-[11px] font-medium text-green-500">Resolved</span>
+              <span className="font-body text-[11px] font-semibold" style={{ color: "var(--sage)" }}>Resolved</span>
             )}
           </div>
         </div>

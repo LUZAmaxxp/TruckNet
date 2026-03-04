@@ -54,8 +54,8 @@ export default function AdminDriversPage() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="text-2xl font-bold text-white">Drivers</h1>
-        <p className="text-sm text-gray-400 mt-1">
+        <h1 className="font-display text-[22px] font-bold tracking-[-0.03em]" style={{ color: "var(--ink)" }}>Drivers</h1>
+        <p className="font-body text-[13px] mt-1" style={{ color: "var(--muted)" }}>
           All registered drivers — {total} total
         </p>
       </div>

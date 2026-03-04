@@ -7,7 +7,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   return (
     <CallStateWrapper>
       <SosAlertListener />
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="min-h-screen flex flex-col" style={{ background: "var(--base)" }}>
         <Navbar />
         <main className="flex-1 container mx-auto px-4 py-6 max-w-5xl pb-20 md:pb-6">
           {children}

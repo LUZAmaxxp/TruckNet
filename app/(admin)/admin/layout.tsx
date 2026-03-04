@@ -3,11 +3,6 @@ import { auth } from "@/auth";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 
-/**
- * Admin layout — server-side role guard.
- * Redirects to /dashboard if the user is not authenticated or not an admin.
- * Isolated from the driver (protected) layout.
- */
 export default async function AdminLayout({
   children,
 }: {
@@ -19,18 +14,25 @@ export default async function AdminLayout({
     redirect("/login");
   }
 
-  // Type-safe role check — role is propagated via JWT callbacks
   const role = (session.user as { role?: string }).role;
   if (role !== "admin") {
     redirect("/dashboard");
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-950 text-gray-100">
+    <div
+      className="flex h-screen overflow-hidden"
+      style={{ background: "var(--base)" }}
+    >
       <AdminSidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <AdminHeader session={session} />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main
+          className="flex-1 overflow-y-auto p-6"
+          style={{ background: "var(--base)" }}
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

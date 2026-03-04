@@ -63,8 +63,8 @@ export default function AdminSosPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">SOS Alerts</h1>
-          <p className="text-sm text-gray-400 mt-1">
+          <h1 className="font-display text-[22px] font-bold tracking-[-0.03em]" style={{ color: "var(--ink)" }}>SOS Alerts</h1>
+          <p className="font-body text-[13px] mt-1" style={{ color: "var(--muted)" }}>
             {activeCount} active · {total} total
           </p>
         </div>
@@ -78,11 +78,12 @@ export default function AdminSosPage() {
                 setStatusFilter(opt.value);
                 setPage(1);
               }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                statusFilter === opt.value
-                  ? "bg-red-600 text-white"
-                  : "bg-gray-800 text-gray-300 hover:bg-gray-700"
-              }`}
+              className="px-3 py-1.5 rounded-[8px] font-body text-[12px] font-semibold transition-colors"
+              style={{
+                background: statusFilter === opt.value ? "var(--terra-lt)" : "var(--base)",
+                color: statusFilter === opt.value ? "var(--terra)" : "var(--muted)",
+                border: statusFilter === opt.value ? "1px solid rgba(184,80,57,0.3)" : "1px solid var(--hairline)",
+              }}
             >
               {opt.label}
             </button>
@@ -93,13 +94,13 @@ export default function AdminSosPage() {
       {loading ? (
         <div className="grid gap-3">
           {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-24 rounded-xl bg-gray-800 animate-pulse" />
+            <div key={i} className="h-24 rounded-[12px] animate-pulse" style={{ background: "var(--hairline-2)" }} />
           ))}
         </div>
       ) : alerts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-gray-500">
-          <p className="text-lg font-medium">No alerts found</p>
-          <p className="text-sm mt-1">
+        <div className="flex flex-col items-center justify-center py-16">
+          <p className="font-display text-[18px] font-bold" style={{ color: "var(--ink)" }}>No alerts found</p>
+          <p className="font-body text-[13px] mt-1" style={{ color: "var(--muted)" }}>
             {statusFilter === "active" ? "No active SOS signals right now." : "Nothing to display."}
           </p>
         </div>
@@ -117,17 +118,19 @@ export default function AdminSosPage() {
           <button
             disabled={page === 1}
             onClick={() => setPage((p) => p - 1)}
-            className="px-3 py-1.5 rounded-lg bg-gray-800 text-sm disabled:opacity-40 hover:bg-gray-700 transition-colors"
+            className="px-3 py-1.5 rounded-[8px] font-body text-[12px] font-semibold disabled:opacity-40 transition-colors"
+            style={{ background: "var(--base)", border: "1px solid var(--hairline)", color: "var(--ink)" }}
           >
             Previous
           </button>
-          <span className="text-sm text-gray-400">
+          <span className="font-mono text-[11px]" style={{ color: "var(--subtle)" }}>
             Page {page} of {totalPages}
           </span>
           <button
             disabled={page === totalPages}
             onClick={() => setPage((p) => p + 1)}
-            className="px-3 py-1.5 rounded-lg bg-gray-800 text-sm disabled:opacity-40 hover:bg-gray-700 transition-colors"
+            className="px-3 py-1.5 rounded-[8px] font-body text-[12px] font-semibold disabled:opacity-40 transition-colors"
+            style={{ background: "var(--base)", border: "1px solid var(--hairline)", color: "var(--ink)" }}
           >
             Next
           </button>

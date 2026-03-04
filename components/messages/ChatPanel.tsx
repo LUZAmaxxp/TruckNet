@@ -254,50 +254,85 @@ export function ChatPanel({
     .slice(0, 2);
 
   return (
-    <div className="flex h-full flex-col bg-background overflow-hidden" role="region" aria-label={`Conversation with ${friend.name}`}>
+    <div
+      className="flex h-full flex-col overflow-hidden"
+      style={{ background: "var(--base)" }}
+      role="region"
+      aria-label={`Conversation with ${friend.name}`}
+    >
       {/* ── Header ── */}
-      <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background px-4 py-3 shrink-0">
+      <div
+        className="sticky top-0 z-10 flex items-center gap-3 px-4 py-3 shrink-0"
+        style={{
+          background: "var(--surface)",
+          borderBottom: "1px solid var(--hairline)",
+          boxShadow: "var(--shadow-nav)",
+        }}
+      >
         {showBackButton && (
           <Button
             variant="ghost"
             size="icon"
             onClick={onBack}
             aria-label="Back to friends list"
-            className="mr-1 h-12 w-12 shrink-0"
+            className="mr-1 shrink-0"
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
         )}
-        <Avatar className="h-9 w-9 shrink-0">
-          {friend.profileImageUrl && (
-            <AvatarImage src={friend.profileImageUrl} alt={friend.name} />
-          )}
-          <AvatarFallback>{initials}</AvatarFallback>
-        </Avatar>
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-semibold leading-tight">{friend.name}</p>
-          <p className="text-xs text-muted-foreground">{friend.tag}</p>
+        {/* Avatar + online dot */}
+        <div className="relative shrink-0">
+          <Avatar className="h-[38px] w-[38px]">
+            {friend.profileImageUrl && (
+              <AvatarImage src={friend.profileImageUrl} alt={friend.name} />
+            )}
+            <AvatarFallback>{initials}</AvatarFallback>
+          </Avatar>
+          <span
+            className="absolute bottom-0 right-0 h-[9px] w-[9px] rounded-full border-2"
+            style={{
+              background: "var(--sage-md)",
+              borderColor: "var(--surface)",
+            }}
+            aria-label="Online"
+          />
         </div>
+
+        <div className="min-w-0 flex-1">
+          <p
+            className="truncate font-body text-[14px] font-semibold tracking-[-0.01em] leading-tight"
+            style={{ color: "var(--ink)" }}
+          >
+            {friend.name}
+          </p>
+          <p className="font-mono text-[11px]" style={{ color: "var(--subtle)" }}>
+            {friend.tag}
+          </p>
+        </div>
+
         {/* Call buttons */}
         <CallButton friendId={friend.id} variant="voice" className="h-9 w-9" />
         <CallButton friendId={friend.id} variant="video" className="h-9 w-9" />
-        {/* Online presence dot */}
-        <span
-          className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-500"
-          aria-label="Online"
-        />
       </div>
 
       {/* ── Messages ── */}
-      <ScrollArea className="flex-1 px-4 py-3">
+      <ScrollArea className="flex-1 px-4 py-5">
         {loading ? (
-          <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+          <div
+            className="flex h-full items-center justify-center text-[13px]"
+            style={{ color: "var(--muted)" }}
+          >
             Loading conversation…
           </div>
         ) : combined.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-            <MessageSquare className="h-10 w-10 opacity-30" />
-            <p className="text-sm">No messages yet. Say hello!</p>
+          <div className="flex h-full flex-col items-center justify-center gap-2">
+            <MessageSquare
+              className="h-10 w-10 opacity-30"
+              style={{ color: "var(--muted)" }}
+            />
+            <p className="text-[13px]" style={{ color: "var(--muted)" }}>
+              No messages yet. Say hello!
+            </p>
           </div>
         ) : (
           <div className="flex flex-col gap-2 pb-2">

@@ -3,15 +3,11 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { UserPlus, Users, Loader2, Check, X, MessageSquare, MapPin, Clock } from "lucide-react";
+import { UserPlus, Loader2, Check, X, MessageSquare, MapPin, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSocket } from "@/hooks/useSocket";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { CallButton } from "@/components/calls/CallButton";
 
 interface Friend {
@@ -179,160 +175,200 @@ export default function FriendsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold flex items-center gap-2">
-        <Users className="h-6 w-6" /> Friends
-      </h1>
+    <motion.div
+      className="space-y-6"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {/* Page header */}
+      <div>
+        <div className="mb-2 flex items-center gap-3">
+          <span className="inline-block h-[1.5px] w-4 rounded-full" style={{ background: "var(--navy-md)" }} />
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--navy-md)" }}>
+            Network
+          </span>
+        </div>
+        <h1 className="font-display text-[26px] font-bold leading-tight tracking-[-0.03em]" style={{ color: "var(--ink)" }}>
+          Friends
+        </h1>
+      </div>
 
       {/* Send friend request */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <UserPlus className="h-4 w-4" /> Add a Friend
-          </CardTitle>
-          <CardDescription>Enter a driver&apos;s tag (e.g. john#1234) to send a friend request.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-1">
-            <Label htmlFor="sendToId">Driver Tag</Label>
-            <div className="flex gap-2">
-              <Input
-                id="sendToId"
-                placeholder="e.g. john#1234"
-                value={sendToId}
-                onChange={(e) => setSendToId(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void handleSendRequest(); }}
-              />
-              <Button
-                onClick={() => void handleSendRequest()}
-                disabled={sending || !sendToId.trim()}
-              >
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-              </Button>
-            </div>
+      <div
+        className="rounded-lg border p-5"
+        style={{ background: "var(--surface)", borderColor: "var(--hairline)", boxShadow: "var(--shadow-sm)" }}
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <div className="flex h-8 w-8 items-center justify-center rounded-sm text-[16px]" style={{ background: "var(--navy-lt)" }}>
+            <UserPlus className="h-4 w-4" style={{ color: "var(--navy)" }} />
           </div>
-        </CardContent>
-      </Card>
+          <span className="font-display text-[14px] font-semibold tracking-[-0.01em]" style={{ color: "var(--ink)" }}>
+            Add a Friend
+          </span>
+        </div>
+        <p className="text-[12px] mb-3" style={{ color: "var(--muted)" }}>
+          Enter a driver&apos;s tag (e.g. john#1234) to send a friend request.
+        </p>
+        <div className="flex gap-2">
+          <Input
+            id="sendToId"
+            placeholder="e.g. john#1234"
+            value={sendToId}
+            onChange={(e) => setSendToId(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void handleSendRequest(); }}
+            className="flex-1"
+          />
+          <Button
+            onClick={() => void handleSendRequest()}
+            disabled={sending || !sendToId.trim()}
+            variant="primary"
+            size="icon"
+          >
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+          </Button>
+        </div>
+      </div>
 
       {/* Incoming requests */}
       {(loadingRequests || requests.length > 0) && (
-        <>
-          <Separator />
-          <div>
-            <h2 className="text-lg font-semibold mb-3">
+        <div>
+          <div className="mb-[14px] flex items-center gap-2">
+            <span className="font-display text-[13px] font-semibold leading-none tracking-[-0.01em]" style={{ color: "var(--ink-2)" }}>
               Incoming Requests
-              {requests.length > 0 && (
-                <Badge variant="destructive" className="ml-2">{requests.length}</Badge>
-              )}
-            </h2>
-            {loadingRequests ? (
-              <div className="flex justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : (
+            </span>
+            {requests.length > 0 && (
+              <span
+                className="inline-flex items-center rounded-[10px] px-[7px] py-[2px] font-mono text-[10px] font-semibold"
+                style={{ background: "var(--terra-lt)", color: "var(--terra)" }}
+              >
+                {requests.length}
+              </span>
+            )}
+          </div>
+          {loadingRequests ? (
+            <div className="flex justify-center py-4">
+              <Loader2 className="h-5 w-5 animate-spin" style={{ color: "var(--muted)" }} />
+            </div>
+          ) : (
+            <div className="space-y-2">
               <AnimatePresence mode="popLayout">
                 {requests.map((req) => (
                   <motion.div
                     key={req.id}
                     layout
-                    initial={{ opacity: 0, x: -20 }}
+                    initial={{ opacity: 0, x: -16 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 60, scale: 0.95 }}
                     transition={{ duration: 0.22 }}
                   >
-                    <Card>
-                      <CardContent className="flex items-center justify-between py-3 px-4">
-                        <div>
-                          <p className="font-medium text-sm">{req.senderName}</p>
-                          <Badge variant="outline" className="mt-0.5 text-xs">{req.senderTag}</Badge>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={() => void handleAccept(req.id)}
-                          >
-                            <Check className="h-3 w-3 mr-1" /> Accept
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => void handleReject(req.id)}
-                          >
-                            <X className="h-3 w-3 mr-1" /> Reject
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
+                    <div
+                      className="flex items-center justify-between rounded-[12px] border p-4"
+                      style={{ background: "var(--surface)", borderColor: "var(--hairline)", boxShadow: "var(--shadow-xs)" }}
+                    >
+                      <div>
+                        <p className="font-body text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{req.senderName}</p>
+                        <p className="font-mono text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>{req.senderTag}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="success" onClick={() => void handleAccept(req.id)}>
+                          <Check className="h-3 w-3 mr-1" /> Accept
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => void handleReject(req.id)}>
+                          <X className="h-3 w-3 mr-1" /> Reject
+                        </Button>
+                      </div>
+                    </div>
                   </motion.div>
                 ))}
               </AnimatePresence>
-            )}
-          </div>
-        </>
+            </div>
+          )}
+        </div>
       )}
-
-      <Separator />
 
       {/* Friends list */}
       <div>
-        <h2 className="text-lg font-semibold mb-3">My Friends ({friends.length})</h2>
+        <div className="mb-[14px] flex items-center gap-2">
+          <span className="font-display text-[13px] font-semibold leading-none tracking-[-0.01em]" style={{ color: "var(--ink-2)" }}>
+            My Friends
+          </span>
+          <span
+            className="inline-flex items-center rounded-[10px] px-[7px] py-[2px] font-mono text-[10px]"
+            style={{ background: "var(--hairline-2)", color: "var(--muted)" }}
+          >
+            {friends.length}
+          </span>
+        </div>
         {loadingFriends ? (
           <div className="flex justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <Loader2 className="h-6 w-6 animate-spin" style={{ color: "var(--muted)" }} />
           </div>
         ) : friends.length === 0 ? (
-          <Card>
-            <CardContent className="py-8 text-center text-muted-foreground text-sm">
-              No friends yet. Send a request to get started!
-            </CardContent>
-          </Card>
+          <div
+            className="rounded-lg border py-10 text-center"
+            style={{ background: "var(--surface)", borderColor: "var(--hairline)", boxShadow: "var(--shadow-sm)" }}
+          >
+            <p className="text-[32px] mb-2">👥</p>
+            <p className="font-display text-[13px] font-semibold" style={{ color: "var(--ink-2)" }}>No friends yet</p>
+            <p className="mt-1 text-[12px]" style={{ color: "var(--muted)" }}>Send a request using a driver tag above</p>
+          </div>
         ) : (
-          <AnimatePresence mode="popLayout">
-            {friends.map((friend, i) => (
-              <motion.div
-                key={friend.id}
-                layout
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.2, delay: i * 0.04 }}
-              >
-                <Card className="overflow-hidden">
-                  <CardContent className="py-3 px-4">
-                    {/* Main row */}
-                    <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <AnimatePresence mode="popLayout">
+              {friends.map((friend, i) => (
+                <motion.div
+                  key={friend.id}
+                  layout
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.18, delay: i * 0.04 }}
+                >
+                  <div
+                    className="overflow-hidden rounded-[12px] border transition-shadow hover:shadow-md"
+                    style={{ background: "var(--surface)", borderColor: "var(--hairline)", boxShadow: "var(--shadow-xs)" }}
+                  >
+                    <div className="flex items-center justify-between p-4">
                       <div>
-                        <p className="font-medium text-sm">{friend.name}</p>
-                        <Badge variant="secondary" className="mt-0.5 text-xs">{friend.tag}</Badge>
+                        <p className="font-body text-[13px] font-semibold tracking-[-0.01em]" style={{ color: "var(--ink)" }}>
+                          {friend.name}
+                        </p>
+                        <p className="font-mono text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>{friend.tag}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <CallButton friendId={friend.id} variant="voice" />
                         <Link href={`/messages?to=${friend.id}`}>
                           <button
                             title="Send a message"
-                            className="flex items-center justify-center w-10 h-10 rounded-full transition-all bg-primary/10 hover:bg-primary/20 text-primary active:scale-95"
+                            className="flex h-[34px] w-[34px] items-center justify-center rounded-sm border border-hairline bg-navy-lt transition-all hover:bg-[#DDE8F4]"
                             aria-label="Open messages"
                           >
-                            <MessageSquare className="w-4 h-4" />
+                            <MessageSquare className="h-4 w-4" style={{ color: "var(--navy)" }} />
                           </button>
                         </Link>
                         <CallButton friendId={friend.id} variant="video" />
-                        {/* Location toggle */}
                         <button
                           title="See location"
                           onClick={() => void toggleLocation(friend.id)}
-                          className={`flex items-center justify-center w-10 h-10 rounded-full transition-all active:scale-95 ${
+                          className={`flex h-[34px] w-[34px] items-center justify-center rounded-sm border transition-all ${
                             typeof friendLocations[friend.id] === "object"
-                              ? "bg-green-500/20 text-green-500"
-                              : "bg-primary/10 hover:bg-primary/20 text-primary"
+                              ? "border-[rgba(58,107,82,0.3)] bg-sage-lt"
+                              : "border-hairline bg-transparent hover:bg-base-2"
                           }`}
                           aria-label="Toggle location"
                         >
                           {friendLocations[friend.id] === "loading" ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--muted)" }} />
                           ) : (
-                            <MapPin className="w-4 h-4" />
+                            <MapPin
+                              className="h-4 w-4"
+                              style={{
+                                color: typeof friendLocations[friend.id] === "object"
+                                  ? "var(--sage)"
+                                  : "var(--ink-2)"
+                              }}
+                            />
                           )}
                         </button>
                       </div>
@@ -346,17 +382,20 @@ export default function FriendsPage() {
                           initial={{ height: 0, opacity: 0 }}
                           animate={{ height: "auto", opacity: 1 }}
                           exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2 }}
+                          transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
                           className="overflow-hidden"
                         >
-                          <div className="mt-3 pt-3 border-t flex items-center justify-between gap-3">
-                            <div className="space-y-0.5">
-                              <p className="text-xs font-mono text-muted-foreground">
+                          <div
+                            className="mx-4 mb-4 rounded-[8px] px-[14px] py-3 flex items-center justify-between gap-3"
+                            style={{ background: "var(--base)", border: "1px solid var(--hairline)" }}
+                          >
+                            <div>
+                              <p className="font-mono text-[12px] font-medium" style={{ color: "var(--navy)" }}>
                                 {(friendLocations[friend.id] as FriendLocation).latitude.toFixed(5)},{" "}
                                 {(friendLocations[friend.id] as FriendLocation).longitude.toFixed(5)}
                               </p>
-                              <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
+                              <p className="text-[11px] mt-0.5 flex items-center gap-1" style={{ color: "var(--muted)" }}>
+                                <Clock className="h-3 w-3" />
                                 {(() => {
                                   const diff = Math.round(
                                     (Date.now() - new Date((friendLocations[friend.id] as FriendLocation).updatedAt).getTime()) / 60_000
@@ -367,9 +406,10 @@ export default function FriendsPage() {
                             </div>
                             <Link
                               href={`/map?focus=${friend.id}`}
-                              className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline shrink-0"
+                              className="text-[12px] font-semibold flex items-center gap-1 shrink-0 hover:underline"
+                              style={{ color: "var(--navy)" }}
                             >
-                              <MapPin className="w-3.5 h-3.5" />
+                              <MapPin className="h-3.5 w-3.5" />
                               View on Map
                             </Link>
                           </div>
@@ -384,17 +424,19 @@ export default function FriendsPage() {
                           transition={{ duration: 0.2 }}
                           className="overflow-hidden"
                         >
-                          <p className="mt-2 text-xs text-destructive">Could not fetch location. Try again.</p>
+                          <p className="mx-4 mb-3 text-[12px]" style={{ color: "var(--terra)" }}>
+                            Could not fetch location. Try again.
+                          </p>
                         </motion.div>
                       )}
                     </AnimatePresence>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }

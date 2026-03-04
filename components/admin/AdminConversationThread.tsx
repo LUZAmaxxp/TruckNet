@@ -118,7 +118,7 @@ export function AdminConversationThread({
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+      <Loader2 className="h-6 w-6 animate-spin" style={{ color: "var(--muted)" }} />
       </div>
     );
   }
@@ -126,21 +126,27 @@ export function AdminConversationThread({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-gray-800 px-4 py-3">
-        <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-700 flex items-center justify-center text-sm font-bold text-gray-300">
+      <div
+        className="flex items-center gap-3 px-4 py-3"
+        style={{ borderBottom: "1px solid var(--hairline)" }}
+      >
+        <div
+          className="h-8 w-8 shrink-0 overflow-hidden rounded-full flex items-center justify-center font-display text-[12px] font-bold"
+          style={{ background: "var(--navy-lt)", color: "var(--navy)" }}
+        >
           {driverAvatar ? (
             <img src={driverAvatar} alt={driverName} className="h-full w-full object-cover" />
           ) : (
             driverName[0]?.toUpperCase()
           )}
         </div>
-        <p className="font-semibold text-white">{driverName}</p>
+        <p className="font-body font-semibold" style={{ color: "var(--ink)" }}>{driverName}</p>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ background: "var(--base)" }}>
         {messages.length === 0 ? (
-          <p className="text-center text-sm text-gray-500 py-8">No messages yet. Say hello!</p>
+          <p className="text-center font-body text-[13px] py-8" style={{ color: "var(--muted)" }}>No messages yet. Say hello!</p>
         ) : (
           messages.map((msg) => (
             <AdminMessageBubble
@@ -157,7 +163,7 @@ export function AdminConversationThread({
       </div>
 
       {/* Input */}
-      <div className="border-t border-gray-800 p-3">
+      <div className="p-3" style={{ borderTop: "1px solid var(--hairline)", background: "var(--surface)" }}>
         <div className="flex items-end gap-2">
           <textarea
             rows={2}
@@ -165,12 +171,18 @@ export function AdminConversationThread({
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a message… (⌘Enter to send)"
-            className="flex-1 resize-none rounded-xl border border-gray-700 bg-gray-800 px-4 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+            className="flex-1 resize-none rounded-[8px] px-4 py-2 font-body text-[13px] focus:outline-none focus:ring-2"
+            style={{
+              border: "1.5px solid var(--hairline)",
+              background: "var(--base)",
+              color: "var(--ink)",
+            }}
           />
           <button
             onClick={() => void handleSend()}
             disabled={!text.trim() || sending}
-            className="rounded-xl bg-blue-600 p-2.5 text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="rounded-[8px] p-2.5 transition-colors disabled:opacity-50"
+            style={{ background: "var(--navy)", color: "white" }}
           >
             {sending ? (
               <Loader2 className="h-4 w-4 animate-spin" />

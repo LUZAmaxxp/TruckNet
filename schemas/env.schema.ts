@@ -27,6 +27,9 @@ export const EnvSchema = z.object({
   KAFKA_ENABLED: z.enum(["true", "false"]).default("false"),
   // Admin invite code — required when role=admin is submitted during registration
   ADMIN_INVITE_CODE: z.string().min(8).optional(),
+  // Redis — optional; enables OSRM route result caching for performance.
+  // When unset, all route requests go directly to OSRM (correct but slower).
+  REDIS_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

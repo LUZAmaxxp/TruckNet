@@ -106,13 +106,18 @@ export function DriverTable({
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none" style={{ color: "var(--muted)" }} />
           <input
             type="text"
             placeholder="Search by name or tag…"
             value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
-            className="w-full rounded-lg border border-gray-700 bg-gray-800 pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-[8px] pl-9 pr-3 py-2 font-body text-[13px] focus:outline-none focus:ring-2"
+            style={{
+              border: "1.5px solid var(--hairline)",
+              background: "var(--base)",
+              color: "var(--ink)",
+            }}
           />
         </div>
         <div className="flex gap-1">
@@ -120,11 +125,12 @@ export function DriverTable({
             <button
               key={s}
               onClick={() => onStatusChange(s)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${
-                status === s
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-800 text-gray-300 hover:bg-gray-700"
-              }`}
+              className="px-3 py-1.5 rounded-[8px] font-body text-[12px] font-semibold capitalize transition-colors"
+              style={{
+                background: status === s ? "var(--navy-lt)" : "var(--base)",
+                color: status === s ? "var(--navy)" : "var(--muted)",
+                border: status === s ? "1px solid var(--navy-pale)" : "1px solid var(--hairline)",
+              }}
             >
               {s}
             </button>
@@ -133,39 +139,48 @@ export function DriverTable({
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-xl border border-gray-800">
+      <div className="overflow-x-auto rounded-[12px]" style={{ border: "1px solid var(--hairline)" }}>
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-800 bg-gray-900">
-              <th className="px-4 py-3 text-left font-medium text-gray-400">Driver</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-400">Status</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-400 hidden md:table-cell">Last Location</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-400 hidden sm:table-cell">Last Seen</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-400">Actions</th>
+            <tr style={{ borderBottom: "1px solid var(--hairline)", background: "var(--base)" }}>
+              <th className="px-4 py-3 text-left font-mono text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--subtle)" }}>Driver</th>
+              <th className="px-4 py-3 text-left font-mono text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--subtle)" }}>Status</th>
+              <th className="px-4 py-3 text-left font-mono text-[11px] font-semibold uppercase tracking-wide hidden md:table-cell" style={{ color: "var(--subtle)" }}>Last Location</th>
+              <th className="px-4 py-3 text-left font-mono text-[11px] font-semibold uppercase tracking-wide hidden sm:table-cell" style={{ color: "var(--subtle)" }}>Last Seen</th>
+              <th className="px-4 py-3 text-right font-mono text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--subtle)" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading
               ? Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-gray-800">
+                  <tr key={i} style={{ borderBottom: "1px solid var(--hairline)" }}>
                     <td colSpan={5} className="px-4 py-3">
-                      <div className="h-8 rounded-lg bg-gray-800 animate-pulse" />
+                      <div className="h-8 rounded-[8px] animate-pulse" style={{ background: "var(--hairline-2)" }} />
                     </td>
                   </tr>
                 ))
               : drivers.length === 0
               ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={5} className="px-4 py-8 text-center font-body text-[13px]" style={{ color: "var(--muted)" }}>
                     No drivers found
                   </td>
                 </tr>
               )
               : drivers.map((driver) => (
-                  <tr key={driver.id} className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors">
+                  <tr
+                    key={driver.id}
+                    className="transition-colors"
+                    style={{ borderBottom: "1px solid var(--hairline)" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--base)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-300">
+                        <div
+                          className="h-8 w-8 shrink-0 overflow-hidden rounded-full flex items-center justify-center font-display text-[11px] font-bold"
+                          style={{ background: "var(--navy-lt)", color: "var(--navy)" }}
+                        >
                           {driver.profileImageUrl ? (
                             <img src={driver.profileImageUrl} alt={driver.name} className="h-full w-full object-cover" />
                           ) : (
@@ -173,29 +188,32 @@ export function DriverTable({
                           )}
                         </div>
                         <div>
-                          <p className="font-medium text-white">{driver.name}</p>
-                          <p className="text-xs text-gray-500">@{driver.tag}</p>
+                          <p className="font-body text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{driver.name}</p>
+                          <p className="font-mono text-[10px]" style={{ color: "var(--subtle)" }}>@{driver.tag}</p>
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-3">
                       <span
-                        className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                          driver.isOnline
-                            ? "bg-green-600/20 text-green-400"
-                            : "bg-gray-700/50 text-gray-400"
-                        }`}
+                        className="inline-flex items-center gap-1.5 rounded-[20px] px-[10px] py-[3px] font-body text-[11px] font-semibold"
+                        style={{
+                          background: driver.isOnline ? "var(--sage-lt)" : "var(--hairline-2)",
+                          color: driver.isOnline ? "var(--sage)" : "var(--muted)",
+                        }}
                       >
-                        <span className={`h-1.5 w-1.5 rounded-full ${driver.isOnline ? "bg-green-400" : "bg-gray-500"}`} />
+                        <span
+                          className="h-[5px] w-[5px] rounded-full"
+                          style={{ background: driver.isOnline ? "var(--sage-md)" : "var(--subtle)" }}
+                        />
                         {driver.isOnline ? "Online" : "Offline"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 hidden md:table-cell text-gray-400 text-xs font-mono">
+                    <td className="px-4 py-3 hidden md:table-cell font-mono text-[11px]" style={{ color: "var(--slate)" }}>
                       {driver.lastLatitude != null
                         ? `${driver.lastLatitude.toFixed(4)}, ${driver.lastLongitude!.toFixed(4)}`
                         : "—"}
                     </td>
-                    <td className="px-4 py-3 hidden sm:table-cell text-gray-400 text-xs">
+                    <td className="px-4 py-3 hidden sm:table-cell font-body text-[12px]" style={{ color: "var(--muted)" }}>
                       {formatLastSeen(driver.lastSeenAt)}
                     </td>
                     <td className="px-4 py-3">
@@ -204,7 +222,10 @@ export function DriverTable({
                           onClick={() => void handleCall(driver.id, "voice")}
                           disabled={callingId === driver.id}
                           title="Voice call"
-                          className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-600/20 hover:text-blue-400 transition-colors disabled:opacity-50"
+                          className="rounded-[8px] p-1.5 transition-colors disabled:opacity-50"
+                          style={{ color: "var(--slate)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--navy-lt)"; e.currentTarget.style.color = "var(--navy)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--slate)"; }}
                         >
                           <Phone className="h-4 w-4" />
                         </button>
@@ -212,14 +233,20 @@ export function DriverTable({
                           onClick={() => void handleCall(driver.id, "video")}
                           disabled={callingId === driver.id}
                           title="Video call"
-                          className="rounded-lg p-1.5 text-gray-400 hover:bg-purple-600/20 hover:text-purple-400 transition-colors disabled:opacity-50"
+                          className="rounded-[8px] p-1.5 transition-colors disabled:opacity-50"
+                          style={{ color: "var(--slate)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--navy-lt)"; e.currentTarget.style.color = "var(--navy)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--slate)"; }}
                         >
                           <Video className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => router.push(`/admin/messages/${driver.id}`)}
                           title="Send message"
-                          className="rounded-lg p-1.5 text-gray-400 hover:bg-green-600/20 hover:text-green-400 transition-colors"
+                          className="rounded-[8px] p-1.5 transition-colors"
+                          style={{ color: "var(--slate)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--sage-lt)"; e.currentTarget.style.color = "var(--sage)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--slate)"; }}
                         >
                           <MessageSquare className="h-4 w-4" />
                         </button>
@@ -227,7 +254,10 @@ export function DriverTable({
                           <a
                             href={`/map?focus=${driver.id}`}
                             title="View on map"
-                            className="rounded-lg p-1.5 text-gray-400 hover:bg-yellow-600/20 hover:text-yellow-400 transition-colors"
+                            className="rounded-[8px] p-1.5 transition-colors"
+                            style={{ color: "var(--slate)" }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--honey-lt)"; e.currentTarget.style.color = "var(--honey)"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--slate)"; }}
                           >
                             <MapPin className="h-4 w-4" />
                           </a>
@@ -242,7 +272,7 @@ export function DriverTable({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-gray-400">
+        <div className="flex items-center justify-between font-body text-[12px]" style={{ color: "var(--muted)" }}>
           <span>
             {((page - 1) * limit) + 1}–{Math.min(page * limit, total)} of {total}
           </span>
@@ -250,14 +280,20 @@ export function DriverTable({
             <button
               disabled={page === 1}
               onClick={() => onPageChange(page - 1)}
-              className="rounded-lg p-1.5 hover:bg-gray-700 disabled:opacity-30 transition-colors"
+              className="rounded-[8px] p-1.5 disabled:opacity-30 transition-colors"
+              style={{ color: "var(--ink)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hairline-2)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
               disabled={page === totalPages}
               onClick={() => onPageChange(page + 1)}
-              className="rounded-lg p-1.5 hover:bg-gray-700 disabled:opacity-30 transition-colors"
+              className="rounded-[8px] p-1.5 disabled:opacity-30 transition-colors"
+              style={{ color: "var(--ink)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hairline-2)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
               <ChevronRight className="h-4 w-4" />
             </button>

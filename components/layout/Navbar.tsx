@@ -5,17 +5,17 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut, useSession } from "next-auth/react";
-import { Truck, Map, MessageSquare, AlertTriangle, LayoutDashboard, LogOut, Users } from "lucide-react";
+import { Map, MessageSquare, AlertTriangle, LayoutDashboard, LogOut, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { LiveConnectionBadge } from "@/components/layout/LiveConnectionBadge";
 
 const navLinks = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/map", label: "Map", icon: Map },
-  { href: "/messages", label: "Messages", icon: MessageSquare },
-  { href: "/friends", label: "Friends", icon: Users },
-  { href: "/stress", label: "Stress", icon: AlertTriangle },
+  { href: "/map",       label: "Map",       icon: Map },
+  { href: "/messages",  label: "Messages",  icon: MessageSquare },
+  { href: "/friends",   label: "Friends",   icon: Users },
+  { href: "/stress",    label: "Stress",    icon: AlertTriangle },
 ];
 
 export function Navbar() {
@@ -23,7 +23,6 @@ export function Navbar() {
   const { data: session } = useSession();
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
-  // Fetch avatar when session is available
   useEffect(() => {
     if (!session?.user?.id) return;
     fetch("/api/profile")
@@ -35,50 +34,78 @@ export function Navbar() {
   }, [session?.user?.id]);
 
   const initials = session?.user?.name
-    ? session.user.name
-        .split(" ")
-        .map((w) => w[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
+    ? session.user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
     : "?";
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header
+      className="sticky top-0 z-50 w-full"
+      style={{
+        height: 56,
+        background: "rgba(247,245,241,0.88)",
+        backdropFilter: "blur(20px) saturate(180%)",
+        borderBottom: "1px solid var(--hairline)",
+        boxShadow: "var(--shadow-nav)",
+      }}
+    >
       <div className="container flex h-14 items-center gap-4 px-4">
         {/* Logo */}
-        <Link href="/dashboard" className="flex items-center gap-2 font-semibold shrink-0">
-          <Truck className="h-5 w-5" />
-          <span className="hidden sm:inline">TruckConnect</span>
+        <Link
+          href="/dashboard"
+          className="flex shrink-0 items-center gap-2"
+        >
+          <div
+            className="flex h-7 w-7 items-center justify-center rounded-[8px] text-[14px]"
+            style={{
+              background: "var(--navy)",
+              boxShadow: "0 2px 8px rgba(28,58,94,0.3)",
+            }}
+          >
+            🚛
+          </div>
+          <span
+            className="hidden font-display text-[15px] font-bold tracking-[-0.02em] sm:inline"
+            style={{ color: "var(--navy)" }}
+          >
+            TruckConnect
+          </span>
         </Link>
 
-        {/* Nav links — hidden on mobile (handled by BottomNav) */}
-        <nav className="hidden md:flex items-center gap-1 flex-1">
-          {navLinks.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                pathname === href
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground"
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              <span className="hidden sm:inline">{label}</span>
-            </Link>
-          ))}
+        {/* Nav links — hidden on mobile */}
+        <nav className="hidden flex-1 items-center gap-1 md:flex">
+          {navLinks.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href;
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "flex h-9 items-center gap-1.5 rounded-sm px-[14px] text-[13px] font-medium transition-all duration-[0.18s]",
+                  active
+                    ? "bg-navy-lt text-navy font-semibold"
+                    : "text-muted hover:bg-hairline-2 hover:text-ink-2"
+                )}
+              >
+                <Icon className="h-[15px] w-[15px]" />
+                <span className="hidden sm:inline">{label}</span>
+              </Link>
+            );
+          })}
         </nav>
 
-        {/* Avatar + connection badge + sign out */}
-        <div className="flex items-center gap-2 ml-auto shrink-0">
-          {/* Live connection badge */}
+        {/* Right side */}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <LiveConnectionBadge />
 
-          {/* Avatar — click to go to /profile */}
+          {/* Avatar */}
           <Link href="/profile" title="My Profile">
-            <div className="relative w-8 h-8 rounded-full overflow-hidden border border-border bg-muted flex items-center justify-center hover:ring-2 hover:ring-primary transition-all cursor-pointer">
+            <div
+              className="relative flex h-8 w-8 cursor-pointer items-center justify-center overflow-hidden rounded-full transition-all hover:ring-2 hover:ring-[rgba(28,58,94,0.3)]"
+              style={{
+                background: "var(--navy-lt)",
+                border: "1.5px solid var(--hairline)",
+              }}
+            >
               {avatarUrl ? (
                 <Image
                   src={avatarUrl}
@@ -87,16 +114,21 @@ export function Navbar() {
                   className="object-cover"
                 />
               ) : (
-                <span className="text-xs font-semibold text-muted-foreground">{initials}</span>
+                <span
+                  className="font-display text-[11px] font-bold"
+                  style={{ color: "var(--navy)" }}
+                >
+                  {initials}
+                </span>
               )}
             </div>
           </Link>
 
           <Button
             variant="ghost"
-            size="sm"
+            size="icon"
             onClick={() => signOut({ callbackUrl: "/login" })}
-            className="text-muted-foreground"
+            title="Sign out"
           >
             <LogOut className="h-4 w-4" />
             <span className="sr-only">Sign out</span>
@@ -106,3 +138,5 @@ export function Navbar() {
     </header>
   );
 }
+
+

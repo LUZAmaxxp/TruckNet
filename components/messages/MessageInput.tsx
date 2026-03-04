@@ -53,7 +53,13 @@ export function MessageInput({ onSendText, onSendVoice, disabled }: MessageInput
   }, [text, sending, disabled, onSendText]);
 
   return (
-    <div className="flex items-end gap-2 border-t border-border bg-background px-4 py-3">
+    <div
+      className="flex items-end gap-2 px-4 py-3"
+      style={{
+        background: "var(--surface)",
+        borderTop: "1px solid var(--hairline)",
+      }}
+    >
       {/* Voice record button */}
       <div className="shrink-0">
         <RecordButton
@@ -75,8 +81,9 @@ export function MessageInput({ onSendText, onSendVoice, disabled }: MessageInput
           rows={1}
           className={cn(
             "transition-shadow duration-200",
-            "focus-visible:shadow-[0_0_0_2px_hsl(var(--primary)/0.3)]"
+            "focus-visible:shadow-[0_0_0_3px_rgba(28,58,94,0.07)]"
           )}
+          style={{ background: "var(--base)" }}
           aria-label="Message text input"
         />
       </div>
@@ -88,6 +95,7 @@ export function MessageInput({ onSendText, onSendVoice, disabled }: MessageInput
         transition={{ duration: 0.28, ease: "easeOut" }}
       >
         <Button
+          variant="primary"
           size="icon"
           onClick={() => void submitText()}
           disabled={!text.trim() || sending || disabled}

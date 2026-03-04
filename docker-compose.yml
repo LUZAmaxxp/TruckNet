@@ -30,6 +30,8 @@ services:
         condition: service_healthy
       livekit:
         condition: service_started
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
       NEXTAUTH_SECRET: local-dev-secret-change-in-production
@@ -42,6 +44,8 @@ services:
       LIVEKIT_API_SECRET: devsecretchangeinproduction
       # Ably – real-time pub/sub (set your actual key here or via .env file)
       ABLY_API_KEY: ${ABLY_API_KEY}
+      # Redis – OSRM route cache
+      REDIS_URL: redis://redis:6379
       # Kafka – points at the kafka service on the internal Docker network (INTERNAL listener)
       KAFKA_BROKERS: kafka:29092
       KAFKA_ENABLED: "true"
@@ -66,18 +70,30 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Redis (optional — enables socket.io horizontal scaling) ────
-  # Uncomment when deploying multiple app replicas behind a load balancer.
-  # redis:
-  #   image: redis:7-alpine
-  #   restart: unless-stopped
-  #   ports:
-  #     - "6379:6379"
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  # ── Redis — OSRM route cache + optional horizontal scaling ─────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── RedisInsight — web UI for browsing Redis data ──────────────
+  redisinsight:
+    image: redis/redisinsight:latest
+    restart: unless-stopped
+    ports:
+      - "5540:5540"
+    depends_on:
+      redis:
+        condition: service_healthy
 
   # ── Kafka (KRaft mode — no ZooKeeper) ─────────────────────────────
   kafka:
@@ -159,3 +175,4 @@ volumes:
   postgres_data:
   uploads_data:
   kafka_data:
+  redis_data:
