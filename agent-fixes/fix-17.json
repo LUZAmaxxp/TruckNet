@@ -1,0 +1,337 @@
+{
+  "report_id": "FEAT-005",
+  "project": "TruckNet",
+  "date": "2026-03-02",
+  "title": "Admin Dashboard — Real-Time Fixes, Call 404, Conversation UI, Role-Based Auth Flow",
+  "summary": "Five combined issues: (1) SOS alerts not updating in real-time, (2) driver map pins not updating in real-time, (3) voice/video call buttons redirect to 404, (4) admin-driver chat missing conversation UI, (5) auth flow does not differentiate admin vs driver registration/login or redirect to correct dashboard post-login.",
+
+  "issues": [
+    {
+      "id": "ISSUE-A",
+      "severity": "high",
+      "title": "SOS alerts and driver map use polling — not real-time",
+      "symptoms": [
+        "New SOS alerts only appear after a page refresh",
+        "Driver pin positions on FleetMap only update on the 20-second poll cycle",
+        "New drivers coming online do not appear on map until next poll"
+      ],
+      "root_cause": "The admin dashboard components fetch data via REST polling intervals instead of subscribing to the existing Ably channels that already broadcast these events in real-time. The SosPanel should subscribe to stress:alerts → stress_signal_alert. The FleetMap should subscribe to user:{adminId} → nearby_driver_update AND listen for a new shared channel for fleet-wide broadcasts.",
+      "affected_files": [
+        "components/admin/SosPanel.tsx",
+        "components/admin/FleetMap.tsx",
+        "hooks/useSocket.ts",
+        "app/api/drivers/location/route.ts"
+      ]
+    },
+    {
+      "id": "ISSUE-B",
+      "severity": "critical",
+      "title": "Voice/video call buttons from admin redirect to 404",
+      "symptoms": [
+        "Clicking Voice Call or Video Call on a driver from the admin dashboard results in a 404 page",
+        "The call initiate API likely succeeds but the redirect URL is malformed or the call room page does not exist at the expected path"
+      ],
+      "root_cause_hypotheses": [
+        "The admin dashboard contact buttons navigate to /calls/[roomName] but the call room page lives under app/(protected)/calls/[roomName]/page.tsx which is inside the driver layout group — the admin layout group app/(admin)/ does not include this page, so Next.js cannot resolve it",
+        "The navigation after POST /api/calls/initiate uses router.push('/calls/' + roomName) which resolves differently depending on which route group the user is in",
+        "The call room page may not exist at all in the admin route group"
+      ],
+      "affected_files": [
+        "components/admin/AdminDriverCard.tsx",
+        "components/admin/FleetMap.tsx",
+        "components/admin/DriverTable.tsx",
+        "app/(protected)/calls/[roomName]/page.tsx",
+        "app/(admin)/admin/layout.tsx"
+      ]
+    },
+    {
+      "id": "ISSUE-C",
+      "severity": "high",
+      "title": "Admin-driver chat has no conversation UI — only a raw message composer modal",
+      "symptoms": [
+        "Admin can send a one-off message via MessageComposerModal but cannot see the conversation history",
+        "There is no dedicated conversation thread view for admin",
+        "The existing /messages page is inside the driver (protected) layout and not accessible or adapted for the admin role"
+      ],
+      "affected_files": [
+        "app/(protected)/messages/page.tsx",
+        "components/admin/MessageComposerModal.tsx",
+        "app/api/text-messages/route.ts"
+      ]
+    },
+    {
+      "id": "ISSUE-D",
+      "severity": "high",
+      "title": "Auth flow does not support role selection — no admin registration or role-based redirect",
+      "symptoms": [
+        "Admin user can only be set by manually running a SQL UPDATE — there is no UI for it",
+        "After login, all users are redirected to /dashboard regardless of role",
+        "There is no way for an admin to register through the UI",
+        "Admins are not automatically redirected to /admin after login"
+      ],
+      "affected_files": [
+        "app/(auth)/login/page.tsx",
+        "app/(auth)/register/page.tsx",
+        "auth.ts",
+        "middleware.ts",
+        "app/api/auth/register/route.ts"
+      ]
+    }
+  ],
+
+  "agent_prompt": {
+    "role": "You are a senior full-stack engineer on TruckNet, a Next.js 14 App Router real-time fleet communication platform. Apply all fixes below in the stated order. Every fix must be complete — do not leave TODO comments or placeholder logic.",
+    "objective": "Fix all five issues: real-time SOS alerts, real-time driver map, call 404 from admin, admin conversation UI, and role-based auth registration/login/redirect flow.",
+
+    "fix_A": {
+      "id": "FIX-A",
+      "title": "Make SOS alerts and driver map fully real-time via Ably",
+      "files": [
+        "components/admin/SosPanel.tsx",
+        "components/admin/FleetMap.tsx",
+        "app/api/drivers/location/route.ts",
+        "hooks/useSocket.ts"
+      ],
+
+      "fix_A1_sos_panel": {
+        "title": "SosPanel — subscribe to Ably stress:alerts channel",
+        "instructions": [
+          "Open components/admin/SosPanel.tsx",
+          "Import useSocket from hooks/useSocket.ts",
+          "Inside the component, call: const { on, off } = useSocket()",
+          "Add a useEffect that calls on('stress_signal_alert', handler) where handler receives the new alert payload and prepends it to the local alerts state array using setAlerts(prev => [newAlert, ...prev])",
+          "The handler must also: trigger a red pulse animation class on the panel container for 3 seconds, play an alert sound (use a short base64-encoded beep via new Audio()), and update the admin SOS badge count in AdminSidebar via a shared context or by dispatching a custom event",
+          "In the useEffect cleanup, call off('stress_signal_alert', handler) to prevent listener leaks",
+          "Remove the setInterval polling for SOS alerts entirely — real-time replaces it",
+          "Keep the initial fetch (GET /api/admin/sos?status=active) on mount to hydrate the list, then let Ably push updates from that point forward",
+          "When the admin resolves an alert via PATCH /api/admin/sos/[id]/resolve, update local state immediately (optimistic update): remove the resolved alert from the active list without waiting for a re-fetch"
+        ]
+      },
+
+      "fix_A2_fleet_map": {
+        "title": "FleetMap — replace polling with Ably real-time driver updates",
+        "instructions": [
+          "Open app/api/drivers/location/route.ts (the POST handler that upserts driver GPS)",
+          "After the existing ablyPublish call that sends nearby_driver_update to individual drivers, add a SECOND ablyPublish call that broadcasts to a new shared channel: ablyPublish('fleet:locations', 'driver_location_updated', { userId, name, profileImageUrl, latitude, longitude, updatedAt: new Date().toISOString() })",
+          "This fleet:locations channel is public to all admin subscribers and contains live driver movement data",
+          "Open components/admin/FleetMap.tsx",
+          "Import useSocket and subscribe to the new event inside a useEffect: on('driver_location_updated', handler)",
+          "The handler receives { userId, latitude, longitude, updatedAt, name, profileImageUrl } and updates the driver pin in local state: setDrivers(prev => prev.map(d => d.id === userId ? { ...d, latitude, longitude, updatedAt } : d)) — if the userId is not in the list yet (new driver came online), append them: setDrivers(prev => [...prev, newDriver])",
+          "Also subscribe to a driver_went_offline event (explained below) to remove pins when drivers go stale",
+          "In cleanup, call off('driver_location_updated', handler)",
+          "Remove the setInterval polling entirely",
+          "Keep the initial GET /api/admin/drivers/live fetch on mount for hydration",
+          "In hooks/useSocket.ts, update the SocketProvider useEffect to also subscribe to the fleet:locations channel: const fleetChannel = realtime.channels.get('fleet:locations'); fleetChannel.subscribe('driver_location_updated', dispatch('driver_location_updated')). Add 'fleet:locations' cleanup alongside the existing channel cleanups."
+        ]
+      },
+
+      "fix_A3_csp_fleet_channel": {
+        "title": "No CSP changes needed — fleet:locations uses the same Ably infrastructure already whitelisted"
+      }
+    },
+
+    "fix_B": {
+      "id": "FIX-B",
+      "title": "Fix voice/video call 404 from admin dashboard",
+      "files": [
+        "app/(admin)/admin/calls/[roomName]/page.tsx",
+        "components/admin/AdminDriverCard.tsx",
+        "components/admin/FleetMap.tsx",
+        "components/admin/DriverTable.tsx"
+      ],
+      "instructions": [
+        "DIAGNOSIS: The call room page at app/(protected)/calls/[roomName]/page.tsx is inside the driver layout route group. When an admin navigates to /calls/[roomName], Next.js resolves it through the (protected) layout which may redirect the admin away or fail to render because the admin role guard conflicts with the driver layout.",
+        "SOLUTION: Create a dedicated call room page inside the admin route group that reuses the exact same LiveKit room component:",
+
+        "STEP 1 — Create app/(admin)/admin/calls/[roomName]/page.tsx. This page must be identical in functionality to the driver call page but rendered inside the admin layout. Copy the full contents of app/(protected)/calls/[roomName]/page.tsx into the new file. The only difference is the file location (route group).",
+
+        "STEP 2 — In all admin contact buttons (AdminDriverCard, FleetMap popup, DriverTable action column), update the post-initiate navigation to use the admin-scoped path: router.push('/admin/calls/' + roomName + '?type=' + callType) instead of router.push('/calls/' + roomName + '?type=' + callType)",
+
+        "STEP 3 — The initiate call flow in admin components must be: (a) call POST /api/calls/initiate with { calleeId: driverId, type: 'voice'|'video' }, (b) await the response to get { roomName, token, liveKitUrl }, (c) store token and liveKitUrl in sessionStorage keyed by roomName so the call page can retrieve them without a second token fetch, (d) router.push('/admin/calls/' + roomName + '?type=' + callType)",
+
+        "STEP 4 — In app/(admin)/admin/calls/[roomName]/page.tsx, on mount read the token from sessionStorage: const token = sessionStorage.getItem('livekit_token_' + roomName). If token is null, fall back to fetching GET /api/calls/[roomName] to get a fresh token. Then call room.connect(liveKitUrl, token).",
+
+        "STEP 5 — After the call ends, navigate back to /admin (not /messages) using router.push('/admin')"
+      ],
+      "code_template_initiate": "// In AdminDriverCard.tsx or FleetMap popup\nasync function handleCall(driverId: string, type: 'voice' | 'video') {\n  try {\n    setIsLoading(true);\n    const res = await fetch('/api/calls/initiate', {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ calleeId: driverId, type }),\n    });\n    if (!res.ok) throw new Error('Failed to initiate call');\n    const { roomName, token, liveKitUrl } = await res.json();\n    // Cache token so call page doesn't need a second round-trip\n    sessionStorage.setItem(`livekit_token_${roomName}`, token);\n    sessionStorage.setItem(`livekit_url_${roomName}`, liveKitUrl);\n    router.push(`/admin/calls/${roomName}?type=${type}`);\n  } catch (e) {\n    toast.error('Could not start call. Please try again.');\n  } finally {\n    setIsLoading(false);\n  }\n}"
+    },
+
+    "fix_C": {
+      "id": "FIX-C",
+      "title": "Add full conversation UI for admin-driver messaging",
+      "files": [
+        "app/(admin)/admin/messages/page.tsx",
+        "app/(admin)/admin/messages/[driverId]/page.tsx",
+        "components/admin/AdminConversationList.tsx",
+        "components/admin/AdminConversationThread.tsx",
+        "components/admin/AdminMessageBubble.tsx",
+        "app/api/text-messages/route.ts",
+        "components/admin/AdminSidebar.tsx"
+      ],
+      "instructions": [
+        "CREATE app/(admin)/admin/messages/page.tsx — the admin messages landing page. Layout: left panel = AdminConversationList (list of all drivers the admin has conversed with or can message), right panel = AdminConversationThread (the selected thread). This is a two-column layout identical in structure to the driver /messages page.",
+
+        "CREATE components/admin/AdminConversationList.tsx — fetches GET /api/text-messages/conversations (new endpoint, see below) to list all unique conversation partners of the admin user. Renders each as a row: avatar, driver name, tag, last message preview, unread badge, timestamp. Clicking a row navigates to /admin/messages/[driverId] or updates selectedDriverId state (client-side routing within the page).",
+
+        "CREATE components/admin/AdminConversationThread.tsx — accepts driverId prop. Fetches GET /api/text-messages?with={driverId} to load message history. Renders messages as bubbles (AdminMessageBubble). Shows a text input at the bottom with a Send button. On send: POST /api/text-messages { receiverId: driverId, content }. Subscribes to useSocket() on('text_message_received', handler) and appends incoming messages from the selected driver to the thread in real-time WITHOUT a re-fetch.",
+
+        "CREATE components/admin/AdminMessageBubble.tsx — renders a single message bubble. Props: { content, sentAt, isSelf, senderAvatar, senderName }. isSelf = true when senderId === session.user.id. Mirrors the existing driver MessageBubble component styling.",
+
+        "CREATE app/(admin)/admin/messages/[driverId]/page.tsx — deep-link route that pre-selects a specific conversation thread. Used by the View Conversation button on AdminDriverCard. Simply renders the same two-column layout with driverId pre-selected.",
+
+        "MODIFY components/admin/AdminSidebar.tsx — add a Messages nav link pointing to /admin/messages with an unread count badge. The badge count comes from a context or SWR query on GET /api/text-messages/unread-count (reuse or adapt the existing unread count logic from the driver messages page).",
+
+        "MODIFY components/admin/AdminDriverCard.tsx — change the Text Message button from opening MessageComposerModal to navigating to /admin/messages/[driverId]. Delete MessageComposerModal entirely.",
+
+        "ADD GET /api/text-messages/conversations endpoint: returns all unique userIds that the current admin has exchanged messages with, along with the last message and unread count per conversation. Query: SELECT DISTINCT ON (partner_id) ... from text_messages WHERE sender_id = adminId OR receiver_id = adminId ORDER BY created_at DESC.",
+
+        "The real-time subscription in AdminConversationThread must filter incoming text_message_received events by senderId — only append messages to the thread if msg.senderId === the currently viewed driverId, to prevent messages from other drivers appearing in the wrong thread."
+      ]
+    },
+
+    "fix_D": {
+      "id": "FIX-D",
+      "title": "Role-based auth flow — registration with role selection, login with role-based redirect",
+      "files": [
+        "app/(auth)/register/page.tsx",
+        "app/(auth)/login/page.tsx",
+        "app/api/auth/register/route.ts",
+        "auth.ts",
+        "middleware.ts"
+      ],
+
+      "fix_D1_register": {
+        "title": "Add role selection to registration form",
+        "instructions": [
+          "Open app/(auth)/register/page.tsx",
+          "Add a role selector UI element below the existing form fields. Use two large clickable cards (not a dropdown): one card labeled 'Truck Driver' with a truck icon, one card labeled 'Fleet Admin' with a dashboard icon. The selected card gets a highlighted border. Default selection is 'driver'.",
+          "The selected role is stored in local component state: const [role, setRole] = useState<'driver' | 'admin'>('driver')",
+          "Include the role in the form submission payload to POST /api/auth/register: { name, email, password, role }",
+          "Update the Zod UserRegisterSchema in schemas/user.schema.ts to include: role: z.enum(['driver', 'admin']).default('driver')",
+          "Open app/api/auth/register/route.ts and update the INSERT to include the role field from the validated body: db.insert(users).values({ ...validatedData, role: body.role ?? 'driver', passwordHash, tag, tagNumber })",
+          "SECURITY NOTE: In a production app, admin registration should require an invite code or be disabled publicly. Add an optional adminInviteCode field to the register schema. If role === 'admin', validate that the submitted code matches env.ADMIN_INVITE_CODE. If the code is wrong or missing, return 403. Add ADMIN_INVITE_CODE to env.schema.ts and .env.local. This prevents anyone from self-registering as admin."
+        ],
+        "ui_code_template": "// Role selector in register form\n<div className=\"grid grid-cols-2 gap-4 mb-6\">\n  {(['driver', 'admin'] as const).map((r) => (\n    <button\n      key={r}\n      type=\"button\"\n      onClick={() => setRole(r)}\n      className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${\n        role === r\n          ? 'border-primary bg-primary/10 text-primary'\n          : 'border-muted bg-muted/30 text-muted-foreground'\n      }`}\n    >\n      {r === 'driver' ? <TruckIcon className=\"h-8 w-8\" /> : <LayoutDashboardIcon className=\"h-8 w-8\" />}\n      <span className=\"font-semibold text-sm\">\n        {r === 'driver' ? 'Truck Driver' : 'Fleet Admin'}\n      </span>\n    </button>\n  ))}\n</div>"
+      },
+
+      "fix_D2_login_redirect": {
+        "title": "Role-based redirect after login",
+        "instructions": [
+          "Open auth.ts (the full Auth.js config with Credentials provider)",
+          "In the callbacks.jwt callback, after the existing user data is added to token, add: if (user?.role) token.role = user.role",
+          "In the callbacks.session callback, add: if (token?.role) session.user.role = token.role as 'driver' | 'admin'",
+          "Update the TypeScript type declarations in types/next-auth.d.ts (or next-auth.d.ts at root): extend the Session.user type with role: 'driver' | 'admin'",
+          "Open middleware.ts — find the authorized() callback or the redirect logic that runs after successful authentication",
+          "Add a post-login redirect based on role: if the user's role is 'admin' and they are on /login or /register or /, redirect them to /admin. If their role is 'driver', redirect to /dashboard. Specifically: in the Auth.js authorized callback, if (token?.role === 'admin' && request.nextUrl.pathname === '/') return Response.redirect(new URL('/admin', request.url))",
+          "Also handle the case where an admin manually visits /dashboard — redirect them to /admin instead",
+          "And where a driver manually visits /admin/* — redirect them to /dashboard",
+          "The complete redirect matrix in middleware.ts must be: (1) unauthenticated → /login, (2) authenticated driver on / or /dashboard → /dashboard (existing behavior), (3) authenticated admin on / or /login or /dashboard → /admin, (4) authenticated driver on /admin/* → /dashboard with toast, (5) authenticated admin on driver-only paths → allowed (admin has broader access)"
+        ],
+        "middleware_redirect_matrix_code": "// middleware.ts — add inside the auth callback after session check\nconst role = token?.role as string | undefined;\nconst path = request.nextUrl.pathname;\n\n// Admin redirect rules\nif (role === 'admin') {\n  if (path === '/' || path === '/login' || path === '/register' || path === '/dashboard') {\n    return Response.redirect(new URL('/admin', request.url));\n  }\n}\n\n// Driver redirect rules\nif (role === 'driver') {\n  if (path.startsWith('/admin')) {\n    return Response.redirect(new URL('/dashboard', request.url));\n  }\n  if (path === '/') {\n    return Response.redirect(new URL('/dashboard', request.url));\n  }\n}"
+      },
+
+      "fix_D3_login_page_ux": {
+        "title": "Update login page to inform users about role-based access",
+        "instructions": [
+          "Open app/(auth)/login/page.tsx",
+          "The login form itself does NOT need a role selector — role is stored in the database and retrieved on authentication automatically",
+          "Add a subtle info line below the submit button: 'Admins will be redirected to the fleet dashboard automatically.'",
+          "After successful signIn(), do NOT manually call router.push('/dashboard') — instead call router.push('/') and let the middleware handle the role-based redirect. This ensures the correct destination for both drivers and admins.",
+          "Remove any hardcoded router.push('/dashboard') calls in the login form onSubmit handler and replace with router.push('/')"
+        ]
+      }
+    },
+
+    "fix_E": {
+      "id": "FIX-E",
+      "title": "New environment variable for admin invite code",
+      "files": [
+        "schemas/env.schema.ts",
+        "lib/env.ts",
+        ".env.local"
+      ],
+      "instructions": [
+        "Add ADMIN_INVITE_CODE to schemas/env.schema.ts: ADMIN_INVITE_CODE: z.string().min(8).optional()",
+        "Add it to lib/env.ts export",
+        "Add ADMIN_INVITE_CODE=your-secret-code-here to .env.local",
+        "In app/api/auth/register/route.ts, when role === 'admin': if (!body.adminInviteCode || body.adminInviteCode !== env.ADMIN_INVITE_CODE) { return NextResponse.json({ error: 'Invalid admin invite code' }, { status: 403 }); }",
+        "In the registration UI, when role === 'admin' is selected, show an additional input field: 'Admin Invite Code' with type='password'. This field is hidden when role === 'driver'."
+      ]
+    },
+
+    "new_api_route": {
+      "method": "GET",
+      "path": "/api/text-messages/conversations",
+      "auth": true,
+      "description": "Returns all unique conversation partners for the current user (used by admin conversation list and could benefit driver messages too). For each partner returns: partnerId, partnerName, partnerAvatar, partnerTag, lastMessage { content, createdAt, isSelf }, unreadCount.",
+      "implementation": {
+        "file": "app/api/text-messages/conversations/route.ts",
+        "query_logic": [
+          "Select all messages where sender_id = userId OR receiver_id = userId",
+          "Group by the other participant (CASE WHEN sender_id = userId THEN receiver_id ELSE sender_id END as partner_id)",
+          "For each partner: get the most recent message (ORDER BY created_at DESC), get count of messages where receiver_id = userId AND status = 'delivered'",
+          "JOIN users on partner_id to get name, tag, profileImageUrl",
+          "Return sorted by last message created_at DESC"
+        ]
+      }
+    },
+
+    "verification_steps": [
+      {
+        "step": 1,
+        "action": "Open /admin dashboard. Trigger a stress signal from a driver account in another browser tab. Verify the SOS alert appears in SosPanel within 1-2 seconds WITHOUT refreshing the admin page."
+      },
+      {
+        "step": 2,
+        "action": "Open /admin dashboard. Move a driver (update their GPS via POST /api/drivers/location from a driver account). Verify the driver pin on FleetMap moves within 2 seconds WITHOUT refreshing."
+      },
+      {
+        "step": 3,
+        "action": "Click Voice Call on any driver from the admin dashboard FleetMap popup or DriverTable. Verify it navigates to /admin/calls/[roomName] (not /calls/[roomName]) and the LiveKit room connects successfully with no 404."
+      },
+      {
+        "step": 4,
+        "action": "Click Video Call from the admin dashboard. Verify same — navigates to /admin/calls/[roomName]?type=video and connects."
+      },
+      {
+        "step": 5,
+        "action": "Navigate to /admin/messages. Verify the conversation list loads. Click a driver. Verify the message thread loads with history. Send a message. Verify the driver receives it in real-time on their /messages page."
+      },
+      {
+        "step": 6,
+        "action": "Send a text message FROM a driver TO the admin. Verify the admin's conversation thread updates in real-time without refresh."
+      },
+      {
+        "step": 7,
+        "action": "Register a new account with role='driver'. Verify after login they are redirected to /dashboard."
+      },
+      {
+        "step": 8,
+        "action": "Register a new admin account using the correct ADMIN_INVITE_CODE. Verify after login they are redirected to /admin."
+      },
+      {
+        "step": 9,
+        "action": "Try to register as admin with a wrong invite code. Verify the API returns 403 and the form shows an error."
+      },
+      {
+        "step": 10,
+        "action": "Log in as an admin and manually navigate to /dashboard. Verify middleware redirects to /admin."
+      },
+      {
+        "step": 11,
+        "action": "Log in as a driver and manually navigate to /admin. Verify middleware redirects to /dashboard."
+      }
+    ],
+
+    "constraints": [
+      "The fleet:locations Ably channel must be added to the CSP connect-src in next.config.mjs — it uses the same Ably domains so no new domain entries are needed, but verify the channel name does not conflict with existing topology",
+      "sessionStorage used to pass LiveKit tokens to the admin call page must be cleaned up after use: sessionStorage.removeItem('livekit_token_' + roomName) after the room connects",
+      "The admin conversation thread real-time listener must be scoped to the currently viewed driverId — do not append messages from other drivers to the wrong thread",
+      "The role field in the JWT and session must use the value from the database — never trust a client-supplied role claim",
+      "ADMIN_INVITE_CODE must be at least 16 characters in production and must never be committed to git",
+      "The /admin/calls/[roomName]/page.tsx must reuse the exact same LiveKit room logic as the driver call page — do not duplicate the WebRTC logic, extract it into a shared component at components/calls/CallRoomView.tsx that both pages import",
+      "Removing MessageComposerModal must not break any existing imports — search the codebase for all usages before deleting",
+      "The role-based middleware redirect must not create redirect loops — add a check that the user is not already on the correct destination before redirecting"
+    ]
+  }
+}

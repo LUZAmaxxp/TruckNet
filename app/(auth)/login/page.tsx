@@ -47,7 +47,8 @@ export default function LoginPage() {
     if (res?.error) {
       setServerError("Invalid email or password.");
     } else {
-      router.push("/dashboard");
+      // Let middleware handle role-based redirect (admin → /admin, driver → /dashboard)
+      router.push("/");
     }
   }
 
@@ -101,6 +102,9 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in…" : "Sign In"}
             </Button>
+            <p className="text-xs text-muted-foreground text-center">
+              Admins are redirected to the fleet dashboard automatically.
+            </p>
             <p className="text-sm text-muted-foreground text-center">
               No account?{" "}
               <Link href="/register" className="text-primary hover:underline">

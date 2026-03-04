@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, MessageSquare } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,8 @@ interface FriendEntry extends Friend {
 interface FriendsSidebarProps {
   activeFriendId: string | null;
   onSelectFriend: (friend: Friend) => void;
+  /** If set, automatically open this conversation once contacts are loaded */
+  autoOpenId?: string | null;
 }
 
 function useDebounce<T>(value: T, delay = 300): T {
@@ -52,71 +54,103 @@ function formatRelativeTime(date?: Date): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-export function FriendsSidebar({ activeFriendId, onSelectFriend }: FriendsSidebarProps) {
+export function FriendsSidebar({ activeFriendId, onSelectFriend, autoOpenId }: FriendsSidebarProps) {
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const debouncedSearch = useDebounce(search);
   const { on } = useSocket();
+  const autoOpenFired = useRef(false);
 
-  // ── Fetch friends + seed last messages ───────────────────────────────────
+  // ── Fetch friends + non-friend conversations (e.g. admin messages) ────────
   useEffect(() => {
     async function load() {
-      const [friendsRes, textRes, voiceRes] = await Promise.all([
+      const [friendsRes, convsRes] = await Promise.all([
         fetch("/api/friends/list"),
-        fetch("/api/text-messages?friendId=all").catch(() => null), // may 400 – handled below
-        fetch("/api/voice-messages"),
+        fetch("/api/text-messages/conversations"),
       ]);
 
       const { friends: rawFriends } = (await friendsRes.json()) as {
         friends: Friend[];
       };
 
-      // Build a lastMessage + unreadCount map keyed by friendId
+      const { conversations: convData } = (await convsRes.json()) as {
+        conversations?: Array<{
+          partnerId: string;
+          partnerName: string;
+          partnerTag: string;
+          partnerAvatar: string | null;
+          lastMessage: { content: string; createdAt: string; isSelf: boolean };
+          unreadCount: number;
+        }>;
+      };
+
+      // Merge non-friend conversation partners (e.g. admins) into the list
+      const friendIds = new Set(rawFriends.map((f) => f.id));
+      const extraContacts: Friend[] = (convData ?? [])
+        .filter((c) => !friendIds.has(c.partnerId))
+        .map((c) => ({
+          id: c.partnerId,
+          name: c.partnerName,
+          tag: c.partnerTag ?? "",
+          profileImageUrl: c.partnerAvatar,
+        }));
+
+      const allContacts = [...rawFriends, ...extraContacts];
+
+      // Build a lastMessage + unreadCount map keyed by partnerId from conversations API
       const infoMap = new Map<
         string,
         { lastMessage: string; lastMessageAt: Date; unreadCount: number }
       >();
 
-      // We fetch per-friend conversations separately for preview;
-      // to avoid N+1 we run them in parallel (friends list is typically small)
-      const previews = await Promise.all(
-        rawFriends.map(async (f) => {
-          const r = await fetch(`/api/text-messages?friendId=${f.id}`);
-          if (!r.ok) return { id: f.id, messages: [] as Array<{ senderId: string; content: string; status: string; createdAt: string }> };
-          const { messages } = (await r.json()) as {
-            messages: Array<{
-              id: string;
-              senderId: string;
-              content: string;
-              status: string;
-              createdAt: string;
-            }>;
-          };
-          return { id: f.id, messages };
-        })
-      );
-
-      for (const preview of previews) {
-        const msgs = preview.messages;
-        if (msgs.length === 0) continue;
-        const last = msgs[msgs.length - 1]!;
-        const unread = msgs.filter(
-          (m) => m.senderId === preview.id && m.status === "delivered"
-        ).length;
-        infoMap.set(preview.id, {
-          lastMessage: last.content,
-          lastMessageAt: new Date(last.createdAt),
-          unreadCount: unread,
+      for (const c of convData ?? []) {
+        infoMap.set(c.partnerId, {
+          lastMessage: c.lastMessage.content,
+          lastMessageAt: new Date(c.lastMessage.createdAt),
+          unreadCount: c.unreadCount,
         });
       }
 
-      setFriends(
-        rawFriends.map((f) => ({
-          ...f,
-          ...(infoMap.get(f.id) ?? { unreadCount: 0 }),
-        }))
-      );
+      // For friends not yet in conversations API (no messages yet), fetch previews
+      const friendsWithoutConv = rawFriends.filter((f) => !infoMap.has(f.id));
+      if (friendsWithoutConv.length > 0) {
+        const previews = await Promise.all(
+          friendsWithoutConv.map(async (f) => {
+            const r = await fetch(`/api/text-messages?friendId=${f.id}`);
+            if (!r.ok) return { id: f.id, messages: [] as Array<{ senderId: string; content: string; status: string; createdAt: string }> };
+            const { messages } = (await r.json()) as {
+              messages: Array<{ id: string; senderId: string; content: string; status: string; createdAt: string }>;
+            };
+            return { id: f.id, messages };
+          })
+        );
+        for (const preview of previews) {
+          const msgs = preview.messages;
+          if (msgs.length === 0) continue;
+          const last = msgs[msgs.length - 1]!;
+          const unread = msgs.filter((m) => m.senderId === preview.id && m.status === "delivered").length;
+          infoMap.set(preview.id, {
+            lastMessage: last.content,
+            lastMessageAt: new Date(last.createdAt),
+            unreadCount: unread,
+          });
+        }
+      }
+
+      const entries: FriendEntry[] = allContacts.map((f) => ({
+        ...f,
+        ...(infoMap.get(f.id) ?? { unreadCount: 0 }),
+      }));
+
+      // Sort by last message time — conversations with messages first
+      entries.sort((a, b) => {
+        const ta = a.lastMessageAt?.getTime() ?? 0;
+        const tb = b.lastMessageAt?.getTime() ?? 0;
+        return tb - ta;
+      });
+
+      setFriends(entries);
       setLoading(false);
     }
     void load();
@@ -125,23 +159,48 @@ export function FriendsSidebar({ activeFriendId, onSelectFriend }: FriendsSideba
   // ── Real-time: update sidebar preview on incoming text message ────────────
   useEffect(() => {
     const unsub = on("text_message_received", (msg) => {
-      setFriends((prev) =>
-        prev.map((f) =>
-          f.id === msg.senderId
-            ? {
-                ...f,
-                lastMessage: msg.content,
-                lastMessageAt: new Date(msg.createdAt),
-                // Only increment unread if not the active conversation
-                unreadCount:
-                  activeFriendId === f.id ? f.unreadCount : f.unreadCount + 1,
-              }
-            : f
-        )
-      );
+      setFriends((prev) => {
+        const exists = prev.find((f) => f.id === msg.senderId);
+        if (exists) {
+          return prev.map((f) =>
+            f.id === msg.senderId
+              ? {
+                  ...f,
+                  lastMessage: msg.content,
+                  lastMessageAt: new Date(msg.createdAt),
+                  unreadCount:
+                    activeFriendId === f.id ? f.unreadCount : f.unreadCount + 1,
+                }
+              : f
+          );
+        }
+        // Sender is not a friend (e.g. admin) — append them to the sidebar
+        return [
+          ...prev,
+          {
+            id: msg.senderId,
+            name: msg.senderName ?? "Unknown",
+            tag: "",
+            profileImageUrl: null,
+            lastMessage: msg.content,
+            lastMessageAt: new Date(msg.createdAt),
+            unreadCount: activeFriendId === msg.senderId ? 0 : 1,
+          },
+        ];
+      });
     });
     return () => unsub?.();
   }, [on, activeFriendId]);
+
+  // ── Auto-open a specific conversation once loaded ───────────────────────
+  useEffect(() => {
+    if (!autoOpenId || loading || autoOpenFired.current) return;
+    const target = friends.find((f) => f.id === autoOpenId);
+    if (target) {
+      autoOpenFired.current = true;
+      onSelectFriend(target);
+    }
+  }, [autoOpenId, loading, friends, onSelectFriend]);
 
   // ── Reset unread when user opens conversation ─────────────────────────────
   useEffect(() => {
@@ -194,12 +253,9 @@ export function FriendsSidebar({ activeFriendId, onSelectFriend }: FriendsSideba
           </div>
         ) : (
           <motion.ul
-            initial="hidden"
-            animate="visible"
-            variants={{
-              visible: { transition: { staggerChildren: 0.04 } },
-              hidden: {},
-            }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.18 }}
             className="py-2"
             role="listbox"
             aria-label="Friends"
@@ -210,11 +266,11 @@ export function FriendsSidebar({ activeFriendId, onSelectFriend }: FriendsSideba
                 return (
                   <motion.li
                     key={f.id}
-                    variants={{
-                      hidden: { opacity: 0, y: 6 },
-                      visible: { opacity: 1, y: 0 },
-                    }}
-                    transition={{ type: "spring", damping: 20, stiffness: 300 }}
+                    layout
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 4 }}
+                    transition={{ duration: 0.15 }}
                     whileHover={{ scale: 1.02 }}
                     role="option"
                     aria-selected={isActive}

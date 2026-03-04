@@ -17,6 +17,8 @@ import { type InferSelectModel, type InferInsertModel } from "drizzle-orm";
 // PostgreSQL Enums
 // ---------------------------------------------------------------------------
 
+export const userRoleEnum = pgEnum("user_role", ["driver", "admin"]);
+
 export const voiceMessageStatusEnum = pgEnum("voice_message_status", [
   "delivered",
   "listened",
@@ -42,18 +44,25 @@ export const friendRequestStatusEnum = pgEnum("friend_request_status", [
 // users
 // ---------------------------------------------------------------------------
 
-export const users = pgTable("users", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
-  tag: varchar("tag", { length: 20 }).notNull().unique(),
-  tagNumber: integer("tag_number").notNull(),
-  profileImageUrl: varchar("profile_image_url", { length: 255 }),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    passwordHash: text("password_hash").notNull(),
+    tag: varchar("tag", { length: 20 }).notNull().unique(),
+    tagNumber: integer("tag_number").notNull(),
+    profileImageUrl: varchar("profile_image_url", { length: 255 }),
+    role: userRoleEnum("role").notNull().default("driver"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    roleIdx: index("users_role_idx").on(table.role),
+  })
+);
 
 // ---------------------------------------------------------------------------
 // driver_locations
@@ -181,11 +190,46 @@ export const textMessages = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// call_history
+// ---------------------------------------------------------------------------
+
+export const callTypeEnum = pgEnum("call_type", ["voice", "video"]);
+
+export const callStatusEnum = pgEnum("call_status", [
+  "ongoing",
+  "completed",
+  "missed",
+  "declined",
+]);
+
+export const callHistory = pgTable(
+  "call_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    roomName: varchar("room_name", { length: 100 }).notNull().unique(),
+    callerId: uuid("caller_id").references(() => users.id, { onDelete: "set null" }),
+    calleeId: uuid("callee_id").references(() => users.id, { onDelete: "set null" }),
+    callType: callTypeEnum("call_type").notNull(),
+    status: callStatusEnum("status").notNull().default("ongoing"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    durationSeconds: integer("duration_seconds"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    callerIdIdx: index("call_history_caller_id_idx").on(table.callerId),
+    calleeIdIdx: index("call_history_callee_id_idx").on(table.calleeId),
+    createdAtIdx: index("call_history_created_at_idx").on(table.createdAt),
+  })
+);
+
+// ---------------------------------------------------------------------------
 // Inferred TypeScript types
 // ---------------------------------------------------------------------------
 
 export type User = InferSelectModel<typeof users>;
 export type NewUser = InferInsertModel<typeof users>;
+export type UserRole = (typeof userRoleEnum.enumValues)[number];
 
 export type DriverLocation = InferSelectModel<typeof driverLocations>;
 export type NewDriverLocation = InferInsertModel<typeof driverLocations>;
@@ -201,3 +245,6 @@ export type NewFriendRequest = InferInsertModel<typeof friendRequests>;
 
 export type TextMessage = InferSelectModel<typeof textMessages>;
 export type NewTextMessage = InferInsertModel<typeof textMessages>;
+
+export type CallHistory = InferSelectModel<typeof callHistory>;
+export type NewCallHistory = InferInsertModel<typeof callHistory>;

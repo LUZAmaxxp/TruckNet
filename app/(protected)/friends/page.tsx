@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { UserPlus, Users, Loader2, Check, X, Mic } from "lucide-react";
+import { UserPlus, Users, Loader2, Check, X, MessageSquare, MapPin, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSocket } from "@/hooks/useSocket";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,12 +12,21 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { CallButton } from "@/components/calls/CallButton";
 
 interface Friend {
   id: string;
   name: string;
   tag: string;
 }
+
+interface FriendLocation {
+  latitude: number;
+  longitude: number;
+  updatedAt: string;
+}
+
+type LocationState = "idle" | "loading" | "error" | FriendLocation;
 
 interface FriendRequest {
   id: string;
@@ -38,6 +47,32 @@ export default function FriendsPage() {
   // Send friend request state
   const [sendToId, setSendToId] = useState("");
   const [sending, setSending] = useState(false);
+
+  // Per-friend location state: "idle" | "loading" | "error" | FriendLocation
+  const [friendLocations, setFriendLocations] = useState<Record<string, LocationState>>({});
+
+  async function toggleLocation(friendId: string) {
+    const current = friendLocations[friendId] ?? "idle";
+    // If already showing location data, hide it
+    if (current !== "idle" && current !== "loading") {
+      setFriendLocations((prev) => ({ ...prev, [friendId]: "idle" }));
+      return;
+    }
+    setFriendLocations((prev) => ({ ...prev, [friendId]: "loading" }));
+    try {
+      const res = await fetch(`/api/friends/${friendId}/location`);
+      if (!res.ok) throw new Error("Failed");
+      const json = (await res.json()) as { location: FriendLocation | null };
+      if (!json.location) {
+        toast.info("This friend hasn't shared their location yet.");
+        setFriendLocations((prev) => ({ ...prev, [friendId]: "idle" }));
+        return;
+      }
+      setFriendLocations((prev) => ({ ...prev, [friendId]: json.location! }));
+    } catch {
+      setFriendLocations((prev) => ({ ...prev, [friendId]: "error" }));
+    }
+  }
 
   const fetchFriends = useCallback(async () => {
     setLoadingFriends(true);
@@ -263,17 +298,96 @@ export default function FriendsPage() {
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.2, delay: i * 0.04 }}
               >
-                <Card>
-                  <CardContent className="flex items-center justify-between py-3 px-4">
-                    <div>
-                      <p className="font-medium text-sm">{friend.name}</p>
-                      <Badge variant="secondary" className="mt-0.5 text-xs">{friend.tag}</Badge>
+                <Card className="overflow-hidden">
+                  <CardContent className="py-3 px-4">
+                    {/* Main row */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-sm">{friend.name}</p>
+                        <Badge variant="secondary" className="mt-0.5 text-xs">{friend.tag}</Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CallButton friendId={friend.id} variant="voice" />
+                        <Link href={`/messages?to=${friend.id}`}>
+                          <button
+                            title="Send a message"
+                            className="flex items-center justify-center w-10 h-10 rounded-full transition-all bg-primary/10 hover:bg-primary/20 text-primary active:scale-95"
+                            aria-label="Open messages"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                          </button>
+                        </Link>
+                        <CallButton friendId={friend.id} variant="video" />
+                        {/* Location toggle */}
+                        <button
+                          title="See location"
+                          onClick={() => void toggleLocation(friend.id)}
+                          className={`flex items-center justify-center w-10 h-10 rounded-full transition-all active:scale-95 ${
+                            typeof friendLocations[friend.id] === "object"
+                              ? "bg-green-500/20 text-green-500"
+                              : "bg-primary/10 hover:bg-primary/20 text-primary"
+                          }`}
+                          aria-label="Toggle location"
+                        >
+                          {friendLocations[friend.id] === "loading" ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <MapPin className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
                     </div>
-                    <Link href={`/messages?to=${friend.id}`}>
-                      <Button size="sm" variant="outline">
-                        <Mic className="h-3 w-3 mr-1" /> Voice Message
-                      </Button>
-                    </Link>
+
+                    {/* Inline location reveal */}
+                    <AnimatePresence initial={false}>
+                      {typeof friendLocations[friend.id] === "object" && (
+                        <motion.div
+                          key="loc"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="mt-3 pt-3 border-t flex items-center justify-between gap-3">
+                            <div className="space-y-0.5">
+                              <p className="text-xs font-mono text-muted-foreground">
+                                {(friendLocations[friend.id] as FriendLocation).latitude.toFixed(5)},{" "}
+                                {(friendLocations[friend.id] as FriendLocation).longitude.toFixed(5)}
+                              </p>
+                              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {(() => {
+                                  const diff = Math.round(
+                                    (Date.now() - new Date((friendLocations[friend.id] as FriendLocation).updatedAt).getTime()) / 60_000
+                                  );
+                                  return diff < 1 ? "Just now" : diff < 60 ? `${diff} min ago` : `${Math.round(diff / 60)} h ago`;
+                                })()}
+                              </p>
+                            </div>
+                            <Link
+                              href={`/map?focus=${friend.id}`}
+                              className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline shrink-0"
+                            >
+                              <MapPin className="w-3.5 h-3.5" />
+                              View on Map
+                            </Link>
+                          </div>
+                        </motion.div>
+                      )}
+                      {friendLocations[friend.id] === "error" && (
+                        <motion.div
+                          key="err"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <p className="mt-2 text-xs text-destructive">Could not fetch location. Try again.</p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </CardContent>
                 </Card>
               </motion.div>

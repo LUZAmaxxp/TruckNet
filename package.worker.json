@@ -1,0 +1,22 @@
+{
+  "name": "truckconnect-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "worker:stress": "tsx workers/stress-signal-consumer.ts",
+    "worker:dev:stress": "tsx watch workers/stress-signal-consumer.ts",
+    "kafka:setup": "tsx scripts/kafka-setup.ts"
+  },
+  "dependencies": {
+    "ably": "^2.18.0",
+    "drizzle-orm": "^0.30.10",
+    "kafkajs": "^2.2.4",
+    "postgres": "^3.4.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.5"
+  }
+}

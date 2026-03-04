@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { validateOrThrow } from "@/lib/validate";
 import { UserRegisterSchema } from "@/schemas/user.schema";
+import { env } from "@/lib/env";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -48,6 +49,22 @@ export async function POST(req: NextRequest) {
     const body: unknown = await req.json();
     const data = await validateOrThrow(UserRegisterSchema, body);
 
+    // Admin registration requires a valid invite code
+    if (data.role === "admin") {
+      if (!env.ADMIN_INVITE_CODE) {
+        return NextResponse.json(
+          { error: "Admin registration is disabled on this server." },
+          { status: 403 }
+        );
+      }
+      if (!data.adminInviteCode || data.adminInviteCode !== env.ADMIN_INVITE_CODE) {
+        return NextResponse.json(
+          { error: "Invalid admin invite code." },
+          { status: 403 }
+        );
+      }
+    }
+
     const passwordHash = await bcrypt.hash(data.password, BCRYPT_SALT_ROUNDS);
     const { tag, tagNumber } = await generateUniqueTag(data.name);
 
@@ -59,12 +76,14 @@ export async function POST(req: NextRequest) {
         passwordHash,
         tag,
         tagNumber,
+        role: data.role,
       })
       .returning({
         id: users.id,
         name: users.name,
         email: users.email,
         tag: users.tag,
+        role: users.role,
         createdAt: users.createdAt,
       });
 

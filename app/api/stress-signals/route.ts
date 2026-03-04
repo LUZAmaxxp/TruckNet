@@ -4,7 +4,11 @@ import { validateOrThrow } from "@/lib/validate";
 import { successResponse } from "@/lib/api";
 import { StressSignalSchema } from "@/schemas/stress.schema";
 import { db } from "@/db";
-import { stressSignals } from "@/db/schema";
+import { stressSignals, users } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { getProducer } from "@/lib/kafka";
+import { STRESS_SIGNALS_TOPIC } from "@/lib/kafka-topics";
+import { env } from "@/lib/env";
 
 /**
  * POST /api/stress-signals
@@ -31,6 +35,43 @@ export async function POST(req: NextRequest) {
       status: "active",
     })
     .returning();
+
+  // Fetch sender name for the Kafka payload (consumer uses it to enrich Ably alerts)
+  const [sender] = await db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+
+  // Produce to Kafka — fire-and-forget after the DB write so the API response
+  // is never delayed by Kafka. The consumer handles fan-out to nearby drivers.
+  // Skip when KAFKA_ENABLED=false (local dev without a running broker).
+  if (env.KAFKA_ENABLED === "true") {
+    getProducer()
+      .then((producer) =>
+        producer.send({
+          topic: STRESS_SIGNALS_TOPIC,
+          messages: [
+            {
+              // Keying by signal ID routes the same signal to the same partition
+              // (idempotency guarantee for retries).
+              key: signal.id,
+              value: JSON.stringify({
+                id: signal.id,
+                userId: signal.userId,
+                senderName: sender?.name ?? null,
+                latitude: signal.latitude,
+                longitude: signal.longitude,
+                createdAt: signal.createdAt,
+              }),
+            },
+          ],
+        })
+      )
+      .catch((err) =>
+        console.error("[stress-signals] kafka produce failed:", err)
+      );
+  }
 
   return successResponse(signal, 201);
 }

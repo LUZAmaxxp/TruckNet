@@ -1,0 +1,155 @@
+{
+  "report": {
+    "id": "BUG-003",
+    "project": "TruckConnect",
+    "date": "2026-03-02",
+    "severity": "high",
+    "feature": "Voice & Video Calls — Hangup / Call End",
+    "title": "TypeError: _activeCall_startedAt.getTime is not a function — crash on call hangup",
+    "symptom": "After hanging up a voice or video call, the app throws a TypeError: _activeCall_startedAt.getTime is not a function. This crashes the call teardown logic, likely preventing call_history from being updated with the correct duration and status.",
+    "observed_behavior": {
+      "error": "TypeError: _activeCall_startedAt.getTime is not a function. (In '_activeCall_startedAt.getTime()', '_activeCall_startedAt.getTime' is undefined)",
+      "trigger": "User clicks the hang-up / end-call button",
+      "consequence": "Call teardown logic crashes mid-execution — call_history row may not be updated to status='completed', duration_seconds may remain null, call_ended Ably event may not be published to the other participant"
+    },
+    "root_cause": {
+      "summary": "startedAt is being used as a JavaScript Date object (calling .getTime()) but the value is either a raw ISO string returned from the database/API (e.g. '2026-03-02T10:01:03.686Z'), null, or undefined. Drizzle ORM returns timestamptz columns as strings by default in some configurations, and JSON serialization over the API always converts Date objects to ISO strings. The code that computes duration_seconds does: Math.floor((endedAt.getTime() - startedAt.getTime()) / 1000) — which breaks if either value is not a proper Date instance.",
+      "affected_locations": [
+        {
+          "location": "DELETE /api/calls/[roomName]/route.ts — duration_seconds computation",
+          "description": "startedAt read from call_history row is an ISO string or null, not a Date object"
+        },
+        {
+          "location": "hooks/useCallState.ts or hooks/useLiveKitRoom.ts — client-side duration display",
+          "description": "activeCall.startedAt stored in state/context may be an ISO string received from the API response, not a Date"
+        },
+        {
+          "location": "components/calls/CallControls.tsx or call room page — elapsed timer",
+          "description": "UI timer that shows call duration may call .getTime() on the raw string value"
+        }
+      ]
+    },
+    "bugs": [
+      {
+        "id": "BUG-003-A",
+        "severity": "high",
+        "title": "startedAt not coerced to Date before .getTime() call in hangup handler",
+        "error_messages": [
+          "TypeError: _activeCall_startedAt.getTime is not a function"
+        ],
+        "affected_files": [
+          "app/api/calls/[roomName]/route.ts",
+          "hooks/useCallState.ts",
+          "components/calls/ActiveCallBadge.tsx"
+        ]
+      },
+      {
+        "id": "BUG-003-B",
+        "severity": "medium",
+        "title": "startedAt can be null if callee never fully joined — duration computation not null-guarded",
+        "error_messages": [
+          "TypeError: Cannot read properties of null (reading 'getTime')"
+        ],
+        "affected_files": [
+          "app/api/calls/[roomName]/route.ts"
+        ]
+      }
+    ]
+  },
+
+  "agent_prompt": {
+    "role": "You are a senior full-stack engineer working on TruckConnect, a Next.js 14 App Router application. Fix a TypeError crash that occurs when a user hangs up a voice or video call. The error is: TypeError: _activeCall_startedAt.getTime is not a function.",
+    "objective": "Ensure that every place in the codebase that reads startedAt or endedAt from the call_history table or from API responses safely coerces the value to a Date object before calling any Date methods, and that null/undefined values are fully guarded.",
+
+    "fix_A": {
+      "id": "FIX-A",
+      "title": "Fix duration_seconds computation in DELETE /api/calls/[roomName]/route.ts",
+      "files": [
+        "app/api/calls/[roomName]/route.ts"
+      ],
+      "instructions": [
+        "Open app/api/calls/[roomName]/route.ts and find the DELETE handler",
+        "Locate where duration_seconds is computed — it will look like: Math.floor((endedAt.getTime() - call.startedAt.getTime()) / 1000) or similar",
+        "The value returned by Drizzle for a timestamptz column is a string in ISO 8601 format (e.g. '2026-03-02T10:01:03.686Z') — it is NOT automatically a Date object",
+        "Replace all raw .getTime() calls with a safe helper that coerces the value first",
+        "Create a toDate helper inline or import from lib/utils.ts: const toDate = (v: Date | string | null | undefined): Date | null => { if (!v) return null; return v instanceof Date ? v : new Date(v); }",
+        "Use the helper to safely compute duration: const startedAt = toDate(call.startedAt); const endedAt = new Date(); const durationSeconds = startedAt ? Math.floor((endedAt.getTime() - startedAt.getTime()) / 1000) : null;",
+        "Update the Drizzle update call to set: { status: 'completed', endedAt: endedAt, durationSeconds: durationSeconds }",
+        "Never pass null to durationSeconds if it is defined as NOT NULL in the schema — if startedAt is null, set durationSeconds to 0 as a safe fallback"
+      ],
+      "code_template": "// app/api/calls/[roomName]/route.ts — DELETE handler (duration fix)\nexport async function DELETE(\n  request: Request,\n  { params }: { params: Promise<{ roomName: string }> }\n) {\n  try {\n    const session = await requireSession();\n    const { roomName } = await params;\n\n    const call = await db.query.callHistory.findFirst({\n      where: and(\n        eq(callHistory.roomName, roomName),\n        or(\n          eq(callHistory.callerId, session.user.id),\n          eq(callHistory.calleeId, session.user.id)\n        )\n      )\n    });\n\n    if (!call) {\n      return NextResponse.json({ error: 'Call not found' }, { status: 404 });\n    }\n\n    // Safe coercion — Drizzle returns timestamptz as string, not Date\n    const toDate = (v: Date | string | null | undefined): Date | null => {\n      if (v == null) return null;\n      return v instanceof Date ? v : new Date(v);\n    };\n\n    const endedAt = new Date();\n    const startedAt = toDate(call.startedAt);\n    const durationSeconds = startedAt\n      ? Math.floor((endedAt.getTime() - startedAt.getTime()) / 1000)\n      : 0; // safe fallback if call was never fully joined\n\n    await db\n      .update(callHistory)\n      .set({\n        status: 'completed',\n        endedAt,\n        durationSeconds,\n      })\n      .where(eq(callHistory.roomName, roomName));\n\n    // Notify the other participant\n    const otherId =\n      call.callerId === session.user.id ? call.calleeId : call.callerId;\n    if (otherId) {\n      await ablyPublish(`user:${otherId}`, 'call_ended', {\n        roomName,\n        durationSeconds,\n      });\n    }\n\n    // Delete the LiveKit room\n    // await livekitRoomService.deleteRoom(roomName);\n\n    return NextResponse.json({ success: true, durationSeconds });\n  } catch (error) {\n    console.error('[DELETE /api/calls] Error:', error);\n    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });\n  }\n}"
+    },
+
+    "fix_B": {
+      "id": "FIX-B",
+      "title": "Fix client-side activeCall.startedAt usage in useCallState and UI components",
+      "files": [
+        "hooks/useCallState.ts",
+        "components/calls/ActiveCallBadge.tsx",
+        "components/calls/CallControls.tsx",
+        "app/(protected)/calls/[roomName]/page.tsx"
+      ],
+      "instructions": [
+        "Search the entire codebase for every occurrence of .getTime() — run: grep -rn '.getTime()' hooks/ components/ app/ to find all call sites",
+        "For every occurrence that operates on startedAt, endedAt, or any timestamp received from an API response or Drizzle query result, wrap it with the safe coercion pattern",
+        "In hooks/useCallState.ts: when storing activeCall in state, ensure startedAt is stored as a Date object, not a string. If the value comes from an API response, coerce it on receipt: startedAt: data.startedAt ? new Date(data.startedAt) : null",
+        "The ActiveCallBadge component likely shows an elapsed timer using setInterval — find where it computes elapsed seconds and ensure it does: const start = activeCall.startedAt instanceof Date ? activeCall.startedAt : new Date(activeCall.startedAt ?? Date.now()); const elapsed = Math.floor((Date.now() - start.getTime()) / 1000);",
+        "Add a shared utility function toDate to lib/utils.ts so it can be reused everywhere: export const toDate = (v: Date | string | null | undefined): Date | null => { if (v == null) return null; return v instanceof Date ? v : new Date(v); };",
+        "Replace all inline coercions with the imported toDate utility for consistency",
+        "In the call room page or useLiveKitRoom hook, if the call start time is set when the room connects, use: const startedAt = new Date(); — always create a fresh Date object, never rely on a value received as a string without coercion"
+      ],
+      "code_template": "// lib/utils.ts — add this utility (alongside existing cn() helper)\nexport const toDate = (\n  v: Date | string | null | undefined\n): Date | null => {\n  if (v == null) return null;\n  return v instanceof Date ? v : new Date(v);\n};\n\n// hooks/useCallState.ts — coerce on state update\nsetActiveCall(prev => ({\n  ...prev,\n  startedAt: toDate(data.startedAt), // never raw string\n}));\n\n// components/calls/ActiveCallBadge.tsx — safe elapsed timer\nuseEffect(() => {\n  const interval = setInterval(() => {\n    const start = toDate(activeCall?.startedAt);\n    if (!start) return;\n    setElapsed(Math.floor((Date.now() - start.getTime()) / 1000));\n  }, 1000);\n  return () => clearInterval(interval);\n}, [activeCall?.startedAt]);"
+    },
+
+    "fix_C": {
+      "id": "FIX-C",
+      "title": "Add null-safety guard to the PATCH /api/calls/[roomName]/decline route",
+      "files": [
+        "app/api/calls/[roomName]/decline/route.ts"
+      ],
+      "instructions": [
+        "Open the decline route handler",
+        "When a call is declined, startedAt will always be null (the call was never answered)",
+        "Ensure the handler does NOT attempt to compute duration_seconds when startedAt is null",
+        "Set durationSeconds: 0 and status: 'declined' directly without any date arithmetic",
+        "This prevents a secondary crash if the decline route accidentally tries to compute a duration"
+      ],
+      "code_template": "// Safe decline handler — no date arithmetic needed\nawait db\n  .update(callHistory)\n  .set({\n    status: 'declined',\n    endedAt: new Date(),\n    durationSeconds: 0, // never started, so always 0\n  })\n  .where(eq(callHistory.roomName, roomName));"
+    },
+
+    "verification_steps": [
+      {
+        "step": 1,
+        "action": "Run: grep -rn '\\.getTime()' hooks/ components/ app/ -- review every result and confirm each one is preceded by a toDate() coercion or instanceof Date check"
+      },
+      {
+        "step": 2,
+        "action": "Initiate a voice call, let it connect, then hang up — verify NO TypeError in the console and the call ends cleanly"
+      },
+      {
+        "step": 3,
+        "action": "Initiate a video call and immediately hang up before the callee answers — verify durationSeconds is set to 0, not null, and no crash occurs"
+      },
+      {
+        "step": 4,
+        "action": "Decline an incoming call — verify no crash and call_history row shows status='declined', durationSeconds=0"
+      },
+      {
+        "step": 5,
+        "action": "Let a call run for 30 seconds then hang up — verify the call_ended Ably event is received by the other participant and the ActiveCallBadge shows the correct elapsed time before dismissing"
+      },
+      {
+        "step": 6,
+        "action": "Query the call_history table directly (npm run db:studio) after each scenario and confirm endedAt, durationSeconds, and status are all correctly set"
+      }
+    ],
+
+    "constraints": [
+      "Do not change the Drizzle schema column type — handle the string-to-Date coercion in application code, not at the ORM layer",
+      "The toDate utility must handle all four input types: Date, string, null, and undefined — it must never throw",
+      "durationSeconds must never be stored as null if the column is NOT NULL — use 0 as the safe fallback for unanswered/declined calls",
+      "Do not use any external date library (e.g. date-fns, dayjs, moment) — the native Date constructor is sufficient for this fix",
+      "All existing call flow logic (Ably events, LiveKit room deletion) must still execute after the duration fix — the fix must not short-circuit the rest of the DELETE handler"
+    ]
+  }
+}

@@ -1,171 +1,170 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import Ably from "ably";
+import { useSession } from "next-auth/react";
 import type { ServerToClientEvents, ClientToServerEvents } from "@/sockets/types";
 
-type EventName = keyof ServerToClientEvents;
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-/**
- * Events that live on a shared channel rather than the per-user channel.
- * All other server→client events go to "user:<clientId>".
- *
- * NOTE: nearby_driver_update is intentionally NOT listed here — it is
- * delivered on the private "user:<clientId>" channel so each driver
- * receives their own personalised list (different distances, different subset).
- */
-const SHARED_CHANNEL_MAP: Partial<Record<EventName, string>> = {
-  // nearby_driver_update → private user:<clientId>  (personalised per driver)
-  stress_signal_alert:  "stress:alerts",
-};
+type EventName    = keyof ServerToClientEvents;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyHandler   = (data: any) => void;
 
-/**
- * useSocket (Ably-backed)
- *
- * Drop-in replacement for the legacy Socket.io hook.
- * Maintains the same public API so zero page-level changes are required.
- *
- * Auth strategy: fetches a signed Ably TokenRequest from GET /api/auth/ably-token
- * (set as `authUrl`). The Ably SDK auto-refreshes the token before expiry.
- *
- * Channel topology:
- *   "stress:alerts"      — emergency alerts                    (stress_signal_alert)
- *   "user:<userId>"      — per-user private channel  (voice / friends / nearby_driver_update / errors)
- *
- * emit() is intentionally a no-op: all client→server data is sent via REST.
- * Pages already call the REST endpoint directly — the socket emit was supplemental.
- */
-export function useSocket() {
-  const ablyRef = useRef<Ably.Realtime | null>(null);
-  const clientIdRef = useRef<string | null>(null);
+/** Events delivered on the shared "stress:alerts" channel */
+const STRESS_EVENTS = new Set<EventName>(["stress_signal_alert"]);
+
+/** Events delivered on the shared "fleet:locations" channel (admin map) */
+const FLEET_EVENTS = new Set<EventName>(["driver_location_updated"]);
+
+interface SocketContextValue {
+  on:          <E extends EventName>(event: E, handler: ServerToClientEvents[E]) => () => void;
+  emit:        <E extends keyof ClientToServerEvents>(event: E, ...args: Parameters<ClientToServerEvents[E]>) => void;
+  onConnect:   (cb: () => void) => () => void;
+  isConnected: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+const SocketContext = createContext<SocketContextValue | null>(null);
+
+// ---------------------------------------------------------------------------
+// Provider — single Ably.Realtime instance per authenticated session
+// ---------------------------------------------------------------------------
+
+export function SocketProvider({ children }: { children: React.ReactNode }) {
+  const { data: session } = useSession();
+  const userId = session?.user?.id;
+
+  const realtimeRef    = useRef<Ably.Realtime | null>(null);
+  // Map<eventName, Set<handler>> — components register here; Ably dispatches to all
+  const listenersRef   = useRef<Map<EventName, Set<AnyHandler>>>(new Map());
+  // Stable Ably dispatch functions per event — created once on first subscription
+  const dispatchersRef = useRef<Map<EventName, Ably.messageCallback<Ably.Message>>>(new Map());
+  const connectCallbacksRef = useRef<Set<() => void>>(new Set());
+
   const [isConnected, setIsConnected] = useState(false);
-  const connectCallbacks = useRef<Array<() => void>>([]);
 
   useEffect(() => {
-    const ably = new Ably.Realtime({
-      authUrl: "/api/auth/ably-token",
-      autoConnect: true,
-    });
+    if (!userId) return;
 
-    ablyRef.current = ably;
+    const realtime = new Ably.Realtime({ authUrl: "/api/auth/ably-token" });
+    realtimeRef.current = realtime;
 
-    ably.connection.on("connected", () => {
-      clientIdRef.current = ably.auth.clientId ?? null;
+    const userChannel   = realtime.channels.get(`user:${userId}`);
+    const stressChannel = realtime.channels.get("stress:alerts");
+    const fleetChannel  = realtime.channels.get("fleet:locations");
+
+    // Build one stable dispatcher per event — routes Ably messages into our
+    // listener registry. Ably keeps exactly ONE subscription per event.
+    const allEvents: EventName[] = [
+      "nearby_driver_update",
+      "voice_message_received",
+      "text_message_received",
+      "stress_signal_alert",
+      "friend_request_received",
+      "friend_request_accepted",
+      "call_incoming",
+      "call_declined",
+      "call_missed",
+      "call_ended",
+      "driver_location_updated",
+      "error",
+    ];
+
+    for (const event of allEvents) {
+      const dispatcher: Ably.messageCallback<Ably.Message> = (msg: Ably.Message) => {
+        listenersRef.current.get(event)?.forEach((h) => h(msg.data));
+      };
+      dispatchersRef.current.set(event, dispatcher);
+
+      const channel = STRESS_EVENTS.has(event)
+        ? stressChannel
+        : FLEET_EVENTS.has(event)
+        ? fleetChannel
+        : userChannel;
+      void channel.subscribe(event, dispatcher);
+    }
+
+    realtime.connection.on("connected", () => {
       setIsConnected(true);
-      connectCallbacks.current.forEach((cb) => cb());
-      console.log("[useSocket] Ably connected, clientId:", clientIdRef.current);
+      connectCallbacksRef.current.forEach((cb) => cb());
     });
-
-    ably.connection.on("disconnected", () => setIsConnected(false));
-    ably.connection.on("suspended",    () => setIsConnected(false));
-    ably.connection.on("failed", (stateChange) => {
-      console.error("[useSocket] Ably connection failed:", stateChange?.reason?.message);
-      setIsConnected(false);
-    });
+    realtime.connection.on("disconnected", () => setIsConnected(false));
+    realtime.connection.on("suspended",    () => setIsConnected(false));
+    realtime.connection.on("failed",       () => setIsConnected(false));
 
     return () => {
-      ably.close();
-      ablyRef.current    = null;
-      clientIdRef.current = null;
+      userChannel.unsubscribe();
+      stressChannel.unsubscribe();
+      fleetChannel.unsubscribe();
+      realtime.close();
+      realtimeRef.current    = null;
+      dispatchersRef.current = new Map();
+      connectCallbacksRef.current.clear();
+      // Keep listenersRef alive — components' useEffect cleanups will remove
+      // their own handlers. Clearing here would break re-mounts in StrictMode.
     };
-  }, []);
+  }, [userId]);
 
-  /** Resolve the Ably channel for a given server→client event name. */
-  const resolveChannel = useCallback((event: EventName): Ably.RealtimeChannel | null => {
-    const ably = ablyRef.current;
-    if (!ably) return null;
+  // ── Stable API — safe to pass as props without triggering re-renders ──
 
-    const shared = SHARED_CHANNEL_MAP[event];
-    if (shared) return ably.channels.get(shared);
-
-    const cid = clientIdRef.current ?? ably.auth.clientId;
-    if (!cid) {
-      console.warn(`[useSocket] clientId not yet available for private channel (event: ${event})`);
-      return null;
-    }
-    return ably.channels.get(`user:${cid}`);
-  }, []);
-
-  /**
-   * Subscribe to a typed server→client event.
-   * Returns an unsubscribe function — call it on component unmount.
-   *
-   * Uses a persistent `on("connected", ...)` listener so that subscriptions
-   * are automatically re-established after every reconnection, not just the
-   * first one.  The channel listener is removed before re-adding to avoid
-   * duplicate deliveries.
-   */
   const on = useCallback(
     <E extends EventName>(event: E, handler: ServerToClientEvents[E]) => {
-      const ably = ablyRef.current;
-      if (!ably) return () => {};
-
-      const listener = (msg: Ably.Message) =>
-        (handler as (data: unknown) => void)(msg.data);
-
-      const subscribe = () => {
-        const channel = resolveChannel(event);
-        if (!channel) {
-          console.warn(
-            `[useSocket] could not resolve channel for "${event}" — clientId not yet available`
-          );
-          return;
-        }
-        // Unsubscribe first so reconnections don't stack duplicate listeners.
-        channel.unsubscribe(event, listener);
-        void channel.subscribe(event, listener);
-        console.log(
-          `[useSocket] subscribed to "${event}" on channel "${channel.name}"`
-        );
-      };
-
-      // Subscribe now if already connected.
-      if (ably.connection.state === "connected") {
-        subscribe();
+      if (!listenersRef.current.has(event)) {
+        listenersRef.current.set(event, new Set());
       }
-
-      // Re-subscribe on every (re)connection — this also covers the initial
-      // connection when the hook hasn't connected yet.
-      ably.connection.on("connected", subscribe);
+      listenersRef.current.get(event)!.add(handler as AnyHandler);
 
       return () => {
-        // Stop re-subscribing on future reconnections.
-        ably.connection.off("connected", subscribe);
-        // Remove the channel listener.
-        const channel = resolveChannel(event);
-        channel?.unsubscribe(event, listener);
+        listenersRef.current.get(event)?.delete(handler as AnyHandler);
       };
     },
-    [resolveChannel]
+    []
   );
 
-  /**
-   * No-op — all client→server data travels over REST API routes.
-   * Preserved for backward compatibility with page-level code.
-   */
   const emit = useCallback(
     <E extends keyof ClientToServerEvents>(
       _event: E,
       ..._args: Parameters<ClientToServerEvents[E]>
     ) => {
-      // intentional no-op: REST handles persistence + Ably server-side handles broadcast
+      // Intentional no-op: all client→server data travels over REST API routes.
     },
     []
   );
 
-  /**
-   * Register a callback to run each time the Ably connection (re)establishes.
-   * Fires immediately if already connected. Returns an unsubscribe function.
-   */
   const onConnect = useCallback((cb: () => void) => {
-    if (ablyRef.current?.connection.state === "connected") {
+    if (realtimeRef.current?.connection.state === "connected") {
       cb();
     }
-    connectCallbacks.current.push(cb);
-    return () => {
-      connectCallbacks.current = connectCallbacks.current.filter((fn) => fn !== cb);
-    };
+    connectCallbacksRef.current.add(cb);
+    return () => { connectCallbacksRef.current.delete(cb); };
   }, []);
 
-  return { socket: ablyRef, on, emit, onConnect, isConnected };
+  return React.createElement(
+    SocketContext.Provider,
+    { value: { on, emit, onConnect, isConnected } },
+    children
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Hook — all components share the single Provider instance
+// ---------------------------------------------------------------------------
+
+export function useSocket(): SocketContextValue {
+  const ctx = useContext(SocketContext);
+  if (!ctx) throw new Error("useSocket must be used within <SocketProvider>");
+  return ctx;
 }

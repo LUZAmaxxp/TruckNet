@@ -10,6 +10,8 @@ export const UserRegisterSchema = z.object({
   password: z
     .string()
     .min(8, { message: "Password must be at least 8 characters" }),
+  role: z.enum(["driver", "admin"]).default("driver"),
+  adminInviteCode: z.string().optional(),
 });
 
 /**

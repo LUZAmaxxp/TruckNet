@@ -29,12 +29,18 @@ export const authConfig: NextAuthConfig = {
       if (user?.id) {
         token.id = user.id;
       }
+      if ((user as { role?: string })?.role) {
+        token.role = (user as { role?: string }).role;
+      }
       return token;
     },
 
     session({ session, token }) {
       if (token.id) {
         session.user.id = token.id as string;
+      }
+      if (token.role) {
+        (session.user as { role?: string }).role = token.role as string;
       }
       return session;
     },
@@ -45,11 +51,48 @@ export const authConfig: NextAuthConfig = {
      */
     authorized({ auth: session, request: { nextUrl } }) {
       const isLoggedIn = !!session?.user?.id;
-      const protectedPaths = ["/dashboard", "/map", "/messages", "/stress"];
+      const role = (session?.user as { role?: string } | undefined)?.role;
+      const path = nextUrl.pathname;
+
+      // ── Role-based redirects for authenticated users ─────────────────────
+      if (isLoggedIn) {
+        // Admin users: redirect to /admin from root, /login, /register, or /dashboard
+        if (role === "admin") {
+          if (
+            path === "/" ||
+            path === "/login" ||
+            path === "/register" ||
+            path.startsWith("/dashboard")
+          ) {
+            return Response.redirect(new URL("/admin", nextUrl));
+          }
+        }
+
+        // Driver users: redirect to /dashboard from root
+        if (role === "driver" && path === "/") {
+          return Response.redirect(new URL("/dashboard", nextUrl));
+        }
+
+        // Driver on admin path → redirect to /dashboard
+        if (role === "driver" && path.startsWith("/admin")) {
+          return Response.redirect(new URL("/dashboard", nextUrl));
+        }
+      }
+
+      // ── Protected path guard ──────────────────────────────────────────────
+      const protectedPaths = ["/dashboard", "/map", "/messages", "/stress", "/friends", "/profile", "/calls"];
       const isOnProtected = protectedPaths.some((p) =>
-        nextUrl.pathname.startsWith(p)
+        path.startsWith(p)
       );
       if (isOnProtected) return isLoggedIn;
+
+      // ── Admin route guard ─────────────────────────────────────────────────
+      if (path.startsWith("/admin")) {
+        if (!isLoggedIn) return Response.redirect(new URL("/login", nextUrl));
+        if (role !== "admin") return Response.redirect(new URL("/dashboard", nextUrl));
+        return true;
+      }
+
       return true;
     },
   },

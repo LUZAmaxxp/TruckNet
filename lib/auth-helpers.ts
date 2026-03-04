@@ -33,12 +33,34 @@ export async function getServerSession(): Promise<Session | null> {
  *     // session.user.id is string — no casting required
  *   }
  */
-export async function requireAuth(): Promise<Session & { user: { id: string; email: string; name: string } }> {
+export async function requireAuth(): Promise<Session & { user: { id: string; email: string; name: string; role: "driver" | "admin" } }> {
   const session = await auth();
 
   if (!session?.user?.id) {
     throw NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return session as Session & { user: { id: string; email: string; name: string } };
+  return session as Session & { user: { id: string; email: string; name: string; role: "driver" | "admin" } };
+}
+
+/**
+ * requireAdminSession()
+ *
+ * Asserts authentication AND admin role.
+ * Throws 401 if unauthenticated, 403 if authenticated but not admin.
+ *
+ * @example
+ *   export async function GET() {
+ *     const session = await requireAdminSession();
+ *     // session.user.role === 'admin' is guaranteed
+ *   }
+ */
+export async function requireAdminSession(): Promise<Session & { user: { id: string; email: string; name: string; role: "admin" } }> {
+  const session = await requireAuth();
+
+  if (session.user.role !== "admin") {
+    throw NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  return session as Session & { user: { id: string; email: string; name: string; role: "admin" } };
 }

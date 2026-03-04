@@ -1,0 +1,449 @@
+{
+  "feature": {
+    "id": "FEAT-004",
+    "project": "TruckNet",
+    "date": "2026-03-02",
+    "title": "Admin Dashboard — Fleet Overview, Driver Contact & SOS Monitor",
+    "description": "A secure, real-time admin dashboard that shows fleet-wide driver presence on an interactive map, live SOS alert monitoring, and the ability to contact any driver directly via text, voice call, or video call — all integrated into the existing TruckNet stack without new dependencies.",
+    "priority": "high",
+    "target_users": ["Admin role — fleet managers, dispatchers, operations team"]
+  },
+
+  "role_system": {
+    "new_role": "admin",
+    "existing_role": "driver",
+    "implementation": {
+      "database_change": {
+        "table": "users",
+        "new_column": {
+          "name": "role",
+          "type": "enum('driver', 'admin')",
+          "default": "driver",
+          "not_null": true
+        },
+        "migration": "ALTER TABLE users ADD COLUMN role user_role NOT NULL DEFAULT 'driver'; CREATE TYPE user_role AS ENUM ('driver', 'admin');"
+      },
+      "drizzle_schema_change": {
+        "file": "db/schema.ts",
+        "change": "Add roleEnum = pgEnum('user_role', ['driver', 'admin']) and role: roleEnum('role').default('driver').notNull() to the users table definition"
+      },
+      "seed_admin": "Manually UPDATE users SET role = 'admin' WHERE email = 'admin@trucknet.com' after first registration, or add a one-time seed script at scripts/seed-admin.ts",
+      "session_propagation": {
+        "file": "auth.ts",
+        "change": "Add role to the JWT and session callbacks so session.user.role is available on every request: callbacks.jwt → token.role = user.role; callbacks.session → session.user.role = token.role"
+      },
+      "middleware_guard": {
+        "file": "middleware.ts",
+        "change": "Add path matcher for /admin/* — if session.user.role !== 'admin' redirect to /dashboard with a 403 toast"
+      }
+    }
+  },
+
+  "new_pages": [
+    {
+      "path": "app/(admin)/admin/layout.tsx",
+      "description": "Admin-only layout wrapper. Reads session on server, redirects to /dashboard if role !== 'admin'. Renders AdminSidebar + top AdminHeader. Completely separate from the driver (protected) layout.",
+      "components": ["AdminSidebar", "AdminHeader"]
+    },
+    {
+      "path": "app/(admin)/admin/page.tsx",
+      "description": "Admin dashboard home — overview stats bar + fleet map + SOS panel side by side.",
+      "sections": [
+        "StatsBar — total drivers registered, drivers online now, active SOS alerts count, calls in progress count",
+        "FleetMap — full-width interactive Leaflet map with all online driver pins",
+        "SosPanelSidebar — live list of active SOS alerts with resolve button"
+      ]
+    },
+    {
+      "path": "app/(admin)/admin/drivers/page.tsx",
+      "description": "Paginated table of all registered drivers with their online status, last seen location, last active timestamp, and quick-action buttons (message, voice call, video call)."
+    },
+    {
+      "path": "app/(admin)/admin/sos/page.tsx",
+      "description": "Dedicated SOS alert management page — full list of active and resolved alerts, filter by status/date, map view of alert locations, resolve action."
+    },
+    {
+      "path": "app/(admin)/admin/calls/page.tsx",
+      "description": "Call history log — all calls (admin-initiated and driver-to-driver), filterable by type, status, date range, driver name."
+    }
+  ],
+
+  "new_api_routes": [
+    {
+      "method": "GET",
+      "path": "/api/admin/drivers",
+      "auth": true,
+      "role_required": "admin",
+      "description": "Returns all registered drivers with their online status, last known location, and distance from a reference point.",
+      "query_params": ["page", "limit", "search (name or tag)", "status (online|offline|all)"],
+      "response_shape": {
+        "drivers": "DriverAdminEntry[]",
+        "total": "number",
+        "onlineCount": "number"
+      },
+      "driver_admin_entry_fields": [
+        "id", "name", "tag", "profileImageUrl", "role",
+        "lastLatitude", "lastLongitude", "lastSeenAt",
+        "isOnline (boolean — lastSeenAt within 5 minutes)",
+        "createdAt"
+      ],
+      "implementation_notes": [
+        "JOIN users LEFT JOIN driver_locations ON driver_locations.user_id = users.id using Drizzle",
+        "Order by lastSeenAt DESC so most-recently-active drivers appear first",
+        "isOnline computed server-side: lastSeenAt > now() - interval '5 minutes'",
+        "Exclude users where role = 'admin' from the list"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/drivers/live",
+      "auth": true,
+      "role_required": "admin",
+      "description": "Lightweight endpoint — returns only currently online drivers with their GPS coordinates. Called by the fleet map every 20 seconds for live pin updates. Returns a minimal payload for performance.",
+      "response_shape": {
+        "drivers": "{ id, name, profileImageUrl, latitude, longitude, updatedAt }[]"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/sos",
+      "auth": true,
+      "role_required": "admin",
+      "description": "Returns all SOS alerts (active and resolved) with sender info. Supports filtering.",
+      "query_params": ["status (active|resolved|all)", "page", "limit"],
+      "response_shape": {
+        "alerts": "SosAdminEntry[]",
+        "total": "number",
+        "activeCount": "number"
+      },
+      "sos_admin_entry_fields": [
+        "id", "userId", "senderName", "senderTag", "senderAvatar",
+        "latitude", "longitude", "status", "createdAt", "resolvedAt"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/sos/[id]/resolve",
+      "auth": true,
+      "role_required": "admin",
+      "description": "Admin resolves a stress signal. Updates status to 'resolved'. Re-uses existing stress_signals table. Publishes Ably event to notify the sender that their SOS was acknowledged by admin.",
+      "ably_event_published": {
+        "channel": "user:{senderId}",
+        "event": "sos_resolved_by_admin",
+        "payload": "{ signalId, adminName, resolvedAt }"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/stats",
+      "auth": true,
+      "role_required": "admin",
+      "description": "Returns aggregated fleet statistics for the StatsBar component.",
+      "response_shape": {
+        "totalDrivers": "number",
+        "onlineDrivers": "number",
+        "activeSosAlerts": "number",
+        "ongoingCalls": "number",
+        "totalCallsToday": "number",
+        "totalMessagesToday": "number"
+      },
+      "implementation_notes": [
+        "onlineDrivers: COUNT users WHERE last location updated_at > now() - 5min",
+        "activeSosAlerts: COUNT stress_signals WHERE status = 'active'",
+        "ongoingCalls: COUNT call_history WHERE status = 'ongoing'",
+        "All counts in a single Drizzle parallel query using Promise.all for speed"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/calls/initiate",
+      "auth": true,
+      "role_required": "admin",
+      "description": "Reuses the existing call initiate route. Admin can call any driver — friendship check must be BYPASSED for admin role. Add a role check: if session.user.role === 'admin', skip the friendship verification step.",
+      "change_required": {
+        "file": "app/api/calls/initiate/route.ts",
+        "change": "Wrap the friendship check in: if (session.user.role !== 'admin') { /* friendship check */ } — admins can initiate calls to any driver"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/text-messages",
+      "auth": true,
+      "role_required": "admin",
+      "description": "Reuses the existing text message route. Admin can message any driver. Add the same role-based bypass of friendship/permission checks if any exist in this route.",
+      "change_required": {
+        "file": "app/api/text-messages/route.ts",
+        "change": "If session.user.role === 'admin', skip any friendship validation before inserting the message"
+      }
+    }
+  ],
+
+  "admin_role_guard_utility": {
+    "file": "lib/auth-helpers.ts",
+    "new_function": "requireAdminSession",
+    "implementation": "export async function requireAdminSession() { const session = await requireSession(); if (session.user.role !== 'admin') { throw new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 }); } return session; }",
+    "usage": "Import and call requireAdminSession() at the top of every /api/admin/* route handler instead of requireSession()"
+  },
+
+  "new_components": [
+    {
+      "name": "components/admin/AdminSidebar.tsx",
+      "description": "Fixed left navigation sidebar for the admin layout. Links: Fleet Overview, Drivers, SOS Alerts, Call History. Shows active SOS badge count in real-time via Ably.",
+      "props": "none — reads session internally"
+    },
+    {
+      "name": "components/admin/AdminHeader.tsx",
+      "description": "Top bar showing: TruckNet Admin branding, current admin user name + avatar, LiveConnectionBadge (Ably status), logout button."
+    },
+    {
+      "name": "components/admin/StatsBar.tsx",
+      "description": "Horizontal row of 4-6 stat cards: Total Drivers, Online Now, Active SOS Alerts, Ongoing Calls, Messages Today. Data from GET /api/admin/stats. Auto-refreshes every 30 seconds.",
+      "props": "{ stats: AdminStats }"
+    },
+    {
+      "name": "components/admin/FleetMap.tsx",
+      "description": "Full-screen Leaflet map showing all online drivers as pins. Clicking a pin opens a popup with driver name, tag, last-seen time, and three action buttons: Voice Call, Video Call, Send Message. Updates every 20 seconds via polling GET /api/admin/drivers/live.",
+      "props": "{ initialDrivers: LiveDriverEntry[] }",
+      "features": [
+        "Cluster pins when drivers are within 1km of each other (Leaflet.markercluster)",
+        "Color-coded pins: green = online within 1min, yellow = online within 5min",
+        "Heatmap toggle option to see driver density zones",
+        "Selected driver sidebar card with contact actions",
+        "Smooth pan-and-zoom when a driver is selected from the drivers table"
+      ]
+    },
+    {
+      "name": "components/admin/DriverTable.tsx",
+      "description": "Paginated, searchable table of all drivers. Columns: Avatar, Name, Tag, Status (Online/Offline badge), Last Location (lat/lng or 'No location'), Last Seen, Actions. Actions column has three icon buttons: text message, voice call, video call.",
+      "props": "{ drivers: DriverAdminEntry[], total: number, page: number, onPageChange: fn, onSearch: fn }",
+      "features": [
+        "Debounced search by name or tag",
+        "Status filter dropdown (All / Online / Offline)",
+        "Clicking the location cell pans the FleetMap to that driver (cross-component via URL param ?focus=userId)",
+        "Skeleton loading state during data fetch"
+      ]
+    },
+    {
+      "name": "components/admin/SosPanel.tsx",
+      "description": "Right-side panel on the admin home page. Shows active SOS alerts as cards. Each card: sender avatar, name, tag, coordinates, time elapsed since alert, Resolve button, View on Map button. Sorted by most recent. Pulses red when a new alert arrives.",
+      "props": "{ alerts: SosAdminEntry[], onResolve: fn }",
+      "real_time": "Subscribes to 'stress:alerts' Ably channel via useSocket() to receive new stress_signal_alert events and prepend to the list without a page refresh"
+    },
+    {
+      "name": "components/admin/SosAlertCard.tsx",
+      "description": "Individual SOS alert card used inside SosPanel and the /admin/sos full page. Shows: red flashing badge, sender name + tag + avatar, GPS coordinates, elapsed time, Resolve button (calls PATCH /api/admin/sos/[id]/resolve), View on Map button (pans FleetMap).",
+      "props": "{ alert: SosAdminEntry, onResolve: fn }"
+    },
+    {
+      "name": "components/admin/AdminDriverCard.tsx",
+      "description": "Driver contact card used in the driver detail view and map popups. Shows: avatar, name, tag, online status, last seen timestamp, last GPS coordinates, three action buttons (Voice Call, Video Call, Text Message). Actions call the existing initiate/text-message APIs.",
+      "props": "{ driver: DriverAdminEntry, onCall: fn, onMessage: fn }"
+    },
+    {
+      "name": "components/admin/CallHistoryTable.tsx",
+      "description": "Table of all call records. Columns: Caller, Callee, Type (voice/video icon), Status badge, Duration, Started At. Filterable by date range, call type, and status. Reuses the existing call_history table via a new admin query.",
+      "props": "{ calls: CallHistoryEntry[], total: number }"
+    }
+  ],
+
+  "real_time_integration": {
+    "description": "The admin dashboard subscribes to the same Ably channels that already exist, requiring zero new Ably infrastructure. The admin's useSocket() instance listens to both the admin's private user channel and the shared stress:alerts channel.",
+    "subscriptions": [
+      {
+        "channel": "stress:alerts",
+        "event": "stress_signal_alert",
+        "consumer": "SosPanel — prepends new alert to list, plays alert sound, flashes AdminSidebar SOS badge"
+      },
+      {
+        "channel": "user:{adminId}",
+        "event": "call_incoming",
+        "consumer": "IncomingCallModal — drivers can call back the admin just like any other user"
+      },
+      {
+        "channel": "user:{adminId}",
+        "event": "call_ended",
+        "consumer": "Dismiss call UI"
+      }
+    ],
+    "polling": [
+      {
+        "endpoint": "GET /api/admin/drivers/live",
+        "interval_seconds": 20,
+        "consumer": "FleetMap — update driver pin positions"
+      },
+      {
+        "endpoint": "GET /api/admin/stats",
+        "interval_seconds": 30,
+        "consumer": "StatsBar — refresh fleet counts"
+      }
+    ]
+  },
+
+  "contact_flows": {
+    "admin_to_driver_voice_call": {
+      "steps": [
+        "Admin clicks Voice Call button on a driver pin popup, DriverTable row, or AdminDriverCard",
+        "Client calls POST /api/calls/initiate with { calleeId: driverId, type: 'voice' }",
+        "Server skips friendship check (admin bypass), creates LiveKit room, publishes call_incoming to driver's Ably channel",
+        "Server returns { roomName, token, liveKitUrl } to admin client",
+        "Admin client navigates to /calls/[roomName]?type=voice",
+        "Driver sees IncomingCallModal (same as driver-to-driver flow), accepts, joins the room"
+      ]
+    },
+    "admin_to_driver_video_call": {
+      "steps": [
+        "Same as voice call flow with type: 'video'",
+        "Admin navigates to /calls/[roomName]?type=video"
+      ]
+    },
+    "admin_to_driver_text_message": {
+      "steps": [
+        "Admin clicks Text Message button",
+        "Opens a MessageComposerModal (new component) with a textarea and Send button",
+        "Client calls POST /api/text-messages with { receiverId: driverId, content }",
+        "Driver receives text_message_received Ably event as usual",
+        "Admin's sent messages appear in the existing /messages page for conversation continuity"
+      ]
+    }
+  },
+
+  "new_components_message_composer": {
+    "name": "components/admin/MessageComposerModal.tsx",
+    "description": "Modal dialog triggered from admin action buttons. Contains: recipient name header, textarea for message content (max 500 chars), character counter, Send button with loading state. On success shows toast and closes modal.",
+    "props": "{ recipient: { id, name, avatar }, isOpen: boolean, onClose: fn }"
+  },
+
+  "database_changes": {
+    "migration_1": {
+      "title": "Add role column to users table",
+      "sql": "CREATE TYPE user_role AS ENUM ('driver', 'admin'); ALTER TABLE users ADD COLUMN role user_role NOT NULL DEFAULT 'driver';",
+      "drizzle_command": "npm run db:generate && npm run db:migrate"
+    },
+    "no_new_tables": "The admin dashboard reads from existing tables: users, driver_locations, stress_signals, call_history, text_messages, voice_messages. No new tables required.",
+    "new_indexes": [
+      {
+        "table": "users",
+        "index": "role",
+        "reason": "Admin queries filter out admin users from the driver list — index speeds up WHERE role = 'driver'"
+      }
+    ]
+  },
+
+  "security": {
+    "route_protection": [
+      "All /api/admin/* routes call requireAdminSession() which returns 403 for non-admin users",
+      "The /admin/* page group is protected at the Next.js middleware level — non-admin session → redirect /dashboard",
+      "Admin JWT token contains role field — role cannot be escalated client-side"
+    ],
+    "call_bypass_scope": "The friendship bypass ONLY applies when session.user.role === 'admin'. Driver-to-driver calls still require accepted friendship.",
+    "ably_token_scope": "Admin receives the same type of Ably TokenRequest as drivers. No special admin channel is needed — all data comes from REST API calls authenticated by session.",
+    "data_access": "Admins can read all driver locations, messages metadata (not content), and call records. Message content is only visible in the /messages UI — not exposed via admin API to avoid privacy overreach."
+  },
+
+  "environment_variables": {
+    "new_variables": [],
+    "note": "No new environment variables required. The admin dashboard uses all existing env vars (DATABASE_URL, ABLY_API_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)."
+  },
+
+  "implementation_phases": [
+    {
+      "phase": 1,
+      "name": "Role System & Auth Guard",
+      "estimated_days": 1,
+      "tasks": [
+        "Add user_role enum and role column to db/schema.ts",
+        "Run npm run db:generate && npm run db:migrate",
+        "Update auth.ts JWT + session callbacks to include role",
+        "Add requireAdminSession() to lib/auth-helpers.ts",
+        "Add /admin/* guard to middleware.ts",
+        "Manually seed one admin user in the database",
+        "Update next-auth.d.ts TypeScript types to include session.user.role"
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "Admin API Routes",
+      "estimated_days": 2,
+      "tasks": [
+        "Implement GET /api/admin/stats",
+        "Implement GET /api/admin/drivers (paginated, searchable)",
+        "Implement GET /api/admin/drivers/live (lightweight GPS snapshot)",
+        "Implement GET /api/admin/sos (filterable alert list)",
+        "Implement PATCH /api/admin/sos/[id]/resolve",
+        "Patch POST /api/calls/initiate to bypass friendship check for admins",
+        "Patch POST /api/text-messages to bypass friendship check for admins"
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "Admin Layout & Navigation",
+      "estimated_days": 1,
+      "tasks": [
+        "Create app/(admin)/admin/layout.tsx with server-side role check",
+        "Build AdminSidebar with navigation links and real-time SOS badge",
+        "Build AdminHeader with session info and logout",
+        "Build StatsBar with auto-refresh"
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "Fleet Map",
+      "estimated_days": 2,
+      "tasks": [
+        "Build FleetMap component based on existing DriverMap — extend for all-driver view",
+        "Add 20-second polling for live driver positions",
+        "Add driver pin popups with contact action buttons",
+        "Add SOS alert pins (red pulsing markers) overlaid on the fleet map",
+        "Wire View on Map button from SosPanel to pan FleetMap"
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "Driver Table & SOS Panel",
+      "estimated_days": 2,
+      "tasks": [
+        "Build DriverTable with pagination, search, status filter, action buttons",
+        "Build SosPanel with real-time Ably subscription",
+        "Build SosAlertCard with resolve action",
+        "Build AdminDriverCard for driver detail view",
+        "Build MessageComposerModal for admin-to-driver text messages",
+        "Assemble admin home page layout (StatsBar + FleetMap + SosPanel)"
+      ]
+    },
+    {
+      "phase": 6,
+      "name": "Dedicated Pages & Polish",
+      "estimated_days": 2,
+      "tasks": [
+        "Build /admin/drivers full page with DriverTable",
+        "Build /admin/sos full page with SOS history and map overlay",
+        "Build /admin/calls page with CallHistoryTable",
+        "Add loading skeletons to all admin data tables",
+        "Add empty states (no drivers online, no active SOS)",
+        "Mobile-responsive layout check for tablet use by dispatchers"
+      ]
+    }
+  ],
+
+  "total_estimated_effort": {
+    "development_days": 10,
+    "phases": 6,
+    "new_api_routes": 5,
+    "modified_api_routes": 2,
+    "new_pages": 5,
+    "new_components": 10,
+    "new_db_columns": 1,
+    "new_db_tables": 0,
+    "new_dependencies": 0
+  },
+
+  "constraints": [
+    "Do not introduce new npm packages — Leaflet, Ably, LiveKit, Drizzle, shadcn/ui, Tailwind are already available",
+    "Admin pages must be in a separate route group app/(admin)/ to keep them isolated from the driver app/(protected)/ layout",
+    "The friendship bypass for admin calls and messages must be gated strictly on session.user.role === 'admin' — never on a client-supplied flag",
+    "requireAdminSession() must be called in every /api/admin/* route — never rely on middleware alone for API security",
+    "The FleetMap polling interval must not be lower than 20 seconds to match the driver location broadcast interval",
+    "Admin must not be able to read the content of driver-to-driver private messages — admin message APIs only expose metadata",
+    "All existing driver functionality must remain completely unchanged — the admin feature is purely additive"
+  ]
+}

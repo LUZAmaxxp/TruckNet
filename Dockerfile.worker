@@ -1,0 +1,46 @@
+# ============================================================
+# Dockerfile.worker
+#
+# Lightweight image for the Kafka consumer workers.
+# Uses package.worker.json — a minimal dependency set with ONLY
+# what the workers need (no Next.js, no SWC, no React, etc.).
+# This avoids the @next/swc-win32-x64-msvc EBADPLATFORM error
+# that occurs when installing the full package.json on Linux.
+# ============================================================
+FROM node:20-alpine AS deps
+WORKDIR /app
+
+RUN apk add --no-cache libc6-compat
+
+# Use the worker-specific package.json — no Next.js, no SWC binaries
+COPY package.worker.json ./package.json
+RUN npm install --no-audit --no-fund
+
+# ============================================================
+# Runner
+# ============================================================
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser  --system --uid 1001 workerjs
+
+# Copy installed dependencies
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.worker.json ./package.json
+
+# Copy all source that workers need at runtime
+COPY workers ./workers
+COPY lib ./lib
+COPY schemas ./schemas
+COPY db ./db
+COPY sockets ./sockets
+COPY tsconfig.json ./
+
+RUN mkdir -p public/uploads
+
+USER workerjs
+
+CMD ["node_modules/.bin/tsx", "workers/stress-signal-consumer.ts"]

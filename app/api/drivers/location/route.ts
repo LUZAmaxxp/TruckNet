@@ -104,5 +104,19 @@ export async function POST(req: NextRequest) {
     console.error("[location] Ably publish failed:", err);
   }
 
+  // ── 6. Broadcast to fleet:locations for admin real-time map ─────────────
+  try {
+    await ablyPublish("fleet:locations", "driver_location_updated", {
+      userId,
+      name: profile?.name ?? null,
+      profileImageUrl: profile?.profileImageUrl ?? null,
+      latitude,
+      longitude,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("[location] Fleet channel Ably publish failed:", err);
+  }
+
   return successResponse({ latitude, longitude }, 200);
 }

@@ -1,0 +1,156 @@
+{
+  "report": {
+    "id": "BUG-002",
+    "project": "TruckConnect",
+    "date": "2026-03-02",
+    "severity": "critical",
+    "feature": "Voice & Video Calls + Real-Time Messaging",
+    "title": "Three concurrent bugs: CSP blocks Ably token requests, LiveKit disconnects before connection establishes, Ably channel subscribed multiple times",
+    "bugs": [
+      {
+        "id": "BUG-002-A",
+        "severity": "critical",
+        "title": "CSP blocks Ably token endpoint (https://main.realtime.ably.net)",
+        "root_cause": "The Content Security Policy in next.config.mjs includes https://*.ably.io and https://*.ably-realtime.com but does NOT include https://*.ably.net or wss://*.ably.net. Ably's SDK resolves to main.realtime.ably.net for token requests and fallback transports, which is a different subdomain pattern (.ably.net vs .ably.io / .ably-realtime.com). All three Ably domain patterns must be present.",
+        "missing_csp_entries": [
+          "https://*.ably.net",
+          "wss://*.ably.net"
+        ],
+        "error_messages": [
+          "Connecting to 'https://main.realtime.ably.net/keys/RMZTfg.u3i6rw/requestToken?rnd=...' violates the following Content Security Policy directive: connect-src 'self' ws://localhost:* wss://localhost:* ws: wss: https://*.ably.io wss://*.ably.io https://*.ably-realtime.com wss://*.ably-realtime.com wss://*.livekit.cloud https://*.livekit.cloud"
+        ],
+        "affected_files": [
+          "next.config.mjs"
+        ]
+      },
+      {
+        "id": "BUG-002-B",
+        "severity": "critical",
+        "title": "LiveKit room disconnects immediately \u2014 'Client initiated disconnect' before WebSocket establishes",
+        "error_messages": [
+          "disconnect from room",
+          "Abort connection attempt due to user initiated disconnect",
+          "WebSocket connection to 'wss://trucknet-xzddcw8i.livekit.cloud/rtc/v1?access_token=...' failed: WebSocket is closed before the connection is established.",
+          "[useLiveKitRoom] connect failed: ConnectionError: Client initiated disconnect"
+        ],
+        "root_cause": "React 18 Strict Mode double-invokes useEffect in development \u2014 the component mounts, starts room.connect(), then immediately unmounts and remounts. The cleanup function of the first mount calls room.disconnect() while the WebSocket handshake is still in progress. The second mount starts a new connect() which also gets aborted by the same race. The fix requires: (1) a connection guard (isConnecting ref) to prevent concurrent connect calls, (2) an isMounted/aborted flag so cleanup does not call disconnect if connect never completed, and (3) using a stable Room instance with useRef instead of re-creating it on every render.",
+        "affected_files": [
+          "hooks/useLiveKitRoom.ts",
+          "app/(protected)/calls/[roomName]/page.tsx"
+        ]
+      },
+      {
+        "id": "BUG-002-C",
+        "severity": "medium",
+        "title": "Ably channel subscribed multiple times \u2014 same event registered 3-4x per session",
+        "error_messages": [
+          "[useSocket] subscribed to 'text_message_received' on channel 'user:d7ad45c7...' (appears 4 times)",
+          "[useSocket] subscribed to 'voice_message_received' on channel 'user:d7ad45c7...' (appears 3 times)"
+        ],
+        "root_cause": "useSocket hook is being called from multiple components simultaneously (e.g. layout.tsx, DriverMap, messages page all call useSocket independently). Each call creates its own subscription without checking if one already exists. Additionally, React Strict Mode double-fires effects, doubling the subscription count. Fix requires: (1) move the Ably Realtime instance and all channel subscriptions into a single React Context/Provider so there is exactly one instance per session, and (2) in the provider's useEffect cleanup, call channel.unsubscribe() for every registered listener before re-subscribing.",
+        "affected_files": [
+          "hooks/useSocket.ts",
+          "components/Providers.tsx"
+        ]
+      }
+    ]
+  },
+  "agent_prompt": {
+    "role": "You are a senior full-stack engineer working on TruckConnect, a Next.js 14 App Router application using Ably for real-time messaging and LiveKit for voice/video calls. You have full access to the codebase. Fix three bugs identified in BUG-002-A, BUG-002-B, and BUG-002-C below. Apply all fixes in the order listed. Do not introduce new dependencies.",
+    "objective": "Resolve all three bugs (CSP blocking Ably, LiveKit race-condition disconnect, Ably duplicate channel subscriptions) so that real-time messaging and voice/video calls work correctly on all devices.",
+    "fix_A": {
+      "id": "FIX-A",
+      "title": "Add missing Ably .ably.net domains to Content Security Policy",
+      "instructions": [
+        "Open next.config.mjs and locate the headers() function that sets the Content-Security-Policy header",
+        "Find the connect-src directive",
+        "The current connect-src includes https://*.ably.io, wss://*.ably.io, https://*.ably-realtime.com, wss://*.ably-realtime.com",
+        "Add the following two entries to connect-src immediately after the existing Ably entries: https://*.ably.net wss://*.ably.net",
+        "Also verify wss://*.livekit.cloud and https://*.livekit.cloud are present \u2014 if missing add them",
+        "Also add https://main.realtime.ably.net explicitly as a safety fallback",
+        "The final connect-src must contain ALL of the following Ably entries: https://*.ably.io wss://*.ably.io https://*.ably-realtime.com wss://*.ably-realtime.com https://*.ably.net wss://*.ably.net https://main.realtime.ably.net",
+        "Do not remove any existing entries",
+        "Restart the dev server after saving \u2014 CSP headers are set at build/startup time in Next.js"
+      ],
+      "code_template": "// In next.config.mjs headers() \u2014 connect-src value example:\nconst connectSrc = [\n  \"'self'\",\n  \"ws://localhost:*\",\n  \"wss://localhost:*\",\n  // Ably \u2014 all three domain patterns required\n  \"https://*.ably.io\",\n  \"wss://*.ably.io\",\n  \"https://*.ably-realtime.com\",\n  \"wss://*.ably-realtime.com\",\n  \"https://*.ably.net\",\n  \"wss://*.ably.net\",\n  \"https://main.realtime.ably.net\",\n  // LiveKit\n  \"wss://*.livekit.cloud\",\n  \"https://*.livekit.cloud\",\n].join(' ');",
+      "files": [
+        "next.config.mjs"
+      ]
+    },
+    "fix_B": {
+      "id": "FIX-B",
+      "title": "Fix LiveKit room connecting and immediately disconnecting (React StrictMode race condition)",
+      "files": [
+        "hooks/useLiveKitRoom.ts",
+        "app/(protected)/calls/[roomName]/page.tsx"
+      ],
+      "instructions": [
+        "Open hooks/useLiveKitRoom.ts",
+        "PROBLEM 1 \u2014 Room instance re-creation: Verify the Room object is created with useRef, NOT with useState or inline in the hook body. If it is created inline or with useState, move it to: const roomRef = useRef<Room | null>(null); if (!roomRef.current) { roomRef.current = new Room({ adaptiveStream: true, dynacast: true }); } const room = roomRef.current;",
+        "PROBLEM 2 \u2014 Concurrent connect calls: Add a connecting guard using useRef: const isConnectingRef = useRef(false). At the start of the connect logic inside useEffect, check: if (isConnectingRef.current) return; isConnectingRef.current = true; \u2014 and reset it in the finally block: isConnectingRef.current = false;",
+        "PROBLEM 3 \u2014 Cleanup calling disconnect on inflight connection: Add an abort flag inside the useEffect: let aborted = false; \u2014 In the cleanup function return () => { aborted = true; room.disconnect(); }; \u2014 After await room.connect(liveKitUrl, token) completes, check: if (aborted) { room.disconnect(); return; } \u2014 This ensures that if StrictMode already cleaned up before connect finished, we immediately disconnect the now-orphaned connection",
+        "PROBLEM 4 \u2014 Token fetch triggering re-render loop: The token fetch must NOT be in a useEffect with dependencies that change after the fetch (e.g. putting token in state and listing it as a dep). Use a ref for the token: const tokenRef = useRef<string | null>(null). Fetch the token once inside the connect effect and store it in tokenRef.current before passing to room.connect()",
+        "The corrected useLiveKitRoom hook connect effect must follow this exact sequence: (1) check isConnectingRef guard, (2) set guard to true, (3) fetch token from /api/calls/token/${roomName}, (4) check aborted flag before proceeding, (5) call room.connect(liveKitUrl, token), (6) check aborted flag again after connect, (7) reset guard in finally, (8) catch errors and call onError callback",
+        "In app/(protected)/calls/[roomName]/page.tsx: verify the component does NOT call room.disconnect() in a useEffect cleanup that runs during normal navigation-within-the-call-page re-renders. The disconnect should only happen on explicit user action (end call button) or when the component fully unmounts (navigating away from /calls)"
+      ],
+      "code_template": "// hooks/useLiveKitRoom.ts \u2014 corrected connect effect\nimport { Room, RoomEvent } from 'livekit-client';\nimport { useEffect, useRef, useCallback } from 'react';\n\nexport function useLiveKitRoom(roomName: string, onError?: (e: Error) => void) {\n  const roomRef = useRef<Room | null>(null);\n  const isConnectingRef = useRef(false);\n\n  if (!roomRef.current) {\n    roomRef.current = new Room({ adaptiveStream: true, dynacast: true });\n  }\n  const room = roomRef.current;\n\n  useEffect(() => {\n    if (!roomName) return;\n    if (isConnectingRef.current) return;\n\n    let aborted = false;\n    isConnectingRef.current = true;\n\n    async function connect() {\n      try {\n        const res = await fetch(`/api/calls/token/${roomName}`);\n        if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`);\n        const { token, liveKitUrl } = await res.json();\n\n        if (aborted) return; // StrictMode already cleaned up\n\n        await room.connect(liveKitUrl, token);\n\n        if (aborted) {\n          room.disconnect();\n          return;\n        }\n      } catch (e) {\n        if (!aborted) onError?.(e as Error);\n      } finally {\n        isConnectingRef.current = false;\n      }\n    }\n\n    connect();\n\n    return () => {\n      aborted = true;\n      room.disconnect();\n    };\n  }, [roomName]); // roomName only \u2014 room and onError must NOT be in deps\n\n  return { room };\n}"
+    },
+    "fix_C": {
+      "id": "FIX-C",
+      "title": "Fix Ably duplicate channel subscriptions \u2014 move to singleton Context Provider",
+      "files": [
+        "hooks/useSocket.ts",
+        "components/Providers.tsx"
+      ],
+      "instructions": [
+        "DIAGNOSIS: Run a search in the codebase for all files that call useSocket() \u2014 list every component and hook that imports and calls it. The duplicate subscriptions mean multiple component trees each independently create Ably channel subscriptions for the same events.",
+        "SOLUTION: Refactor useSocket into a Context-based singleton pattern:",
+        "STEP 1 \u2014 Create a SocketContext: In hooks/useSocket.ts (or a new file components/SocketProvider.tsx), define: const SocketContext = createContext<SocketContextValue | null>(null)",
+        "STEP 2 \u2014 Create SocketProvider component: This component holds the single Ably.Realtime instance in a useRef. In its useEffect it creates the instance once, subscribes to 'user:{clientId}' and 'stress:alerts' channels, and stores event listeners in a Map<eventName, Set<handler>>. The cleanup returns channel.unsubscribe() + realtime.close().",
+        "STEP 3 \u2014 on() and off() methods: Instead of calling channel.subscribe() directly each time on() is called (which stacks subscriptions), maintain an internal listener registry (Map<eventName, Set<handler>>). When the Ably channel message arrives, iterate the Set and call each registered handler. on() adds to the Set, off() removes from it. This means Ably itself only ever has ONE subscription per event name, regardless of how many components call on().",
+        "STEP 4 \u2014 Add SocketProvider to Providers.tsx: Wrap the children with <SocketProvider> inside the existing Providers component, alongside SessionProvider. Ensure it is INSIDE SessionProvider so it can read the session.",
+        "STEP 5 \u2014 Remove all direct Ably.Realtime instantiation from useSocket.ts body: The hook body should now just call useContext(SocketContext) and throw if null (i.e. used outside provider). All components that call useSocket() will now share the single instance from the Provider.",
+        "STEP 6 \u2014 Verify React StrictMode safety: The useEffect in SocketProvider must handle double-invocation. Use the standard pattern: inside useEffect, create Ably instance; in cleanup, call realtime.close() and clear the listener Map. On second mount, a fresh instance is created cleanly."
+      ],
+      "code_template": "// Condensed SocketProvider pattern\nimport Ably from 'ably';\nimport { createContext, useContext, useEffect, useRef, ReactNode } from 'react';\nimport { useSession } from 'next-auth/react';\n\ntype Handler = (data: unknown) => void;\n\ninterface SocketContextValue {\n  on: (event: string, handler: Handler) => void;\n  off: (event: string, handler: Handler) => void;\n  isConnected: boolean;\n}\n\nconst SocketContext = createContext<SocketContextValue | null>(null);\n\nexport function SocketProvider({ children }: { children: ReactNode }) {\n  const { data: session } = useSession();\n  const realtimeRef = useRef<Ably.Realtime | null>(null);\n  const listenersRef = useRef<Map<string, Set<Handler>>>(new Map());\n  const isConnectedRef = useRef(false);\n\n  useEffect(() => {\n    if (!session?.user?.id) return;\n\n    const realtime = new Ably.Realtime({ authUrl: '/api/auth/ably-token' });\n    realtimeRef.current = realtime;\n\n    const userChannel = realtime.channels.get(`user:${session.user.id}`);\n    const stressChannel = realtime.channels.get('stress:alerts');\n\n    const dispatch = (event: string) => (msg: Ably.Types.Message) => {\n      listenersRef.current.get(event)?.forEach(h => h(msg.data));\n    };\n\n    // Subscribe ONCE per event on the Ably channel\n    const events = ['text_message_received','voice_message_received','call_incoming','call_declined','call_ended','call_missed','friend_request_received','friend_request_accepted','nearby_driver_update','error'];\n    events.forEach(e => userChannel.subscribe(e, dispatch(e)));\n    stressChannel.subscribe('stress_signal_alert', dispatch('stress_signal_alert'));\n\n    realtime.connection.on('connected', () => { isConnectedRef.current = true; });\n    realtime.connection.on('disconnected', () => { isConnectedRef.current = false; });\n\n    return () => {\n      userChannel.unsubscribe();\n      stressChannel.unsubscribe();\n      realtime.close();\n      realtimeRef.current = null;\n      listenersRef.current.clear();\n    };\n  }, [session?.user?.id]);\n\n  const on = (event: string, handler: Handler) => {\n    if (!listenersRef.current.has(event)) listenersRef.current.set(event, new Set());\n    listenersRef.current.get(event)!.add(handler);\n  };\n\n  const off = (event: string, handler: Handler) => {\n    listenersRef.current.get(event)?.delete(handler);\n  };\n\n  return (\n    <SocketContext.Provider value={{ on, off, isConnected: isConnectedRef.current }}>\n      {children}\n    </SocketContext.Provider>\n  );\n}\n\nexport function useSocket() {\n  const ctx = useContext(SocketContext);\n  if (!ctx) throw new Error('useSocket must be used within SocketProvider');\n  return ctx;\n}"
+    },
+    "verification_steps": [
+      {
+        "step": 1,
+        "action": "Restart the dev server after applying all three fixes: npm run dev"
+      },
+      {
+        "step": 2,
+        "action": "Open browser DevTools \u2192 Console. Verify ZERO CSP errors for ably.net or livekit.cloud domains"
+      },
+      {
+        "step": 3,
+        "action": "Open DevTools \u2192 Console. Verify each Ably event (text_message_received, voice_message_received) appears subscribed EXACTLY ONCE, not multiple times"
+      },
+      {
+        "step": 4,
+        "action": "Initiate a voice call. In the Console verify NO 'Client initiated disconnect' or 'Abort connection attempt' errors appear"
+      },
+      {
+        "step": 5,
+        "action": "Confirm the LiveKit WebSocket connects successfully \u2014 look for the room 'connected' event in the console log from useLiveKitRoom"
+      },
+      {
+        "step": 6,
+        "action": "Send a text message and verify it arrives in real-time without duplicate delivery (which would indicate duplicate subscriptions are still active)"
+      },
+      {
+        "step": 7,
+        "action": "Open DevTools \u2192 Network \u2192 WS. Verify exactly ONE WebSocket connection to realtime.ably.net and ONE to livekit.cloud during an active call"
+      }
+    ],
+    "constraints": [
+      "Do not downgrade React or disable StrictMode as a workaround \u2014 fix the actual race condition",
+      "Do not hardcode the Ably API key on the client \u2014 always use authUrl: '/api/auth/ably-token'",
+      "Do not add new npm packages \u2014 use the existing livekit-client and ably packages",
+      "The SocketProvider must be placed INSIDE NextAuth SessionProvider in Providers.tsx so useSession() works inside it",
+      "Do not change the Ably channel naming convention (user:{userId} and stress:alerts)",
+      "The Room instance in useLiveKitRoom must never be recreated between renders \u2014 use useRef"
+    ]
+  }
+}

@@ -1,0 +1,482 @@
+{
+  "project": "TruckConnect – Voice & Video Calls Feature",
+  "version": "1.0.0",
+  "created_at": "2026-03-02",
+  "summary": "A comprehensive plan to add 1-on-1 and group voice/video calls to TruckConnect using LiveKit as the WebRTC SFU infrastructure, supporting all devices (smartphone, tablet, desktop).",
+
+  "technology_decision": {
+    "chosen_stack": "LiveKit (Open-Source WebRTC SFU)",
+    "alternatives_considered": [
+      {
+        "name": "Pure WebRTC + Ably Signaling",
+        "pros": ["No new dependency", "Uses existing Ably infra"],
+        "cons": ["Peer-to-peer only (no SFU = bad for 3+ users)", "Complex NAT traversal logic to build manually", "No mesh = high CPU on mobile for group calls"]
+      },
+      {
+        "name": "Twilio Video",
+        "pros": ["Managed service", "Battle-tested"],
+        "cons": ["Expensive ($0.004/min/participant)", "Vendor lock-in", "Overkill pricing for a fleet app"]
+      },
+      {
+        "name": "Agora.io",
+        "pros": ["Great mobile SDKs", "Global edge infrastructure"],
+        "cons": ["Proprietary protocol", "Pricing unpredictable at scale", "Less control"]
+      },
+      {
+        "name": "Daily.co",
+        "pros": ["Easy embed", "Good Safari support"],
+        "cons": ["Costly at scale", "Limited customization of UI"]
+      }
+    ],
+    "why_livekit": [
+      "100% open source (Apache 2.0) – self-host on existing Docker infra",
+      "SFU architecture – scales from 1:1 to group calls without P2P mesh overhead",
+      "First-class React SDK (@livekit/components-react) – fits Next.js perfectly",
+      "Works natively on iOS Safari, Android Chrome, iPad, Desktop browsers",
+      "Built-in TURN server via LiveKit Egress/Ingress + relay support",
+      "Supports audio-only mode (voice calls) and video calls with the same SDK",
+      "Room-based model maps perfectly to trucker conversations",
+      "LiveKit Cloud available if self-hosting becomes a burden",
+      "Active ecosystem: recording, transcription, SIP integration for future"
+    ]
+  },
+
+  "architecture": {
+    "overview": "LiveKit Server runs as a sidecar Docker container alongside the Next.js app and PostgreSQL. Ably continues to handle all existing real-time events. LiveKit handles only call signaling and media relay. The Next.js backend issues LiveKit access tokens via a new /api/calls/* route group.",
+    "diagram": {
+      "client": "Browser / iOS Safari / Android Chrome",
+      "client_connects_to": [
+        "LiveKit Server (WebRTC media + signaling via WSS)",
+        "Next.js API (REST: create room, get token, end call)"
+      ],
+      "nextjs_server_connects_to": [
+        "LiveKit Server REST API (room management, token generation)",
+        "PostgreSQL (call_history table)",
+        "Ably (publish call_incoming / call_ended events to callee)"
+      ],
+      "livekit_server_connects_to": [
+        "STUN (Google / Cloudflare – free)",
+        "TURN (built-in LiveKit relay OR Cloudflare TURN free tier)"
+      ]
+    },
+    "call_flow": {
+      "step_1_caller_initiates": "Caller hits POST /api/calls/initiate with { calleeId, type: 'voice'|'video' }",
+      "step_2_server_creates_room": "Server calls LiveKit API: CreateRoom({ name: 'call-{uuid}', emptyTimeout: 30 })",
+      "step_3_server_issues_tokens": "Server generates two JWT tokens (caller + callee) via livekit-server-sdk",
+      "step_4_notify_callee": "Server calls ablyPublish('user:{calleeId}', 'call_incoming', { roomName, token, callerInfo, type })",
+      "step_5_callee_ui": "Callee sees incoming call modal (accept / decline)",
+      "step_6_accept": "Both clients join the LiveKit room using their tokens",
+      "step_7_decline_or_timeout": "If declined/30s timeout: ablyPublish('user:{callerId}', 'call_declined'|'call_missed'), room auto-deleted",
+      "step_8_end_call": "Any participant can call DELETE /api/calls/{roomName}, server deletes LiveKit room, both get call_ended event",
+      "step_9_persist": "Server writes call_history row (participants, duration, type, status)"
+    }
+  },
+
+  "new_dependencies": {
+    "server": [
+      {
+        "package": "livekit-server-sdk",
+        "version": "^2.x",
+        "purpose": "Generate access tokens and manage rooms via LiveKit REST API"
+      }
+    ],
+    "client": [
+      {
+        "package": "livekit-client",
+        "version": "^2.x",
+        "purpose": "Core WebRTC SDK – connects to LiveKit server, manages tracks"
+      },
+      {
+        "package": "@livekit/components-react",
+        "version": "^2.x",
+        "purpose": "Ready-made React components: VideoConference, AudioRenderer, ParticipantTile, ControlBar"
+      }
+    ],
+    "infrastructure": [
+      {
+        "service": "LiveKit Server Docker Image",
+        "image": "livekit/livekit-server:latest",
+        "purpose": "WebRTC SFU + signaling server"
+      }
+    ]
+  },
+
+  "environment_variables": {
+    "new_variables": [
+      {
+        "name": "LIVEKIT_URL",
+        "example": "wss://livekit.yourdomain.com",
+        "required": true,
+        "description": "LiveKit server WebSocket URL (used by both server SDK and client)"
+      },
+      {
+        "name": "LIVEKIT_API_KEY",
+        "example": "APIxxxxxxx",
+        "required": true,
+        "description": "LiveKit API key for server-side token generation"
+      },
+      {
+        "name": "LIVEKIT_API_SECRET",
+        "example": "xxxxxxxxxxxxxxxx",
+        "required": true,
+        "description": "LiveKit API secret – never sent to client"
+      }
+    ],
+    "add_to_env_schema": "schemas/env.schema.ts – add LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET to the Zod EnvSchema"
+  },
+
+  "database_changes": {
+    "new_table": {
+      "name": "call_history",
+      "columns": [
+        { "name": "id", "type": "uuid PK", "notes": "default random" },
+        { "name": "room_name", "type": "varchar(100)", "notes": "unique LiveKit room name" },
+        { "name": "caller_id", "type": "uuid FK → users", "notes": "ON DELETE SET NULL" },
+        { "name": "callee_id", "type": "uuid FK → users", "notes": "ON DELETE SET NULL" },
+        { "name": "call_type", "type": "enum", "notes": "'voice' | 'video'" },
+        { "name": "status", "type": "enum", "notes": "'missed' | 'declined' | 'completed' | 'ongoing'" },
+        { "name": "started_at", "type": "timestamptz", "notes": "nullable – set when callee joins" },
+        { "name": "ended_at", "type": "timestamptz", "notes": "nullable – set on room destruction" },
+        { "name": "duration_seconds", "type": "integer", "notes": "nullable – computed on end" },
+        { "name": "created_at", "type": "timestamptz", "notes": "" }
+      ],
+      "indexes": ["caller_id", "callee_id", "created_at"]
+    },
+    "migration_command": "npm run db:generate && npm run db:migrate"
+  },
+
+  "new_api_routes": [
+    {
+      "method": "POST",
+      "path": "/api/calls/initiate",
+      "auth": true,
+      "rate_limit": "5 calls per minute per user",
+      "body": "{ calleeId: string, type: 'voice' | 'video' }",
+      "response": "{ roomName: string, token: string }",
+      "actions": [
+        "Validate calleeId is a valid UUID and is a friend of caller",
+        "Check callee is not already in an active call (query call_history status='ongoing')",
+        "Create LiveKit room via livekit-server-sdk: AccessToken + RoomCreate grant",
+        "Insert call_history row with status='ongoing'",
+        "ablyPublish('user:{calleeId}', 'call_incoming', { roomName, type, callerName, callerAvatar, liveKitUrl })",
+        "Return { roomName, token: callerToken }"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/calls/token/:roomName",
+      "auth": true,
+      "description": "Callee fetches their own token after accepting",
+      "response": "{ token: string, liveKitUrl: string }",
+      "actions": [
+        "Verify the session user is the callee in the call_history row for roomName",
+        "Generate a new AccessToken for the callee with RoomJoin grant",
+        "Update call_history.started_at = now()",
+        "Return token"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/calls/:roomName",
+      "auth": true,
+      "description": "End an active call (either participant can call this)",
+      "actions": [
+        "Verify session user is caller or callee for this room",
+        "Call LiveKit DeleteRoom API",
+        "Update call_history: status='completed', ended_at=now(), duration_seconds computed",
+        "ablyPublish('user:{otherId}', 'call_ended', { roomName, duration })"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/calls/:roomName/decline",
+      "auth": true,
+      "description": "Callee declines an incoming call",
+      "actions": [
+        "Verify session user is the callee",
+        "Update call_history: status='declined'",
+        "ablyPublish('user:{callerId}', 'call_declined', { roomName })",
+        "Call LiveKit DeleteRoom API"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/calls/history",
+      "auth": true,
+      "description": "Paginated call history for the current user",
+      "query_params": "?page=1&limit=20",
+      "response": "{ calls: CallHistory[], total: number }"
+    }
+  ],
+
+  "ably_new_events": {
+    "channel": "user:{userId}",
+    "new_events": [
+      {
+        "event": "call_incoming",
+        "payload": "{ roomName, type, callerName, callerAvatar, callerUserId, liveKitUrl }",
+        "consumer": "useSocket() hook → triggers IncomingCallModal"
+      },
+      {
+        "event": "call_declined",
+        "payload": "{ roomName }",
+        "consumer": "Dismiss call UI, show 'Call declined' toast"
+      },
+      {
+        "event": "call_missed",
+        "payload": "{ roomName, callerName }",
+        "consumer": "Show missed call notification badge"
+      },
+      {
+        "event": "call_ended",
+        "payload": "{ roomName, duration }",
+        "consumer": "Close call UI, show call summary toast"
+      }
+    ]
+  },
+
+  "frontend_components": {
+    "new_pages": [
+      {
+        "path": "app/(protected)/calls/[roomName]/page.tsx",
+        "description": "Full-screen call room using @livekit/components-react",
+        "modes": {
+          "voice_only": "Custom layout: large avatar, mute/unmute, end call. No video tiles.",
+          "video": "Standard <VideoConference /> layout with participant tiles grid, ControlBar"
+        },
+        "mobile_considerations": [
+          "Lock screen orientation on video (landscape preferred)",
+          "Floating pip-mode UI when user navigates away",
+          "Proximity sensor: auto-mute speaker on mobile (web API where available)",
+          "Large touch targets for mute/end buttons (min 48x48px)"
+        ]
+      }
+    ],
+    "new_components": [
+      {
+        "name": "components/calls/IncomingCallModal.tsx",
+        "description": "Full-screen overlay modal with caller info, ringtone, accept/decline buttons. Uses Framer Motion for slide-in animation. Triggered by 'call_incoming' Ably event in useSocket.",
+        "props": "{ callerName, callerAvatar, callType, roomName, onAccept, onDecline }"
+      },
+      {
+        "name": "components/calls/CallButton.tsx",
+        "description": "Voice and video call trigger buttons displayed on friend profile / messages thread. Validates friendship before initiating.",
+        "variants": "voice | video"
+      },
+      {
+        "name": "components/calls/CallControls.tsx",
+        "description": "Bottom bar with: mute mic, toggle camera (video only), toggle speaker, end call. Works on all screen sizes.",
+        "notes": "Wraps @livekit/components-react <ControlBar /> with custom TruckConnect styling"
+      },
+      {
+        "name": "components/calls/CallHistoryList.tsx",
+        "description": "Call log per contact showing call type icon, direction (inbound/outbound), duration, timestamp. Rendered in /messages thread."
+      },
+      {
+        "name": "components/calls/ActiveCallBadge.tsx",
+        "description": "Persistent floating banner shown during an active call when user navigates to other tabs (like DriverMap). Shows duration timer + return-to-call button."
+      }
+    ],
+    "modified_components": [
+      {
+        "component": "components/messages/* (thread view)",
+        "change": "Add <CallButton type='voice' /> and <CallButton type='video' /> in the message thread header"
+      },
+      {
+        "component": "components/layout/Navbar.tsx + BottomNav.tsx",
+        "change": "Show <ActiveCallBadge /> when a call is in progress (global call state via Zustand or React context)"
+      },
+      {
+        "component": "hooks/useSocket.ts",
+        "change": "Add listeners for call_incoming, call_declined, call_missed, call_ended events. Expose call state to consumers."
+      }
+    ]
+  },
+
+  "new_hooks": [
+    {
+      "name": "hooks/useCallState.ts",
+      "description": "Global call state manager. Tracks activeCall ({ roomName, type, status }), incoming call, and exposes initiateCall(), acceptCall(), declineCall(), endCall() methods. Uses React Context so any component can access it.",
+      "integrates_with": ["useSocket (incoming events)", "API routes (REST actions)"]
+    },
+    {
+      "name": "hooks/useLiveKitRoom.ts",
+      "description": "Thin wrapper around livekit-client useRoom hook. Handles token fetch, room connection, device switching, and cleanup on unmount.",
+      "key_features": [
+        "Auto-fetch token from /api/calls/token/:roomName",
+        "Handle room disconnect events (end call)",
+        "Device enumeration for mic/camera selection on desktop"
+      ]
+    }
+  ],
+
+  "device_compatibility": {
+    "desktop_browsers": {
+      "chrome": "Full voice + video",
+      "firefox": "Full voice + video",
+      "safari": "Full voice + video (WebRTC supported since Safari 11)",
+      "edge": "Full voice + video"
+    },
+    "mobile_browsers": {
+      "ios_safari": "Full voice + video. getUserMedia works in iOS 14.5+. No background audio restriction workaround needed with LiveKit SDK.",
+      "android_chrome": "Full voice + video",
+      "android_firefox": "Voice + video supported"
+    },
+    "tablet": {
+      "ipad_safari": "Full voice + video, same as iOS Safari",
+      "android_tablet": "Full voice + video via Chrome"
+    },
+    "notes": [
+      "Camera/mic permissions are already declared in Permissions-Policy header (microphone=(self)) – add camera=(self) for video",
+      "CSP update needed: add LiveKit WSS domain to connect-src in next.config.mjs",
+      "HTTPS is required for getUserMedia on all platforms (already enforced by HSTS header)"
+    ]
+  },
+
+  "infrastructure_changes": {
+    "docker_compose_additions": {
+      "new_service": "livekit",
+      "image": "livekit/livekit-server:latest",
+      "ports": ["7880:7880 (HTTP/API)", "7881:7881 (RTC TCP)", "7882:7882/udp (RTC UDP)"],
+      "environment": {
+        "LIVEKIT_KEYS": "APIxxxxxx: secretxxxxxxxx",
+        "LIVEKIT_RTC_TCP_PORT": "7881",
+        "LIVEKIT_RTC_UDP_PORT": "7882"
+      },
+      "volumes": ["./livekit.yaml:/livekit.yaml"],
+      "config_file": "livekit.yaml – minimal config: port, rtc.tcp_port, rtc.udp_port, keys"
+    },
+    "dockerfile_changes": "No changes needed to Next.js Dockerfile. LiveKit runs as a separate container.",
+    "network": "Add livekit service to the existing docker-compose network so the Next.js app can reach it internally at http://livekit:7880",
+    "production_deployment": {
+      "option_a": "Self-host LiveKit on a separate VPS/container with a public IP. Requires open UDP port 7882 for WebRTC media.",
+      "option_b": "LiveKit Cloud (cloud.livekit.io) – managed, no infra changes needed, usage-based pricing.",
+      "turn_server": "LiveKit has built-in TURN relay for restrictive networks (truckers on cellular/firewalled WiFi). Enable in livekit.yaml: turn.enabled=true."
+    }
+  },
+
+  "security": {
+    "token_security": [
+      "Tokens generated server-side only (LIVEKIT_API_SECRET never exposed to client)",
+      "Tokens are scoped: each token grants access to exactly one room",
+      "Token TTL: 5 minutes (enough to connect, not enough to be replayed)",
+      "Tokens include identity = userId so LiveKit room participants are identifiable"
+    ],
+    "authorization": [
+      "Only friends can call each other (enforced in POST /api/calls/initiate)",
+      "Callee token only issued after explicit accept action (GET /api/calls/token/:roomName)",
+      "Room auto-deleted after emptyTimeout=30s or via DELETE /api/calls/:roomName",
+      "Rate limit: 5 call initiations per minute per user"
+    ],
+    "csp_update": {
+      "file": "next.config.mjs",
+      "change": "Add LiveKit WSS URL to connect-src and wss: sources"
+    },
+    "permissions_policy_update": {
+      "file": "next.config.mjs",
+      "change": "Update Permissions-Policy: camera=(self) (currently set to camera=())"
+    }
+  },
+
+  "rate_limiting": {
+    "new_limits": [
+      {
+        "route": "POST /api/calls/initiate",
+        "limit": 5,
+        "window": "1 minute",
+        "key": "session.user.id",
+        "rationale": "Prevent call spam to other users"
+      }
+    ]
+  },
+
+  "testing_plan": {
+    "unit_tests": [
+      "__tests__/api/calls/initiate.test.ts – token generation, friendship check, duplicate call guard",
+      "__tests__/api/calls/token.test.ts – callee-only token issuance",
+      "__tests__/api/calls/end.test.ts – duration computation, status update",
+      "__tests__/lib/livekit-token.test.ts – token JWT claims validation"
+    ],
+    "e2e_tests": [
+      "e2e/calls.spec.ts – two Playwright browser contexts: initiate call, accept, verify both join, end call",
+      "e2e/calls-decline.spec.ts – decline flow, verify caller receives declined event"
+    ],
+    "manual_device_testing_checklist": [
+      "iOS Safari (iPhone) – voice call",
+      "iOS Safari (iPhone) – video call",
+      "iOS Safari (iPad) – video call landscape mode",
+      "Android Chrome – voice call",
+      "Android Chrome – video call",
+      "Desktop Chrome – video call",
+      "Desktop Firefox – voice call",
+      "Desktop Safari – video call",
+      "Network switch mid-call (WiFi → cellular) – verify LiveKit auto-reconnect"
+    ]
+  },
+
+  "implementation_phases": [
+    {
+      "phase": 1,
+      "name": "Infrastructure & Backend",
+      "estimated_days": 3,
+      "tasks": [
+        "Add LiveKit to docker-compose.yml + create livekit.yaml config",
+        "Add LIVEKIT_* env vars to env.schema.ts and .env.local",
+        "Install livekit-server-sdk",
+        "Create call_history Drizzle schema + migration",
+        "Implement /api/calls/initiate, /api/calls/token/:roomName, /api/calls/:roomName (DELETE), /api/calls/:roomName/decline",
+        "Add new Ably events to channel topology",
+        "Add call_incoming / call_declined / call_ended to useSocket handler"
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "Voice Calls UI",
+      "estimated_days": 3,
+      "tasks": [
+        "Install livekit-client + @livekit/components-react",
+        "Build useCallState hook + CallStateContext",
+        "Build IncomingCallModal component with ringtone + animations",
+        "Build /calls/[roomName]/page.tsx – voice-only layout",
+        "Build CallControls component (mute, end)",
+        "Add CallButton (voice) to message thread header",
+        "Add ActiveCallBadge to Navbar/BottomNav",
+        "Test on desktop + mobile browsers"
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "Video Calls UI",
+      "estimated_days": 2,
+      "tasks": [
+        "Extend /calls/[roomName]/page.tsx with video layout branch",
+        "Add CallButton (video) to message thread header",
+        "Update Permissions-Policy + CSP headers",
+        "Handle camera toggle, screen aspect ratios on iPad/tablet",
+        "Test on iOS Safari, Android Chrome, Desktop"
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "Call History & Polish",
+      "estimated_days": 2,
+      "tasks": [
+        "Implement /api/calls/history endpoint",
+        "Build CallHistoryList component in message thread",
+        "Missed call badge/notification in BottomNav",
+        "End-to-end tests (Playwright dual-context)",
+        "Load test: k6 script for concurrent call initiations",
+        "Production TURN relay verification (simulate cellular/restrictive network)"
+      ]
+    }
+  ],
+
+  "total_estimated_effort": {
+    "development_days": 10,
+    "phases": 4,
+    "new_api_routes": 5,
+    "new_components": 5,
+    "new_hooks": 2,
+    "new_db_tables": 1
+  }
+}

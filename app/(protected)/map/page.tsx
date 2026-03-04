@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Navigation, Loader2, MessageSquare, X, Users } from "lucide-react";
 import { useSocket } from "@/hooks/useSocket";
@@ -35,10 +35,12 @@ interface DriverWithMeta extends NearbyDriverEntry {
 }
 
 // ---------------------------------------------------------------------------
-// Page
+// Inner component — must be separate so Suspense can wrap useSearchParams()
 // ---------------------------------------------------------------------------
-export default function MapPage() {
+function MapPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const focusId = searchParams.get("focus");
   const { on, emit } = useSocket();
 
   const [drivers, setDrivers] = useState<DriverWithMeta[]>([]);
@@ -127,6 +129,23 @@ export default function MapPage() {
     // intentionally omit selectedDriver from deps — we only want to run on drivers change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drivers]);
+
+  // ---------------------------------------------------------------------------
+  // Auto-select a friend when navigated from the friends page (?focus=userId)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!focusId || drivers.length === 0) return;
+    const target = drivers.find((d) => d.userId === focusId);
+    if (target) {
+      setSelectedDriver(target);
+    } else {
+      toast.info("Friend not visible on map", {
+        description: "They may be outside the 50 km radius or haven't shared their location yet.",
+      });
+    }
+  // Run only when the drivers list first loads with data while focusId is set
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusId, drivers.length > 0]);
 
   // Stable callback — wrapped in useCallback so react-leaflet Marker eventHandlers
   // don't re-register on every socket-driven driver-list re-render.
@@ -241,5 +260,22 @@ export default function MapPage() {
         Tap a marker to view driver info • Updates every 20 s via WebSocket
       </p>
     </div>
+  );
+}
+// ---------------------------------------------------------------------------
+// Default export — wraps in Suspense (required when useSearchParams is used
+// in a client component that Next.js tries to prerender).
+// ---------------------------------------------------------------------------
+export default function MapPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 180px)" }}>
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <MapPageInner />
+    </Suspense>
   );
 }

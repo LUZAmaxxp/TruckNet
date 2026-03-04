@@ -112,7 +112,7 @@ export default function DashboardPage() {
       const name = msg.senderName ?? "A contact";
       toast.info(`🎙️ New voice message from ${name}`, {
         duration: 12_000,
-        action: { label: "Listen", onClick: () => router.push("/messages") },
+        action: { label: "Listen", onClick: () => router.push(`/messages?from=${msg.senderId}`) },
       });
     });
     return unsub;
@@ -126,7 +126,7 @@ export default function DashboardPage() {
       const preview = msg.content.length > 60 ? msg.content.slice(0, 60) + "…" : msg.content;
       toast.info(`💬 ${name}: ${preview}`, {
         duration: 10_000,
-        action: { label: "Reply", onClick: () => router.push("/messages") },
+        action: { label: "Reply", onClick: () => router.push(`/messages?from=${msg.senderId}`) },
       });
     });
     return unsub;

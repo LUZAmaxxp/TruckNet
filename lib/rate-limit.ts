@@ -100,3 +100,6 @@ export const voiceMessageLimiter = new RateLimiter(10, 60 * 1000);
 
 /** POST /api/auth/register — 5 requests per hour per IP */
 export const registerLimiter = new RateLimiter(5, 60 * 60 * 1000);
+
+/** POST /api/calls/initiate — 5 call initiations per minute per user */
+export const callInitiateLimiter = new RateLimiter(5, 60 * 1000);

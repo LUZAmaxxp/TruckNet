@@ -23,7 +23,7 @@ const nextConfig = {
           // Disable browser features not needed by the app
           {
             key: "Permissions-Policy",
-            value: "camera=(), geolocation=(self), microphone=(self)",
+            value: "camera=(self), geolocation=(self), microphone=(self)",
           },
           // Content Security Policy
           // microphone=(self) allowed for voice recording via MediaRecorder API
@@ -35,8 +35,8 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               // Next.js inline scripts + Socket.io client
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-              // Allow connections to same origin (API, WS) and ws/wss for Socket.io
-              "connect-src 'self' ws://localhost:* wss://localhost:* ws: wss: https://*.ably.io wss://*.ably.io https://*.ably-realtime.com wss://*.ably-realtime.com",
+              // Allow connections to same origin (API, WS), Ably, and LiveKit WSS
+              "connect-src 'self' ws://localhost:* wss://localhost:* ws: wss: https://*.ably.io wss://*.ably.io https://*.ably-realtime.com wss://*.ably-realtime.com https://*.ably.net wss://*.ably.net https://main.realtime.ably.net wss://*.livekit.cloud https://*.livekit.cloud",
               // Allow audio blobs for voice message playback
               "media-src 'self' blob:",
               // Images: same origin + data URIs for avatars/icons + OpenStreetMap tiles

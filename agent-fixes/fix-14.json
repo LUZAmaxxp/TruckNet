@@ -1,0 +1,160 @@
+{
+  "report": {
+    "id": "BUG-001",
+    "project": "TruckConnect",
+    "date": "2026-03-02",
+    "severity": "critical",
+    "feature": "Voice & Video Calls",
+    "title": "GET /api/calls/token/:roomName returns 404 — call fails to join",
+    "symptom": "When a user tries to initiate or accept a voice/video call, the client fetches the LiveKit token from GET /api/calls/token/call-f037bde0-5f4a-42f9-88b8-02873cdc98b5 and receives a 404 response in ~26ms, causing the call to abort with the message 'Failed to join the call'.",
+    "observed_behavior": {
+      "http_log": "GET /api/calls/token/call-f037bde0-5f4a-42f9-88b8-02873cdc98b5 404 in 26ms",
+      "ui_message": "Failed to join the call",
+      "call_result": "Call is cancelled immediately for both caller and callee"
+    },
+    "environment": {
+      "framework": "Next.js 14.2.x App Router",
+      "language": "TypeScript 5.x",
+      "auth": "Auth.js (NextAuth v5 beta)",
+      "realtime": "Ably",
+      "calls_infra": "LiveKit (livekit-server-sdk + @livekit/components-react)",
+      "database": "PostgreSQL + Drizzle ORM"
+    },
+    "root_cause_hypotheses": [
+      {
+        "id": "H1",
+        "likelihood": "high",
+        "description": "Route file is missing or placed at the wrong path. In Next.js App Router, dynamic segments require bracket folders. The correct path is app/api/calls/token/[roomName]/route.ts. Common mistakes include: app/api/calls/token/route.ts (no dynamic segment), app/api/calls/[roomName]/token/route.ts (wrong order), or a plain file named roomName instead of a bracketed folder."
+      },
+      {
+        "id": "H2",
+        "likelihood": "medium",
+        "description": "The route file exists but the GET export is missing or incorrectly named. Next.js App Router requires a named export 'export async function GET(...)' — a default export will not work."
+      },
+      {
+        "id": "H3",
+        "likelihood": "medium",
+        "description": "The route exists but throws an unhandled exception (e.g. missing env variable, Drizzle query error, livekit-server-sdk import error) and Next.js returns 404/500 before sending a proper response."
+      },
+      {
+        "id": "H4",
+        "likelihood": "low",
+        "description": "The client is calling the wrong URL — e.g. using a hardcoded path or missing the roomName interpolation, resulting in a malformed URL that matches no route."
+      },
+      {
+        "id": "H5",
+        "likelihood": "low",
+        "description": "The call_history row does not exist or has a status other than 'ongoing' when the token is requested, causing a premature 404 from inside the handler logic."
+      }
+    ]
+  },
+
+  "agent_prompt": {
+    "role": "You are a senior full-stack engineer working on TruckConnect, a Next.js 14 App Router application. You have full access to the codebase. Your task is to diagnose and fully fix a critical bug preventing voice and video calls from working.",
+    "objective": "Fix the 404 error on GET /api/calls/token/:roomName so that both voice and video calls can successfully connect via LiveKit.",
+    "instructions": {
+      "step_1_diagnose": {
+        "title": "Audit the file system first",
+        "actions": [
+          "List the contents of app/api/calls/ recursively to see what route files actually exist",
+          "Verify whether app/api/calls/token/[roomName]/route.ts exists",
+          "If it does not exist, identify where the file is (wrong location) or confirm it needs to be created",
+          "Check if the file exports a named GET function — not a default export"
+        ]
+      },
+      "step_2_create_or_fix_route": {
+        "title": "Create or fix app/api/calls/token/[roomName]/route.ts",
+        "file_path": "app/api/calls/token/[roomName]/route.ts",
+        "requirements": [
+          "Must be a Next.js App Router route file with a named export: export async function GET(request, { params })",
+          "Extract roomName from params: const { roomName } = await params (use await for Next.js 14 async params)",
+          "Call requireSession() from lib/auth-helpers.ts to get the current user session — return 401 if not authenticated",
+          "Query the call_history table using Drizzle ORM: find a row where roomName matches AND (caller_id = userId OR callee_id = userId) AND status = 'ongoing'",
+          "If no matching row is found, return NextResponse.json({ error: 'Call not found or already ended' }, { status: 404 })",
+          "Generate a LiveKit AccessToken using livekit-server-sdk: import { AccessToken } from 'livekit-server-sdk'",
+          "Use env.LIVEKIT_API_KEY and env.LIVEKIT_API_SECRET from lib/env.ts (never process.env directly)",
+          "Set token identity to userId (string), TTL to '5m'",
+          "Add grant: { roomJoin: true, room: roomName, canPublish: true, canSubscribe: true }",
+          "Call const jwt = await token.toJwt()",
+          "If the call_history row has started_at = null (callee is joining for first time), update started_at = new Date() using Drizzle",
+          "Return NextResponse.json({ token: jwt, liveKitUrl: env.LIVEKIT_URL }, { status: 200 })",
+          "Wrap the entire handler in try/catch — on error log it and return status 500 with a safe error message"
+        ],
+        "code_template": "import { NextResponse } from 'next/server';\nimport { requireSession } from '@/lib/auth-helpers';\nimport { db } from '@/db';\nimport { callHistory } from '@/db/schema';\nimport { and, eq, or } from 'drizzle-orm';\nimport { AccessToken } from 'livekit-server-sdk';\nimport { env } from '@/lib/env';\n\nexport async function GET(\n  request: Request,\n  { params }: { params: Promise<{ roomName: string }> }\n) {\n  try {\n    const session = await requireSession();\n    const userId = session.user.id;\n    const { roomName } = await params;\n\n    const call = await db.query.callHistory.findFirst({\n      where: and(\n        eq(callHistory.roomName, roomName),\n        or(\n          eq(callHistory.callerId, userId),\n          eq(callHistory.calleeId, userId)\n        ),\n        eq(callHistory.status, 'ongoing')\n      )\n    });\n\n    if (!call) {\n      return NextResponse.json(\n        { error: 'Call not found or already ended' },\n        { status: 404 }\n      );\n    }\n\n    const token = new AccessToken(\n      env.LIVEKIT_API_KEY,\n      env.LIVEKIT_API_SECRET,\n      { identity: userId, ttl: '5m' }\n    );\n    token.addGrant({\n      roomJoin: true,\n      room: roomName,\n      canPublish: true,\n      canSubscribe: true\n    });\n    const jwt = await token.toJwt();\n\n    if (!call.startedAt) {\n      await db\n        .update(callHistory)\n        .set({ startedAt: new Date() })\n        .where(eq(callHistory.roomName, roomName));\n    }\n\n    return NextResponse.json({ token: jwt, liveKitUrl: env.LIVEKIT_URL });\n  } catch (error) {\n    console.error('[GET /api/calls/token] Error:', error);\n    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });\n  }\n}"
+      },
+      "step_3_verify_env": {
+        "title": "Verify environment variables",
+        "actions": [
+          "Open schemas/env.schema.ts and confirm LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET are in the Zod schema with z.string().min(1)",
+          "If any are missing from the schema, add them",
+          "Confirm all three are present in .env.local with correct values: LIVEKIT_URL must start with wss://, LIVEKIT_API_KEY and LIVEKIT_API_SECRET must match your LiveKit server config",
+          "Confirm lib/env.ts re-exports these three new variables"
+        ]
+      },
+      "step_4_verify_db_schema": {
+        "title": "Verify call_history table exists in Drizzle schema",
+        "actions": [
+          "Open db/schema.ts and confirm a callHistory table is defined with columns: id, roomName, callerId, calleeId, callType, status (enum: ongoing|completed|missed|declined), startedAt, endedAt, durationSeconds, createdAt",
+          "If the table is missing, create it in db/schema.ts using Drizzle pgTable syntax",
+          "Run npm run db:generate and npm run db:migrate to apply the migration",
+          "Confirm the callHistory export is available for import in route handlers"
+        ]
+      },
+      "step_5_fix_client_join_logic": {
+        "title": "Fix the client-side call join flow",
+        "actions": [
+          "Find the component or hook responsible for joining a call (likely hooks/useCallState.ts, hooks/useLiveKitRoom.ts, or the page at app/(protected)/calls/[roomName]/page.tsx)",
+          "Ensure the token fetch happens BEFORE room.connect() is called — never call connect() with an undefined or empty token",
+          "The fetch must be: const res = await fetch(`/api/calls/token/${roomName}`)",
+          "Check res.ok before proceeding — if false, throw an error to trigger the catch block",
+          "Pass the token and liveKitUrl from the response directly to room.connect(liveKitUrl, token)",
+          "Wrap the entire join sequence in try/catch",
+          "On catch: call DELETE /api/calls/${roomName} to clean up the room, show a toast notification 'Failed to join the call', navigate the user back to /messages"
+        ],
+        "code_template": "async function joinCall(roomName: string) {\n  try {\n    const res = await fetch(`/api/calls/token/${roomName}`);\n    if (!res.ok) {\n      const err = await res.json();\n      throw new Error(err.error ?? 'Token fetch failed');\n    }\n    const { token, liveKitUrl } = await res.json();\n    await room.connect(liveKitUrl, token);\n  } catch (error) {\n    console.error('Failed to join call:', error);\n    await fetch(`/api/calls/${roomName}`, { method: 'DELETE' }).catch(() => {});\n    toast.error('Failed to join the call');\n    router.push('/messages');\n  }\n}"
+      },
+      "step_6_verify_other_call_routes": {
+        "title": "Verify the other call API routes also exist and are correct",
+        "routes_to_check": [
+          {
+            "path": "app/api/calls/initiate/route.ts",
+            "method": "POST",
+            "check": "Exists and correctly creates a LiveKit room + inserts call_history row with status='ongoing' + publishes call_incoming Ably event"
+          },
+          {
+            "path": "app/api/calls/[roomName]/route.ts",
+            "method": "DELETE",
+            "check": "Exists and deletes the LiveKit room, updates call_history status to completed/declined, publishes call_ended Ably event"
+          },
+          {
+            "path": "app/api/calls/[roomName]/decline/route.ts",
+            "method": "PATCH",
+            "check": "Exists and sets call_history status to declined, publishes call_declined Ably event to caller"
+          }
+        ]
+      },
+      "step_7_test": {
+        "title": "Test the fix",
+        "steps": [
+          "Restart the Next.js dev server: npm run dev",
+          "Open browser DevTools Network tab",
+          "Initiate a voice call from User A to User B",
+          "Verify POST /api/calls/initiate returns 200 with { roomName, token }",
+          "Verify GET /api/calls/token/{roomName} returns 200 with { token, liveKitUrl } for both users",
+          "Verify the LiveKit room connects successfully (no 'Failed to join' toast)",
+          "Verify the call_history row is updated with started_at timestamp",
+          "End the call and verify call_history status becomes 'completed'"
+        ]
+      }
+    },
+    "constraints": [
+      "Do not use process.env directly — always import from lib/env.ts",
+      "Do not expose LIVEKIT_API_SECRET or LIVEKIT_API_KEY to the client",
+      "Token TTL must not exceed 10 minutes",
+      "All DB queries must use Drizzle ORM — no raw SQL",
+      "All route handlers must use NextResponse from next/server",
+      "Do not remove or modify existing Ably event handling in useSocket.ts",
+      "Keep all existing auth patterns — use requireSession() for protected routes"
+    ]
+  }
+}

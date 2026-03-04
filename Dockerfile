@@ -10,6 +10,19 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
 COPY package.json package-lock.json ./
+# Remove the Windows-only SWC binary from both manifests before install.
+# @next/swc-win32-x64-msvc is a devDependency that only works on Windows;
+# it causes EBADPLATFORM on Linux when the lock was generated on Windows.
+RUN node -e " \
+  const fs = require('fs'); \
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); \
+  delete pkg.devDependencies['@next/swc-win32-x64-msvc']; \
+  fs.writeFileSync('package.json', JSON.stringify(pkg)); \
+  const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8')); \
+  delete (lock.packages || {})['node_modules/@next/swc-win32-x64-msvc']; \
+  delete (lock.dependencies || {})['@next/swc-win32-x64-msvc']; \
+  fs.writeFileSync('package-lock.json', JSON.stringify(lock)); \
+"
 RUN npm ci
 
 # ============================================================
@@ -52,8 +65,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.mjs ./
 COPY --from=builder /app/package.json ./
 
-# Copy source files needed by server.ts at runtime
-COPY --from=builder /app/server.ts ./
+# Copy source files needed by drizzle-kit migrate at runtime
 COPY --from=builder /app/lib ./lib
 COPY --from=builder /app/schemas ./schemas
 COPY --from=builder /app/sockets ./sockets
@@ -87,4 +99,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Env schema is validated by lib/env.ts on server startup (fail-fast)
-CMD ["node_modules/.bin/tsx", "server.ts"]
+CMD ["node_modules/.bin/next", "start"]

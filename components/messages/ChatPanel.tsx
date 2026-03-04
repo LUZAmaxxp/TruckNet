@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import { motion } from "framer-motion";
+
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { VoiceMessageBubble } from "@/components/messages/VoiceMessageBubble";
 import { MessageInput } from "@/components/messages/MessageInput";
 import type { VoiceMessageData } from "@/components/voice/VoiceMessageItem";
 import { useSocket } from "@/hooks/useSocket";
+import { CallButton } from "@/components/calls/CallButton";
 
 export interface Friend {
   id: string;
@@ -277,6 +278,9 @@ export function ChatPanel({
           <p className="truncate font-semibold leading-tight">{friend.name}</p>
           <p className="text-xs text-muted-foreground">{friend.tag}</p>
         </div>
+        {/* Call buttons */}
+        <CallButton friendId={friend.id} variant="voice" className="h-9 w-9" />
+        <CallButton friendId={friend.id} variant="video" className="h-9 w-9" />
         {/* Online presence dot */}
         <span
           className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-500"

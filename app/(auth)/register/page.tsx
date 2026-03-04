@@ -8,14 +8,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Truck } from "lucide-react";
+import { Truck, LayoutDashboard } from "lucide-react";
 
 export default function RegisterPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string }>({});
+  const [role, setRole] = useState<"driver" | "admin">("driver");
+  const [adminInviteCode, setAdminInviteCode] = useState("");
+  const [errors, setErrors] = useState<{
+    name?: string;
+    email?: string;
+    password?: string;
+    adminInviteCode?: string;
+  }>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -23,9 +30,15 @@ export default function RegisterPage() {
     e.preventDefault();
     setServerError(null);
 
-    const result = UserRegisterSchema.safeParse({ name, email, password });
+    const result = UserRegisterSchema.safeParse({
+      name,
+      email,
+      password,
+      role,
+      adminInviteCode: role === "admin" ? adminInviteCode : undefined,
+    });
     if (!result.success) {
-      const fieldErrors: { name?: string; email?: string; password?: string } = {};
+      const fieldErrors: typeof errors = {};
       for (const issue of result.error.issues) {
         const field = issue.path[0] as keyof typeof fieldErrors;
         fieldErrors[field] = issue.message;
@@ -34,6 +47,12 @@ export default function RegisterPage() {
       return;
     }
     setErrors({});
+
+    if (role === "admin" && !adminInviteCode.trim()) {
+      setErrors({ adminInviteCode: "Admin invite code is required." });
+      return;
+    }
+
     setLoading(true);
 
     const res = await fetch("/api/auth/register", {
@@ -46,6 +65,11 @@ export default function RegisterPage() {
 
     if (res.status === 409) {
       setServerError("An account with this email already exists.");
+      return;
+    }
+    if (res.status === 403) {
+      const json = await res.json().catch(() => ({}));
+      setServerError((json as { error?: string }).error ?? "Access denied.");
       return;
     }
     if (!res.ok) {
@@ -76,6 +100,34 @@ export default function RegisterPage() {
               </p>
             )}
 
+            {/* Role selector */}
+            <div className="space-y-2">
+              <Label>Account Type</Label>
+              <div className="grid grid-cols-2 gap-3">
+                {(["driver", "admin"] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setRole(r)}
+                    className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
+                      role === r
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-muted bg-muted/30 text-muted-foreground"
+                    }`}
+                  >
+                    {r === "driver" ? (
+                      <Truck className="h-7 w-7" />
+                    ) : (
+                      <LayoutDashboard className="h-7 w-7" />
+                    )}
+                    <span className="font-semibold text-sm">
+                      {r === "driver" ? "Truck Driver" : "Fleet Admin"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="space-y-1">
               <Label htmlFor="name">Full Name</Label>
               <Input
@@ -95,7 +147,7 @@ export default function RegisterPage() {
                 id="email"
                 type="email"
                 autoComplete="email"
-                placeholder="driver@example.com"
+                placeholder={role === "admin" ? "admin@example.com" : "driver@example.com"}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
@@ -114,6 +166,26 @@ export default function RegisterPage() {
               />
               {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
             </div>
+
+            {/* Admin invite code — only shown when admin role is selected */}
+            {role === "admin" && (
+              <div className="space-y-1">
+                <Label htmlFor="adminInviteCode">Admin Invite Code</Label>
+                <Input
+                  id="adminInviteCode"
+                  type="password"
+                  placeholder="Enter invite code"
+                  value={adminInviteCode}
+                  onChange={(e) => setAdminInviteCode(e.target.value)}
+                />
+                {errors.adminInviteCode && (
+                  <p className="text-xs text-destructive">{errors.adminInviteCode}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Contact your fleet manager for an invite code.
+                </p>
+              </div>
+            )}
           </CardContent>
 
           <CardFooter className="flex flex-col gap-3">

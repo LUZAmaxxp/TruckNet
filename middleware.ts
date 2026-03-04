@@ -6,6 +6,7 @@ import {
   stressSignalLimiter,
   voiceMessageLimiter,
   registerLimiter,
+  callInitiateLimiter,
 } from "@/lib/rate-limit";
 
 /**
@@ -87,6 +88,23 @@ export default auth(async (req) => {
         }
       }
     }
+
+    // POST /api/calls/initiate — per-user (session.user.id)
+    if (pathname === "/api/calls/initiate") {
+      const userId = (req as NextRequest & { auth?: { user?: { id?: string } } }).auth?.user?.id;
+      if (userId) {
+        const { allowed, retryAfterSeconds } = callInitiateLimiter.check(userId);
+        if (!allowed) {
+          return NextResponse.json(
+            { error: "Call rate limit exceeded. Please wait before initiating another call." },
+            {
+              status: 429,
+              headers: { "Retry-After": String(retryAfterSeconds) },
+            }
+          );
+        }
+      }
+    }
   }
 
   // -----------------------------------------------------------------
@@ -103,5 +121,7 @@ export const config = {
     "/api/auth/register",
     "/api/voice-messages",
     "/api/stress-signals",
+    "/api/calls/initiate",
+    "/admin/:path*",
   ],
 };

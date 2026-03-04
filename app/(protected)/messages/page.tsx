@@ -1,18 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { FriendsSidebar } from "@/components/messages/FriendsSidebar";
 import { ChatPanel, type Friend } from "@/components/messages/ChatPanel";
 import { useSocket } from "@/hooks/useSocket";
 
-export default function MessagesPage() {
+function MessagesPageInner() {
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? "";
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromParam = searchParams.get("from");
   const { on } = useSocket();
 
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
@@ -30,7 +32,7 @@ export default function MessagesPage() {
         duration: 12_000,
         action: {
           label: "Open chat",
-          onClick: () => router.push("/messages"),
+          onClick: () => router.push(`/messages?from=${msg.senderId}`),
         },
       });
     });
@@ -49,7 +51,7 @@ export default function MessagesPage() {
         duration: 10_000,
         action: {
           label: "Open chat",
-          onClick: () => router.push("/messages"),
+          onClick: () => router.push(`/messages?from=${msg.senderId}`),
         },
       });
     });
@@ -86,6 +88,7 @@ export default function MessagesPage() {
           <FriendsSidebar
             activeFriendId={selectedFriend?.id ?? null}
             onSelectFriend={handleSelectFriend}
+            autoOpenId={fromParam}
           />
         </div>
 
@@ -139,6 +142,7 @@ export default function MessagesPage() {
               <FriendsSidebar
                 activeFriendId={selectedFriend?.id ?? null}
                 onSelectFriend={handleSelectFriend}
+                autoOpenId={fromParam}
               />
             </motion.div>
           ) : (
@@ -163,5 +167,13 @@ export default function MessagesPage() {
         </AnimatePresence>
       </div>
     </motion.div>
+  );
+}
+
+export default function MessagesPage() {
+  return (
+    <Suspense>
+      <MessagesPageInner />
+    </Suspense>
   );
 }

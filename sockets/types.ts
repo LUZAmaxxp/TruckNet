@@ -39,6 +39,7 @@ export interface VoiceMessageAlert {
 export interface StressSignalAlert {
   id: string;
   userId: string;
+  senderName: string | null;
   latitude: number;
   longitude: number;
   createdAt: Date;
@@ -66,6 +67,40 @@ export interface TextMessageAlert {
   createdAt: Date;
 }
 
+export interface CallIncomingAlert {
+  roomName: string;
+  type: "voice" | "video";
+  callerName: string;
+  callerAvatar: string | null;
+  callerUserId: string;
+  liveKitUrl: string;
+  /** Pre-generated LiveKit JWT for the callee — avoids a second round-trip */
+  calleeToken: string;
+}
+
+export interface CallDeclinedAlert {
+  roomName: string;
+}
+
+export interface CallMissedAlert {
+  roomName: string;
+  callerName: string;
+}
+
+export interface CallEndedAlert {
+  roomName: string;
+  duration: number | null;
+}
+
+export interface FleetDriverUpdate {
+  userId: string;
+  name: string | null;
+  profileImageUrl: string | null;
+  latitude: number;
+  longitude: number;
+  updatedAt: string;
+}
+
 export interface ServerToClientEvents {
   nearby_driver_update: (drivers: NearbyDriverEntry[]) => void;
   voice_message_received: (message: VoiceMessageAlert) => void;
@@ -73,6 +108,11 @@ export interface ServerToClientEvents {
   stress_signal_alert: (signal: StressSignalAlert) => void;
   friend_request_received: (payload: FriendRequestAlert) => void;
   friend_request_accepted: (payload: FriendRequestAcceptedAlert) => void;
+  call_incoming: (payload: CallIncomingAlert) => void;
+  call_declined: (payload: CallDeclinedAlert) => void;
+  call_missed: (payload: CallMissedAlert) => void;
+  call_ended: (payload: CallEndedAlert) => void;
+  driver_location_updated: (driver: FleetDriverUpdate) => void;
   error: (payload: { error: string; details?: ZodIssue[] }) => void;
 }
 

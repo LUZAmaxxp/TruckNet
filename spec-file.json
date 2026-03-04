@@ -1,8 +1,8 @@
 {
   "project": {
-    "name": "TruckConnect",
+    "name": "TruckNet",
     "type": "Real-Time Web Communication Platform",
-    "description": "A real-time interpersonal communication system for truck drivers enabling geolocation-based discovery, voice messaging, emergency stress signaling, friend requests, and driver profiles with avatars."
+    "description": "A real-time interpersonal communication system for truck drivers enabling geolocation-based discovery, voice/video calling, voice and text messaging, emergency SOS alerts with Kafka-powered fan-out, friend management, and driver profiles with avatars."
   },
 
   "tech_stack": {
@@ -10,18 +10,32 @@
       "Next.js 14 (App Router)",
       "Tailwind CSS",
       "shadcn/ui",
-      "Socket.io Client",
+      "Ably Realtime SDK (client)",
+      "LiveKit Components React (voice/video rooms)",
       "MediaRecorder API",
       "Leaflet / react-leaflet (interactive map)",
-      "Sonner (toast notifications)"
+      "Sonner (toast notifications)",
+      "Browser Notifications API (SOS desktop alerts)"
     ],
     "backend": [
       "Next.js Route Handlers",
       "Auth.js v5 (Credentials provider, JWT sessions)",
-      "Socket.io Server (custom server.ts, standalone port)",
+      "Ably REST (server-side pub/sub)",
+      "LiveKit Server SDK (room management + JWT tokens)",
+      "KafkaJS v2 (Kafka producer in API routes)",
       "Drizzle ORM",
       "PostgreSQL",
       "Zod"
+    ],
+    "infrastructure": [
+      "Docker + docker-compose",
+      "Confluent Kafka (KRaft mode, CP-Kafka 7.4.0)",
+      "Kafka UI (provectuslabs/kafka-ui)",
+      "LiveKit Server (SFU)",
+      "PostgreSQL 16"
+    ],
+    "workers": [
+      "stress-signal-consumer.ts — KafkaJS consumer, fans out SOS alerts to nearby drivers via Ably"
     ]
   },
 
@@ -34,44 +48,36 @@
       "Enforce database-safe payloads",
       "Type inference via z.infer<>"
     ],
-
     "schemas": {
-
       "UserRegisterSchema": {
         "file": "schemas/user.schema.ts",
         "zod": "z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(8) })"
       },
-
       "UserLoginSchema": {
         "file": "schemas/user.schema.ts",
         "zod": "z.object({ email: z.string().email(), password: z.string().min(8) })"
       },
-
       "LocationUpdateSchema": {
         "file": "schemas/location.schema.ts",
         "zod": "z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) })"
       },
-
       "VoiceMessageSchema": {
         "file": "schemas/voice.schema.ts",
         "zod": "z.object({ receiverId: z.string().uuid(), audioUrl: z.string().url(), durationSeconds: z.number().max(60) })",
         "note": "API route also accepts { tag, audioUrl, durationSeconds } and resolves tag to UUID before validation"
       },
-
       "StressSignalSchema": {
         "file": "schemas/stress.schema.ts",
         "zod": "z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) })"
       },
-
       "TagInputSchema": {
         "file": "schemas/tag.schema.ts",
         "zod": "z.string().regex(/^[a-zA-Z0-9_]+#[0-9]{4}$/)",
         "note": "Validates driver tag format e.g. john#1234. Used in user lookup and voice message send."
       },
-
       "EnvSchema": {
         "file": "schemas/env.schema.ts",
-        "zod": "z.object({ DATABASE_URL: z.string().url(), NEXTAUTH_SECRET: z.string().min(10), NEXTAUTH_URL: z.string().url(), SOCKET_PORT: z.string() })"
+        "zod": "z.object({ DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, SOCKET_PORT, ABLY_API_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, KAFKA_BROKERS, KAFKA_ENABLED })"
       }
     }
   },
@@ -89,7 +95,7 @@
       "provider": "Auth.js v5 Credentials",
       "session_strategy": "JWT",
       "registration": "POST /api/auth/register — hashes password with bcrypt, auto-assigns unique tag (name#XXXX)",
-      "socket_auth": "GET /api/auth/socket-token — issues raw JWT for socket handshake"
+      "ably_token": "GET /api/auth/ably-token — issues signed Ably TokenRequest; client never receives raw API key"
     },
 
     "user_profile": {
@@ -104,11 +110,9 @@
       "radius_km_default": 50,
       "stale_threshold_minutes": 5,
       "distance_calculation": "Haversine formula (lib/haversine.ts)",
-      "real_time_source": "In-memory location store (sockets/store/location.store.ts)",
       "http_source": "GET /api/drivers/nearby — enriched with name, profileImageUrl, distanceKm",
-      "location_persist": "POST /api/drivers/location — upserts to driver_locations table",
-      "broadcast_interval_seconds": 20,
-      "socket_payload_fields": ["userId", "latitude", "longitude", "updatedAt", "name", "profileImageUrl", "distanceKm"]
+      "location_persist": "POST /api/drivers/location — upserts to driver_locations table + publishes nearby_driver_update via Ably",
+      "broadcast_interval_seconds": 20
     },
 
     "map": {
@@ -117,10 +121,11 @@
       "features": [
         "Current user marker (blue pulsing dot)",
         "Nearby driver markers (grey dot or avatar circle, orange when selected)",
-        "Click marker → Leaflet popup with driver name, distance, Send Voice Message button",
-        "Selected driver overlay card (bottom of screen) with Send Voice Message button",
+        "Click marker — popup with driver name, distance, Send Voice Message button",
+        "Selected driver overlay card with Send Voice Message button",
         "Auto-recenters on first geolocation fix",
-        "Refreshes every 20 seconds via WebSocket + HTTP"
+        "Refreshes every 20 seconds",
+        "?focus=<userId> query param — auto-selects and pans to a specific driver (used by friends location button)"
       ]
     },
 
@@ -131,17 +136,46 @@
       "send": "POST /api/voice-messages — accepts { receiverId, audioUrl, durationSeconds } or { tag, audioUrl, durationSeconds }",
       "inbox": "GET /api/voice-messages — returns received messages with sender info",
       "mark_listened": "PATCH /api/voice-messages/[id]/status",
-      "real_time_notify": "socket event voice_message_received emitted to receiver",
+      "real_time_notify": "Ably event voice_message_received on user:<receiverId>",
       "status_enum": ["delivered", "listened"]
     },
 
+    "text_messaging": {
+      "send": "POST /api/text-messages",
+      "list": "GET /api/text-messages?with=<userId>",
+      "real_time_notify": "Ably event text_message_received on user:<receiverId>",
+      "status_enum": ["delivered", "read"]
+    },
+
+    "calls": {
+      "description": "Real-time 1-on-1 voice and video calling powered by LiveKit SFU",
+      "initiate": "POST /api/calls/initiate — verifies friendship, auto-expires stale ongoing records via LiveKit room participant check, creates LiveKit room, returns { roomName, token, liveKitUrl }",
+      "token": "GET /api/calls/[roomName] — issues a LiveKit JWT for an existing room",
+      "end": "DELETE /api/calls/[roomName] — marks call completed, notifies other participant via Ably call_ended",
+      "decline": "POST /api/calls/[roomName]/decline — marks call declined, notifies caller via Ably call_declined",
+      "incoming_ui": "IncomingCallModal — full-screen overlay triggered by call_incoming Ably event",
+      "active_badge": "ActiveCallBadge — floating badge shown when user navigates away from call screen",
+      "stale_call_cleanup": "On every POST /api/calls/initiate: caller's own ongoing records are unconditionally expired; callee's records are checked against LiveKit for live participants before 409",
+      "call_types": ["voice", "video"],
+      "status_enum": ["ongoing", "completed", "missed", "declined"],
+      "real_time_events": {
+        "call_incoming": "Sent to callee with roomName, callerName, callerAvatar, pre-generated calleeToken",
+        "call_declined": "Sent to caller when callee declines",
+        "call_ended": "Sent to the other participant when one side ends the call",
+        "call_missed": "Sent to callee if caller ends before callee answers"
+      }
+    },
+
     "stress_signal": {
-      "description": "Emergency alert broadcast to all nearby drivers within 50 km",
-      "send": "POST /api/stress-signals",
+      "description": "Emergency SOS alert broadcast to all online drivers via Kafka + Ably fan-out",
+      "send": "POST /api/stress-signals — inserts to DB, produces Kafka message (when KAFKA_ENABLED=true)",
       "list_active": "GET /api/stress-signals/active",
       "resolve": "PATCH /api/stress-signals/[id]/resolve",
       "expiration_minutes": 30,
-      "real_time_notify": "socket event stress_signal_alert emitted to nearby drivers",
+      "kafka_topic": "trucknet.stress-signals (3 partitions, 7-day retention)",
+      "kafka_dlq": "trucknet.stress-signals.dlq (1 partition, 30-day retention)",
+      "worker": "workers/stress-signal-consumer.ts — validates payload, queries driver locations, haversine-filters to ≤50 km, fan-out via Ably to each nearby driver's private channel + broadcast on stress:alerts",
+      "notification_ui": "SosAlertListener component (mounted in protected layout) — shows Sonner toast + native browser Notification API push on stress_signal_alert event; suppressed for the sender",
       "status_enum": ["active", "resolved"]
     },
 
@@ -151,48 +185,65 @@
       "list": "GET /api/friends/list — returns accepted friends and pending incoming requests",
       "accept": "PATCH /api/friends/[id]/accept",
       "reject": "PATCH /api/friends/[id]/reject",
+      "location": "GET /api/friends/[id]/location — returns friend's last known GPS coordinates and timestamp (403 if not friends)",
+      "friend_card_actions": ["Voice call (LiveKit)", "Text message", "Video call (LiveKit)", "View location (inline expand + View on Map link)"],
       "real_time_notify": [
-        "socket event friend_request_received emitted to receiver on send",
-        "socket event friend_request_accepted emitted to original sender on accept"
+        "Ably event friend_request_received to receiver on send",
+        "Ably event friend_request_accepted to original sender on accept"
       ],
       "status_enum": ["pending", "accepted", "rejected"]
     }
   },
 
+  "kafka_architecture": {
+    "broker": "confluentinc/cp-kafka:7.4.0 (KRaft mode, no ZooKeeper)",
+    "cluster_id": "MkU3OEVBNTcwNTJENDM2Qk",
+    "listeners": {
+      "INTERNAL": "kafka:29092 — Docker-to-Docker (app container, worker, kafka-ui)",
+      "EXTERNAL": "localhost:9092 — host machine access (local npm run dev)"
+    },
+    "topics": {
+      "trucknet.stress-signals": "3 partitions, replicationFactor 1, 7-day retention. Keyed by signal ID.",
+      "trucknet.stress-signals.dlq": "1 partition, replicationFactor 1, 30-day retention. Receives messages that fail processing."
+    },
+    "producer": "lib/kafka.ts — getProducer() singleton, idempotent, lazy connect. Skipped when KAFKA_ENABLED=false (local dev without broker).",
+    "consumer": "workers/stress-signal-consumer.ts — consumer group stress-worker. Payload validated with Zod. Parse errors → DLQ (no re-throw). Delivery errors → DLQ + re-throw for KafkaJS retry. Graceful SIGTERM/SIGINT shutdown.",
+    "ui": "provectuslabs/kafka-ui at http://localhost:8080",
+    "env_vars": {
+      "KAFKA_BROKERS": "Comma-separated broker list. localhost:9092 for local dev, kafka:29092 inside Docker.",
+      "KAFKA_ENABLED": "true|false. Set false in local dev to skip produce entirely. Set true in Docker."
+    }
+  },
+
   "real_time_architecture": {
-    "technology": "Socket.io v4",
-    "server": "Standalone custom server (server.ts) on SOCKET_PORT",
-    "auth_middleware": "JWT decoded via Auth.js decode(), userId injected into socket.data",
-    "in_memory_store": {
-      "file": "sockets/store/location.store.ts",
-      "fields": ["userId", "latitude", "longitude", "socketId", "updatedAt", "name", "profileImageUrl"],
-      "note": "name and profileImageUrl fetched from DB once per connection and cached"
-    },
-
-    "client_events": {
-      "update_location": "LocationUpdateSchema — updates store, recomputes nearby, emits nearby_driver_update",
-      "send_voice_message": "VoiceMessageSchema — persists to DB, emits voice_message_received to receiver",
-      "send_stress_signal": "StressSignalSchema — persists to DB, emits stress_signal_alert to nearby drivers"
-    },
-
-    "server_events": {
-      "nearby_driver_update": "NearbyDriverEntry[] — includes name, profileImageUrl, distanceKm",
-      "voice_message_received": "VoiceMessageAlert — id, senderId, audioUrl, durationSeconds, createdAt",
-      "stress_signal_alert": "StressSignalAlert — id, userId, latitude, longitude, createdAt",
-      "friend_request_received": "FriendRequestAlert — requestId, fromUserId, fromUserName, fromUserTag",
-      "friend_request_accepted": "FriendRequestAcceptedAlert — requestId, friendId, friendName, friendTag",
-      "error": "{ error: string, details?: ZodIssue[] }"
-    },
-
+    "technology": "Ably Pub/Sub",
+    "auth_strategy": "Ably Token Auth — clients fetch signed TokenRequest from GET /api/auth/ably-token",
     "client_hook": {
       "file": "hooks/useSocket.ts",
       "features": [
-        "Async JWT fetch before io() connection",
-        "Emit queue — buffers emit() calls made during JWT fetch window, flushed once socket is created",
-        "onConnect(cb) — fires callback on every connect/reconnect, immediately if already connected",
+        "One Ably.Realtime instance per component (singleton pattern via useRef)",
         "Typed on() / emit() wrappers",
-        "Auto-reconnect with exponential backoff"
+        "Re-subscribes automatically on every Ably reconnection",
+        "emit() is a no-op — all client→server data travels over REST",
+        "SocketProvider is a passthrough wrapper kept for API compatibility"
       ]
+    },
+    "channel_topology": {
+      "user:<userId>": ["nearby_driver_update", "voice_message_received", "text_message_received", "friend_request_received", "friend_request_accepted", "call_incoming", "call_declined", "call_missed", "call_ended", "error"],
+      "stress:alerts": ["stress_signal_alert"]
+    },
+    "server_events": {
+      "nearby_driver_update": "NearbyDriverEntry[] — userId, latitude, longitude, updatedAt, name, profileImageUrl, distanceKm",
+      "voice_message_received": "VoiceMessageAlert — id, senderId, senderName, audioUrl, durationSeconds, createdAt",
+      "text_message_received": "TextMessageAlert — id, senderId, senderName, content, createdAt",
+      "stress_signal_alert": "StressSignalAlert — id, userId, senderName, latitude, longitude, createdAt",
+      "friend_request_received": "FriendRequestAlert — requestId, fromUserId, fromUserName, fromUserTag",
+      "friend_request_accepted": "FriendRequestAcceptedAlert — requestId, friendId, friendName, friendTag",
+      "call_incoming": "CallIncomingAlert — roomName, type, callerName, callerAvatar, callerUserId, liveKitUrl, calleeToken",
+      "call_declined": "{ roomName }",
+      "call_ended": "{ roomName, endedByUserId }",
+      "call_missed": "{ roomName }",
+      "error": "{ error: string, details?: ZodIssue[] }"
     }
   },
 
@@ -200,7 +251,7 @@
     "auth": [
       "POST /api/auth/register",
       "GET|POST /api/auth/[...nextauth]",
-      "GET /api/auth/socket-token"
+      "GET /api/auth/ably-token"
     ],
     "profile": [
       "GET /api/profile",
@@ -220,6 +271,10 @@
       "GET /api/voice-messages",
       "PATCH /api/voice-messages/[id]/status"
     ],
+    "text_messages": [
+      "POST /api/text-messages",
+      "GET /api/text-messages"
+    ],
     "upload": [
       "POST /api/upload/audio"
     ],
@@ -232,7 +287,17 @@
       "POST /api/friends/request",
       "GET /api/friends/list",
       "PATCH /api/friends/[id]/accept",
-      "PATCH /api/friends/[id]/reject"
+      "PATCH /api/friends/[id]/reject",
+      "GET /api/friends/[id]/location"
+    ],
+    "calls": [
+      "POST /api/calls/initiate",
+      "GET /api/calls/[roomName]",
+      "DELETE /api/calls/[roomName]",
+      "POST /api/calls/[roomName]/decline"
+    ],
+    "health": [
+      "GET /api/health"
     ]
   },
 
@@ -243,11 +308,12 @@
     ],
     "protected": [
       "/dashboard — location broadcast, nearby drivers list, real-time alerts",
-      "/map — Leaflet interactive map with driver markers and click-to-message",
-      "/messages — voice message inbox and send (by UUID or tag#XXXX)",
-      "/friends — friend requests, pending list, accepted friends",
+      "/map — Leaflet interactive map; ?focus=<userId> auto-selects a specific driver",
+      "/messages — voice message inbox + send; text message conversations",
+      "/friends — friend list with call/message/location actions; pending requests",
       "/profile — view/edit name, upload avatar, view tag",
-      "/stress — send emergency signal, view and resolve active signals"
+      "/stress — send SOS signal, view and resolve active signals",
+      "/calls/[roomName] — LiveKit voice/video call room; ?type=voice|video"
     ]
   },
 
@@ -258,8 +324,8 @@
       "name": "text not null",
       "email": "text unique not null",
       "password_hash": "text not null",
-      "tag": "varchar(20) unique not null — auto-assigned e.g. john#1234",
-      "tag_number": "integer not null — the 4-digit suffix",
+      "tag": "varchar(20) unique not null",
+      "tag_number": "integer not null",
       "profile_image_url": "varchar(255) nullable",
       "created_at": "timestamp with timezone"
     },
@@ -283,6 +349,16 @@
       "status": "enum(delivered, listened) default delivered"
     },
 
+    "text_messages": {
+      "id": "uuid (pk)",
+      "sender_id": "uuid fk users.id (cascade delete)",
+      "receiver_id": "uuid fk users.id (cascade delete)",
+      "content": "text",
+      "status": "enum(delivered, read) default delivered",
+      "created_at": "timestamp with timezone",
+      "indexes": ["sender_id", "receiver_id", "created_at"]
+    },
+
     "stress_signals": {
       "id": "uuid (pk)",
       "user_id": "uuid fk users.id (cascade delete)",
@@ -300,17 +376,33 @@
       "status": "enum(pending, accepted, rejected) default pending",
       "created_at": "timestamp with timezone",
       "constraints": ["unique(sender_id, receiver_id)"]
+    },
+
+    "call_history": {
+      "id": "uuid (pk)",
+      "room_name": "varchar(100) unique not null",
+      "caller_id": "uuid fk users.id (set null on delete)",
+      "callee_id": "uuid fk users.id (set null on delete)",
+      "call_type": "enum(voice, video)",
+      "status": "enum(ongoing, completed, missed, declined) default ongoing",
+      "started_at": "timestamp with timezone nullable",
+      "ended_at": "timestamp with timezone nullable",
+      "duration_seconds": "integer nullable",
+      "created_at": "timestamp with timezone",
+      "indexes": ["caller_id", "callee_id", "created_at"]
     }
   },
 
   "security_requirements": [
     "All API routes protected by Auth.js session check",
     "All API inputs validated with Zod before processing",
-    "All socket events validated with Zod before processing",
-    "Socket connections authenticated via JWT (Auth.js socket-token endpoint)",
     "Passwords hashed with bcrypt",
     "HTTPS only in production",
-    "Environment variables validated at startup via EnvSchema"
+    "Environment variables validated at startup via EnvSchema",
+    "Ably Token Auth — clients never receive the raw Ably API key",
+    "LiveKit JWT tokens scoped to a single room with 8-hour TTL",
+    "Friend-only call restriction — POST /api/calls/initiate verifies accepted friendship",
+    "Friend-only location restriction — GET /api/friends/[id]/location returns 403 if not friends"
   ],
 
   "non_functional_requirements": {
@@ -319,7 +411,9 @@
     "location_broadcast_interval_seconds": 20,
     "nearby_radius_km": 50,
     "stale_location_threshold_minutes": 5,
-    "scalable_socket_architecture": true,
+    "kafka_sos_fan_out": "Decoupled from API response — produce is fire-and-forget, consumer handles delivery",
+    "kafka_consumer_scaling": "Horizontal scaling with --scale stress-worker=N (all instances share stress-worker consumer group)",
+    "scalable_architecture": true,
     "redis_adapter_ready": true
   }
 }
