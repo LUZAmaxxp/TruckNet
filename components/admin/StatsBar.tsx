@@ -1,6 +1,6 @@
 "use client";
 
-import { Users, Wifi, AlertTriangle, PhoneCall, MessageSquare, PhoneMissed } from "lucide-react";
+import { Users, Wifi, AlertTriangle, PhoneCall, MessageSquare, PhoneMissed, Cpu } from "lucide-react";
 import type { AdminStats } from "@/app/(admin)/admin/page";
 
 const SKELETON = "h-4 w-20 rounded animate-pulse" ;
@@ -66,6 +66,7 @@ export function StatsBar({ stats }: StatsBarProps) {
       <StatCard label="Ongoing Calls" value={stats?.ongoingCalls} icon={PhoneCall} accentColor="var(--slate)" loading={loading} />
       <StatCard label="Calls Today" value={stats?.totalCallsToday} icon={PhoneMissed} accentColor="var(--honey)" loading={loading} />
       <StatCard label="Messages Today" value={stats?.totalMessagesToday} icon={MessageSquare} accentColor="var(--slate)" loading={loading} />
+      <StatCard label="Sensor Alerts" value={stats?.sensorAlertCount} icon={Cpu} accentColor="var(--terra)" loading={loading} />
     </div>
   );
 }

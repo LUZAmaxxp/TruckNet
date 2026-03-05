@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: truckconnect_dev
       POSTGRES_DB: truckconnect
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -171,8 +171,54 @@ services:
       KAFKA_BROKERS: kafka:29092
       KAFKA_ENABLED: "true"
 
+  # ── MQTT Sensor Consumer (IoT worker) ──────────────────────────────
+  # Subscribes to MQTT, validates readings, persists to DB, fans out via Ably.
+  sensor-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: production
+      ABLY_API_KEY: ${ABLY_API_KEY}
+      MQTT_URL: mqtt://trucknet:${MQTT_PASSWORD}@mosquitto:1883
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_ENABLED: "false"
+
+  # ── Eclipse Mosquitto MQTT Broker ──────────────────────────────
+  # Receives sensor readings from ESP32 devices on port 1883.
+  # WebSocket listener on 9001 for browser-based debugging tools.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: trucknet-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./docker/mosquitto/passwd:/mosquitto/config/passwd:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: "mosquitto_sub -h localhost -t '$$SYS/#' -C 1 -u trucknet -P ${MQTT_PASSWORD} -W 3 || exit 1"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   postgres_data:
   uploads_data:
   kafka_data:
   redis_data:
+  mosquitto_data:
+  mosquitto_log:

@@ -26,6 +26,9 @@ const STRESS_EVENTS = new Set<EventName>(["stress_signal_alert"]);
 /** Events delivered on the shared "fleet:locations" channel (admin map) */
 const FLEET_EVENTS = new Set<EventName>(["driver_location_updated", "driver_route_set", "driver_route_cleared"]);
 
+/** Events delivered on the shared "admin:sensors" channel */
+const SENSOR_EVENTS = new Set<EventName>(["sensor_alert", "sensor_alert_acked", "fleet_sensor_update"]);
+
 interface SocketContextValue {
   on:          <E extends EventName>(event: E, handler: ServerToClientEvents[E]) => () => void;
   emit:        <E extends keyof ClientToServerEvents>(event: E, ...args: Parameters<ClientToServerEvents[E]>) => void;
@@ -65,6 +68,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     const userChannel   = realtime.channels.get(`user:${userId}`);
     const stressChannel = realtime.channels.get("stress:alerts");
     const fleetChannel  = realtime.channels.get("fleet:locations");
+    const sensorChannel = realtime.channels.get("admin:sensors");
 
     // Build one stable dispatcher per event — routes Ably messages into our
     // listener registry. Ably keeps exactly ONE subscription per event.
@@ -82,6 +86,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       "driver_location_updated",
       "driver_route_set",
       "driver_route_cleared",
+      // IoT sensor fleet events
+      "sensor_alert",
+      "sensor_alert_acked",
+      "fleet_sensor_update",
       "error",
     ];
 
@@ -95,6 +103,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         ? stressChannel
         : FLEET_EVENTS.has(event)
         ? fleetChannel
+        : SENSOR_EVENTS.has(event)
+        ? sensorChannel
         : userChannel;
       void channel.subscribe(event, dispatcher);
     }
@@ -111,6 +121,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       userChannel.unsubscribe();
       stressChannel.unsubscribe();
       fleetChannel.unsubscribe();
+      sensorChannel.unsubscribe();
       realtime.close();
       realtimeRef.current    = null;
       dispatchersRef.current = new Map();

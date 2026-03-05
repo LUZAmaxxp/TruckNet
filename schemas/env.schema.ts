@@ -15,10 +15,10 @@ export const EnvSchema = z.object({
     .url({ message: "NEXTAUTH_URL must be a valid URL" }),
   SOCKET_PORT: z.string({ required_error: "SOCKET_PORT is required" }).optional(),
   ABLY_API_KEY: z.string().min(1, { message: "ABLY_API_KEY is required" }),
-  // LiveKit – WebRTC SFU for voice/video calls
-  LIVEKIT_URL: z.string().url({ message: "LIVEKIT_URL must be a valid URL (e.g. wss://livekit.yourdomain.com)" }),
-  LIVEKIT_API_KEY: z.string().min(1, { message: "LIVEKIT_API_KEY is required" }),
-  LIVEKIT_API_SECRET: z.string().min(1, { message: "LIVEKIT_API_SECRET is required" }),
+  // LiveKit – WebRTC SFU for voice/video calls (Next.js app only, not required by workers)
+  LIVEKIT_URL: z.string().url({ message: "LIVEKIT_URL must be a valid URL (e.g. wss://livekit.yourdomain.com)" }).optional(),
+  LIVEKIT_API_KEY: z.string().min(1, { message: "LIVEKIT_API_KEY is required" }).optional(),
+  LIVEKIT_API_SECRET: z.string().min(1, { message: "LIVEKIT_API_SECRET is required" }).optional(),
   // Kafka – message queue for critical notifications (SOS alerts, etc.)
   // Comma-separated list of broker addresses, e.g. "kafka:9092" or
   // "broker1:9092,broker2:9092" for multi-broker production clusters.
@@ -30,6 +30,10 @@ export const EnvSchema = z.object({
   // Redis — optional; enables OSRM route result caching for performance.
   // When unset, all route requests go directly to OSRM (correct but slower).
   REDIS_URL: z.string().url().optional(),
+  // MQTT — Eclipse Mosquitto broker for IoT sensor data ingestion
+  // Optional in local dev: only required when running the sensor-consumer worker.
+  MQTT_URL:      z.string().url({ message: "MQTT_URL must be a valid URL, e.g. mqtt://trucknet:password@localhost:1883" }).optional(),
+  MQTT_PASSWORD: z.string().min(8, { message: "MQTT_PASSWORD must be at least 8 characters" }).optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

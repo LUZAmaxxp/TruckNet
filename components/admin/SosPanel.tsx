@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
-import { useSocket } from "@/hooks/useSocket";
+import { useAdminSosStream } from "@/hooks/useAdminSosStream";
 import { SosAlertCard } from "@/components/admin/SosAlertCard";
 import type { SosAdminEntry } from "@/app/(admin)/admin/page";
 
@@ -15,42 +14,12 @@ interface SosPanelProps {
 
 /**
  * SosPanel — right sidebar panel on admin home showing active SOS alerts.
- * Subscribes to stress:alerts Ably channel and prepends new alerts in real-time.
+ * Pushes real-time updates via Kafka → SSE (see /api/admin/sos/stream).
  */
 export function SosPanel({ alerts, onResolve, onNewAlert, onViewOnMap }: SosPanelProps) {
-  const { on } = useSocket();
-
-  useEffect(() => {
-    const handler = (payload: unknown) => {
-      const p = payload as {
-        signalId?: string;
-        userId?: string;
-        senderName?: string;
-        senderTag?: string;
-        senderAvatar?: string | null;
-        latitude?: number;
-        longitude?: number;
-        timestamp?: string;
-      };
-      if (!p.signalId || !p.userId) return;
-
-      const newAlert: SosAdminEntry = {
-        id: p.signalId,
-        userId: p.userId,
-        senderName: p.senderName ?? "Unknown",
-        senderTag: p.senderTag ?? "",
-        senderAvatar: p.senderAvatar ?? null,
-        latitude: p.latitude ?? 0,
-        longitude: p.longitude ?? 0,
-        status: "active",
-        createdAt: p.timestamp ?? new Date().toISOString(),
-      };
-      onNewAlert(newAlert);
-    };
-
-    const unsub = on("stress_signal_alert", handler);
-    return unsub;
-  }, [on, onNewAlert]);
+  // Connect to the Kafka-backed SSE stream; new alerts are forwarded to the
+  // parent via the onNewAlert callback (prepend + stats refresh live there).
+  useAdminSosStream(onNewAlert);
 
   return (
     <div

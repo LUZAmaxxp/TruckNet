@@ -1,0 +1,19 @@
+# CRITICAL — never commit real WiFi or MQTT passwords
+config/credentials.h
+
+# Arduino IDE build artifacts
+build/
+.cache/
+*.elf
+*.bin
+*.map
+
+# PlatformIO
+.pio/
+.vscode/
+
+# Python tools
+__pycache__/
+*.pyc
+tools/venv/
+*.egg-info/

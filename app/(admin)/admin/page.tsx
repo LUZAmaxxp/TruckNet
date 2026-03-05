@@ -12,6 +12,7 @@ export type AdminStats = {
   ongoingCalls: number;
   totalCallsToday: number;
   totalMessagesToday: number;
+  sensorAlertCount?: number;
 };
 
 export type LiveDriverEntry = {

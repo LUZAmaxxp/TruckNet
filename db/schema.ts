@@ -5,6 +5,7 @@ import {
   text,
   varchar,
   integer,
+  real,
   timestamp,
   doublePrecision,
   index,
@@ -294,3 +295,104 @@ export const driverRoutes = pgTable(
 
 export type DriverRoute = InferSelectModel<typeof driverRoutes>;
 export type NewDriverRoute = InferInsertModel<typeof driverRoutes>;
+
+// ---------------------------------------------------------------------------
+// IoT Device + Sensor Enums
+// ---------------------------------------------------------------------------
+
+export const deviceStatusEnum = pgEnum("device_status", [
+  "online",
+  "offline",
+  "unknown",
+]);
+
+export const sensorAlertTypeEnum = pgEnum("sensor_alert_type", [
+  "temp_high",
+  "temp_low",
+  "humidity_high",
+  "vibration_high",
+]);
+
+export const sensorAlertStatusEnum = pgEnum("sensor_alert_status", [
+  "active",
+  "acknowledged",
+]);
+
+// ---------------------------------------------------------------------------
+// iot_devices
+// ---------------------------------------------------------------------------
+
+export const iotDevices = pgTable(
+  "iot_devices",
+  {
+    id:              uuid("id").primaryKey().defaultRandom(),
+    deviceId:        varchar("device_id", { length: 50 }).unique().notNull(),
+    driverId:        uuid("driver_id").references(() => users.id, { onDelete: "set null" }),
+    truckLabel:      varchar("truck_label", { length: 100 }).notNull(),
+    status:          deviceStatusEnum("status").notNull().default("unknown"),
+    lastSeenAt:      timestamp("last_seen_at", { withTimezone: true }),
+    firmwareVersion: varchar("firmware_version", { length: 20 }),
+    alertConfig:     json("alert_config").notNull().default({ temp_min_c: 2, temp_max_c: 8, humidity_max_pct: 85, vibration_max_g: 0.5 }),
+    createdAt:       timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    deviceIdIdx: index("iot_devices_device_id_idx").on(t.deviceId),
+    statusIdx:   index("iot_devices_status_idx").on(t.status),
+  })
+);
+
+// ---------------------------------------------------------------------------
+// sensor_readings
+// ---------------------------------------------------------------------------
+
+export const sensorReadings = pgTable(
+  "sensor_readings",
+  {
+    id:                 uuid("id").primaryKey().defaultRandom(),
+    deviceId:           varchar("device_id", { length: 50 }).notNull(),
+    recordedAt:         timestamp("recorded_at", { withTimezone: true }).notNull(),
+    temperatureC:       real("temperature_c").notNull(),
+    humidityPct:        real("humidity_pct").notNull(),
+    vibrationMagnitude: real("vibration_magnitude").notNull(),
+    accelX:             real("accel_x").notNull(),
+    accelY:             real("accel_y").notNull(),
+    accelZ:             real("accel_z").notNull(),
+  },
+  (t) => ({
+    deviceTimeIdx: index("sensor_readings_device_time_idx").on(t.deviceId, t.recordedAt),
+    timeIdx:       index("sensor_readings_time_idx").on(t.recordedAt),
+  })
+);
+
+// ---------------------------------------------------------------------------
+// sensor_alerts
+// ---------------------------------------------------------------------------
+
+export const sensorAlerts = pgTable(
+  "sensor_alerts",
+  {
+    id:          uuid("id").primaryKey().defaultRandom(),
+    deviceId:    varchar("device_id", { length: 50 }).notNull(),
+    driverId:    uuid("driver_id").references(() => users.id, { onDelete: "set null" }),
+    alertType:   sensorAlertTypeEnum("alert_type").notNull(),
+    value:       real("value").notNull(),
+    threshold:   real("threshold").notNull(),
+    status:      sensorAlertStatusEnum("status").notNull().default("active"),
+    triggeredAt: timestamp("triggered_at", { withTimezone: true }).notNull(),
+    ackedAt:     timestamp("acked_at", { withTimezone: true }),
+    ackedBy:     uuid("acked_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    deviceStatusIdx: index("sensor_alerts_device_status_idx").on(t.deviceId, t.status),
+    statusTimeIdx:   index("sensor_alerts_status_time_idx").on(t.status, t.triggeredAt),
+  })
+);
+
+export type IotDevice = InferSelectModel<typeof iotDevices>;
+export type NewIotDevice = InferInsertModel<typeof iotDevices>;
+
+export type SensorReading = InferSelectModel<typeof sensorReadings>;
+export type NewSensorReading = InferInsertModel<typeof sensorReadings>;
+
+export type SensorAlert = InferSelectModel<typeof sensorAlerts>;
+export type NewSensorAlert = InferInsertModel<typeof sensorAlerts>;

@@ -1,7 +1,9 @@
 "use client";
 
-import { AlertTriangle, MapPin, CheckCircle } from "lucide-react";
+import { AlertTriangle, MapPin, CheckCircle, Video, MessageSquare, Loader2 } from "lucide-react";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import type { SosAdminEntry } from "@/app/(admin)/admin/page";
 
 function formatElapsed(dateStr: string): string {
@@ -24,7 +26,9 @@ interface SosAlertCardProps {
  * SosAlertCard — individual SOS alert card used in SosPanel and /admin/sos.
  */
 export function SosAlertCard({ alert, onResolve, onViewOnMap }: SosAlertCardProps) {
+  const router = useRouter();
   const [resolving, setResolving] = useState(false);
+  const [calling, setCalling] = useState(false);
   const isActive = alert.status === "active";
 
   const handleResolve = async () => {
@@ -34,6 +38,35 @@ export function SosAlertCard({ alert, onResolve, onViewOnMap }: SosAlertCardProp
     } finally {
       setResolving(false);
     }
+  };
+
+  const handleVideoCall = async () => {
+    setCalling(true);
+    try {
+      const res = await fetch("/api/calls/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ calleeId: alert.userId, type: "video" }),
+      });
+      const json = (await res.json()) as { error?: string; roomName?: string; token?: string; liveKitUrl?: string };
+      if (!res.ok || !json.roomName) {
+        toast.error(json.error ?? "Failed to start video call");
+        return;
+      }
+      sessionStorage.setItem(
+        "trucknet_active_call",
+        JSON.stringify({ roomName: json.roomName, type: "video", token: json.token, liveKitUrl: json.liveKitUrl, role: "caller" })
+      );
+      router.push(`/admin/calls/${json.roomName}?type=video`);
+    } catch {
+      toast.error("Could not start video call. Please try again.");
+    } finally {
+      setCalling(false);
+    }
+  };
+
+  const handleMessage = () => {
+    router.push(`/admin/messages/${alert.userId}`);
   };
 
   return (
@@ -83,7 +116,44 @@ export function SosAlertCard({ alert, onResolve, onViewOnMap }: SosAlertCardProp
           </p>
 
           {/* Actions */}
-          <div className="flex gap-2 mt-2 flex-wrap">
+          <div className="flex gap-1.5 mt-2 flex-wrap">
+            {/* Video call */}
+            <button
+              onClick={() => void handleVideoCall()}
+              disabled={calling}
+              title={`Video call ${alert.senderName}`}
+              className="flex items-center gap-1 rounded-[8px] px-2.5 py-1 font-body text-[12px] font-semibold transition-colors disabled:opacity-50"
+              style={{ background: "var(--navy-lt)", color: "var(--navy)" }}
+            >
+              {calling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Video className="h-3 w-3" />}
+              Call
+            </button>
+
+            {/* Message */}
+            <button
+              onClick={handleMessage}
+              title={`Message ${alert.senderName}`}
+              className="flex items-center gap-1 rounded-[8px] px-2.5 py-1 font-body text-[12px] font-semibold transition-colors"
+              style={{ background: "var(--slate-lt)", color: "var(--slate)" }}
+            >
+              <MessageSquare className="h-3 w-3" />
+              Message
+            </button>
+
+            {/* View on Map */}
+            {onViewOnMap && (
+              <button
+                onClick={() => onViewOnMap(alert.userId)}
+                title="View driver on map"
+                className="flex items-center gap-1 rounded-[8px] px-2.5 py-1 font-body text-[12px] font-semibold transition-colors"
+                style={{ background: "var(--base)", border: "1px solid var(--hairline)", color: "var(--ink)" }}
+              >
+                <MapPin className="h-3 w-3" />
+                Location
+              </button>
+            )}
+
+            {/* Resolve */}
             {isActive && (
               <button
                 onClick={() => void handleResolve()}
@@ -95,16 +165,7 @@ export function SosAlertCard({ alert, onResolve, onViewOnMap }: SosAlertCardProp
                 {resolving ? "Resolving…" : "Resolve"}
               </button>
             )}
-            {onViewOnMap && (
-              <button
-                onClick={() => onViewOnMap(alert.userId)}
-                className="flex items-center gap-1 rounded-[8px] px-2.5 py-1 font-body text-[12px] font-semibold transition-colors"
-                style={{ background: "var(--base)", border: "1px solid var(--hairline)", color: "var(--ink)" }}
-              >
-                <MapPin className="h-3 w-3" />
-                View on Map
-              </button>
-            )}
+
             {!isActive && (
               <span className="font-body text-[11px] font-semibold" style={{ color: "var(--sage)" }}>Resolved</span>
             )}

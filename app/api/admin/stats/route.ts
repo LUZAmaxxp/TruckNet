@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { count, eq, gt, sql } from "drizzle-orm";
 import { requireAdminSession } from "@/lib/auth-helpers";
 import { db } from "@/db";
-import { users, driverLocations, stressSignals, callHistory, textMessages } from "@/db/schema";
+import { users, driverLocations, stressSignals, callHistory, textMessages, sensorAlerts } from "@/db/schema";
 
 /**
  * GET /api/admin/stats
@@ -29,6 +29,7 @@ export async function GET() {
     [ongoingCallsRow],
     [callsTodayRow],
     [msgsTodayRow],
+    [sensorAlertRow],
   ] = await Promise.all([
     // Total registered drivers (excludes admins)
     db
@@ -65,14 +66,21 @@ export async function GET() {
       .select({ count: count() })
       .from(textMessages)
       .where(gt(textMessages.createdAt, todayStart)),
+
+    // Active sensor alerts (IoT container monitoring)
+    db
+      .select({ count: count() })
+      .from(sensorAlerts)
+      .where(eq(sensorAlerts.status, "active")),
   ]);
 
   return NextResponse.json({
-    totalDrivers: totalDriversRow.count,
-    onlineDrivers: onlineDriversRow.count,
-    activeSosAlerts: activeSosRow.count,
-    ongoingCalls: ongoingCallsRow.count,
-    totalCallsToday: callsTodayRow.count,
+    totalDrivers:     totalDriversRow.count,
+    onlineDrivers:    onlineDriversRow.count,
+    activeSosAlerts:  activeSosRow.count,
+    ongoingCalls:     ongoingCallsRow.count,
+    totalCallsToday:  callsTodayRow.count,
     totalMessagesToday: msgsTodayRow.count,
+    sensorAlertCount: sensorAlertRow?.count ?? 0,
   });
 }

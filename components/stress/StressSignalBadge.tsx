@@ -1,6 +1,9 @@
 "use client";
 
-import { AlertTriangle, MapPin, Clock } from "lucide-react";
+import { AlertTriangle, MapPin, Clock, Video, MessageSquare, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -22,6 +25,9 @@ interface StressSignalBadgeProps {
 }
 
 export function StressSignalBadge({ signal, isAlert }: StressSignalBadgeProps) {
+  const router = useRouter();
+  const [calling, setCalling] = useState(false);
+
   const createdAt = new Date(signal.createdAt);
   const minutesAgo = Math.round((Date.now() - createdAt.getTime()) / 60_000);
   const timeLabel = minutesAgo < 1 ? "just now" : `${minutesAgo}m ago`;
@@ -32,6 +38,39 @@ export function StressSignalBadge({ signal, isAlert }: StressSignalBadgeProps) {
         ? `${Math.round(signal.distanceKm * 1000)} m away`
         : `${signal.distanceKm.toFixed(1)} km away`
       : null;
+
+  const handleVideoCall = async () => {
+    setCalling(true);
+    try {
+      const res = await fetch("/api/calls/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ calleeId: signal.userId, type: "video" }),
+      });
+      const json = (await res.json()) as { error?: string; roomName?: string; token?: string; liveKitUrl?: string };
+      if (!res.ok || !json.roomName) {
+        toast.error(json.error ?? "Failed to start video call");
+        return;
+      }
+      sessionStorage.setItem(
+        "trucknet_active_call",
+        JSON.stringify({ roomName: json.roomName, type: "video", token: json.token, liveKitUrl: json.liveKitUrl, role: "caller" })
+      );
+      router.push(`/calls/${json.roomName}?type=video`);
+    } catch {
+      toast.error("Could not start video call. Please try again.");
+    } finally {
+      setCalling(false);
+    }
+  };
+
+  const handleMessage = () => {
+    router.push(`/messages?with=${signal.userId}`);
+  };
+
+  const handleViewOnMap = () => {
+    router.push(`/map?focus=${signal.userId}`);
+  };
 
   return (
     <Card
@@ -67,6 +106,38 @@ export function StressSignalBadge({ signal, isAlert }: StressSignalBadgeProps) {
               <span className="text-xs text-muted-foreground">{distanceLabel}</span>
             )}
           </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-1.5 mt-2 flex-wrap">
+            <button
+              onClick={() => void handleVideoCall()}
+              disabled={calling}
+              title="Video call this driver"
+              className="flex items-center gap-1 rounded-[8px] px-2.5 py-1 font-body text-[12px] font-semibold transition-colors disabled:opacity-50"
+              style={{ background: "var(--navy-lt)", color: "var(--navy)" }}
+            >
+              {calling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Video className="h-3 w-3" />}
+              Call
+            </button>
+            <button
+              onClick={handleMessage}
+              title="Message this driver"
+              className="flex items-center gap-1 rounded-[8px] px-2.5 py-1 font-body text-[12px] font-semibold transition-colors"
+              style={{ background: "var(--slate-lt)", color: "var(--slate)" }}
+            >
+              <MessageSquare className="h-3 w-3" />
+              Message
+            </button>
+            <button
+              onClick={handleViewOnMap}
+              title="View driver on map"
+              className="flex items-center gap-1 rounded-[8px] px-2.5 py-1 font-body text-[12px] font-semibold transition-colors"
+              style={{ background: "var(--base)", border: "1px solid var(--hairline)", color: "var(--ink)" }}
+            >
+              <MapPin className="h-3 w-3" />
+              Location
+            </button>
+          </div>
         </div>
 
         {/* Time + status */}
@@ -85,3 +156,4 @@ export function StressSignalBadge({ signal, isAlert }: StressSignalBadgeProps) {
     </Card>
   );
 }
+

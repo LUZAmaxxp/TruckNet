@@ -50,6 +50,13 @@
       "when": 1772655047368,
       "tag": "0006_bored_talon",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1772741136372,
+      "tag": "0007_cold_shooting_star",
+      "breakpoints": true
     }
   ]
 }

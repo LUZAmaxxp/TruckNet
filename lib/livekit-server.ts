@@ -31,6 +31,9 @@ let _roomService: RoomServiceClient | null = null;
 
 export function getRoomService(): RoomServiceClient {
   if (!_roomService) {
+    if (!env.LIVEKIT_URL || !env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET) {
+      throw new Error("LiveKit environment variables are not configured.");
+    }
     _roomService = new RoomServiceClient(
       wsToHttp(env.LIVEKIT_URL),
       env.LIVEKIT_API_KEY,
@@ -56,6 +59,9 @@ export async function generateLiveKitToken(
   userName: string,
   grants: Partial<VideoGrant> = {}
 ): Promise<string> {
+  if (!env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET) {
+    throw new Error("LiveKit environment variables are not configured.");
+  }
   const at = new AccessToken(env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET, {
     identity: userId,
     name: userName,

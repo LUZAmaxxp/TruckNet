@@ -1,0 +1,6 @@
+# passwd.example
+# This file is a placeholder. The real `passwd` file is generated with mosquitto_passwd.
+# See README.md for instructions.
+# The generated passwd file contains only the bcrypt hash — never the plain password.
+# Example format (do not use these values):
+# trucknet:$7$101$placeholder_hash_here==

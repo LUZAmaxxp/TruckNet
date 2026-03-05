@@ -121,6 +121,55 @@ export interface DriverRouteClearedPayload {
   reason: "arrived" | "cancelled";
 }
 
+// ── Sensor event payloads ─────────────────────────────────────────────────────
+
+export interface SensorReadingPayload {
+  deviceId: string;
+  recordedAt: string;
+  temperatureC: number;
+  humidityPct: number;
+  vibrationMagnitude: number;
+}
+
+export interface SensorAlertPayload {
+  alertId: string;
+  deviceId: string;
+  truckLabel: string;
+  alertType: "temp_high" | "temp_low" | "humidity_high" | "vibration_high";
+  value: number;
+  threshold: number;
+  triggeredAt: string;
+}
+
+export interface SensorAlertAckedPayload {
+  alertId: string;
+  deviceId: string;
+  ackedBy: string;
+}
+
+export interface DeviceStatusPayload {
+  deviceId: string;
+  status: "online" | "offline" | "unknown";
+  at: string;
+}
+
+export interface FleetSensorUpdatePayload {
+  devices: {
+    deviceId: string;
+    truckLabel: string;
+    status: "online" | "offline" | "unknown";
+    lastSeenAt: string | null;
+    firmwareVersion: string | null;
+    activeAlertCount: number;
+    latestReading: {
+      temperatureC: number;
+      humidityPct: number;
+      vibrationMagnitude: number;
+      recordedAt: string;
+    } | null;
+  }[];
+}
+
 export interface ServerToClientEvents {
   nearby_driver_update: (drivers: NearbyDriverEntry[]) => void;
   voice_message_received: (message: VoiceMessageAlert) => void;
@@ -135,6 +184,12 @@ export interface ServerToClientEvents {
   driver_location_updated: (driver: FleetDriverUpdate) => void;
   driver_route_set: (payload: DriverRouteSetPayload) => void;
   driver_route_cleared: (payload: DriverRouteClearedPayload) => void;
+  // IoT sensor events
+  sensor_reading: (payload: SensorReadingPayload) => void;
+  sensor_alert: (payload: SensorAlertPayload) => void;
+  sensor_alert_acked: (payload: SensorAlertAckedPayload) => void;
+  device_status: (payload: DeviceStatusPayload) => void;
+  fleet_sensor_update: (payload: FleetSensorUpdatePayload) => void;
   error: (payload: { error: string; details?: ZodIssue[] }) => void;
 }
 

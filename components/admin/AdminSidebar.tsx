@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
-import { LayoutDashboard, Users, AlertTriangle, PhoneCall, TruckIcon, MessageSquare, LogOut } from "lucide-react";
+import { LayoutDashboard, Users, AlertTriangle, PhoneCall, TruckIcon, MessageSquare, LogOut, Cpu } from "lucide-react";
 import { useSocket } from "@/hooks/useSocket";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/admin",          label: "Overview",     icon: LayoutDashboard, exact: true },
   { href: "/admin/drivers",  label: "Drivers",      icon: Users,           exact: false },
   { href: "/admin/sos",      label: "SOS Alerts",   icon: AlertTriangle,   exact: false },
+  { href: "/admin/sensors",  label: "Sensors",      icon: Cpu,             exact: false },
   { href: "/admin/messages", label: "Messages",     icon: MessageSquare,   exact: false },
   { href: "/admin/calls",    label: "Call History", icon: PhoneCall,       exact: false },
 ];
@@ -20,12 +21,14 @@ export function AdminSidebar() {
   const pathname = usePathname();
   const { on } = useSocket();
   const [activeSosBadge, setActiveSosBadge] = useState(0);
+  const [sensorAlertBadge, setSensorAlertBadge] = useState(0);
 
   useEffect(() => {
     fetch("/api/admin/stats")
       .then((r) => r.json())
-      .then((d: { activeSosAlerts?: number }) => {
+      .then((d: { activeSosAlerts?: number; sensorAlertCount?: number }) => {
         if (typeof d.activeSosAlerts === "number") setActiveSosBadge(d.activeSosAlerts);
+        if (typeof d.sensorAlertCount === "number") setSensorAlertBadge(d.sensorAlertCount);
       })
       .catch(() => undefined);
   }, []);
@@ -107,6 +110,18 @@ export function AdminSidebar() {
                   }}
                 >
                   {activeSosBadge > 99 ? "99+" : activeSosBadge}
+                </span>
+              )}
+              {/* Sensor alert badge */}
+              {label === "Sensors" && sensorAlertBadge > 0 && (
+                <span
+                  className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full font-mono text-[10px] font-bold animate-sos-beat px-1"
+                  style={{
+                    background: "var(--terra-lt)",
+                    color: "var(--terra)",
+                  }}
+                >
+                  {sensorAlertBadge > 99 ? "99+" : sensorAlertBadge}
                 </span>
               )}
             </Link>

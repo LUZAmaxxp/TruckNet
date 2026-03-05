@@ -1,0 +1,39 @@
+# TruckNet ESP32 — Required Arduino Libraries
+# Install all of these before attempting to compile.
+
+== BOARD SUPPORT (install first) ==
+Name:    ESP32 Arduino Core by Espressif Systems
+Version: 2.0.14
+Install: Arduino IDE → File → Preferences → Additional Board Manager URLs:
+         https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+         Then: Tools → Board → Boards Manager → search 'esp32' → Install 2.0.14
+
+== LIBRARIES ==
+Name:    PubSubClient
+Author:  Nick O'Leary
+Version: 2.8.0
+Install: Arduino IDE → Sketch → Include Library → Manage Libraries → search 'PubSubClient' → Install
+Purpose: MQTT client
+
+Name:    DHT sensor library
+Author:  Adafruit
+Version: 1.4.6
+Install: Manage Libraries → search 'DHT sensor library by Adafruit' → Install
+         Also install 'Adafruit Unified Sensor' when prompted
+Purpose: Read DHT22 temperature and humidity
+
+Name:    Adafruit MPU6050
+Author:  Adafruit
+Version: 2.2.6
+Install: Manage Libraries → search 'Adafruit MPU6050' → Install
+         Accept all dependency installs (Adafruit Unified Sensor, Adafruit BusIO)
+Purpose: Read accelerometer and gyroscope via I2C
+
+Name:    ArduinoJson
+Author:  Benoit Blanchon
+Version: 6.21.5  ← MUST be v6.x — do NOT install v7.x (different API)
+Install: Manage Libraries → search 'ArduinoJson' → install version 6.21.5
+Purpose: JSON serialization for MQTT payloads
+
+== PLATFORMIO ALTERNATIVE ==
+See platformio.ini in this directory.

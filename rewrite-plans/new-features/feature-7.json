@@ -1,0 +1,938 @@
+{
+  "meta": {
+    "id": "FEAT-007-FULL",
+    "project": "TruckNet",
+    "date": "2026-03-04",
+    "title": "IoT Container Sensor Monitoring — Full Implementation",
+    "description": "Two-part implementation plan. Part A: modify the Next.js monorepo to support IoT sensor data (DB schema, API routes, MQTT worker, admin dashboard UI). Part B: create a fully isolated esp32/ folder at the project root containing all firmware code the ESP32 needs to connect to the TruckNet backend. The agent must execute both parts completely.",
+    "execution_order": "Run subagents in priority order. SA-1 must finish before SA-2. SA-2 must finish before SA-3, SA-4, SA-5. SA-6 (ESP32 folder) can run in parallel with SA-3 through SA-5.",
+    "stack_context": {
+      "framework": "Next.js 14 App Router",
+      "orm": "Drizzle ORM + PostgreSQL",
+      "realtime": "Ably Pub/Sub",
+      "existing_workers": "workers/stress-signal-consumer.ts (KafkaJS pattern to follow)",
+      "design_system": "Warm Maritime Precision — navy #1C3A5E, sage #3A6B52, terra #B85039, honey #C98A2E, base #F7F5F1",
+      "fonts": "Bricolage Grotesque (display), Instrument Sans (body), JetBrains Mono (data/mono)",
+      "component_patterns": "PageHeader, StatCard, SectionTitle, btn-primary, badge-online, animate-live-pulse, animate-sos-beat — all already exist in codebase"
+    }
+  },
+
+  "subagents": [
+
+    {
+      "id": "SA-1",
+      "name": "Foundation Agent",
+      "priority": 1,
+      "title": "Database schema + Zod schemas + environment variables",
+      "description": "Add the three new DB tables, three new Zod schemas, and two new env vars. Everything else depends on this.",
+
+      "files_to_modify": [
+        "db/schema.ts",
+        "schemas/env.schema.ts"
+      ],
+      "files_to_create": [
+        "schemas/sensor.schema.ts"
+      ],
+
+      "tasks": [
+
+        {
+          "file": "db/schema.ts",
+          "action": "APPEND — add after all existing table definitions",
+          "instructions": [
+            "Add enum: export const deviceStatusEnum = pgEnum('device_status', ['online', 'offline', 'unknown'])",
+            "Add enum: export const sensorAlertTypeEnum = pgEnum('sensor_alert_type', ['temp_high', 'temp_low', 'humidity_high', 'vibration_high'])",
+            "Add enum: export const sensorAlertStatusEnum = pgEnum('sensor_alert_status', ['active', 'acknowledged'])",
+
+            "Add table: export const iotDevices = pgTable('iot_devices', {",
+            "  id:              uuid('id').primaryKey().defaultRandom(),",
+            "  deviceId:        varchar('device_id', { length: 50 }).unique().notNull(),",
+            "  driverId:        uuid('driver_id').references(() => users.id, { onDelete: 'set null' }),",
+            "  truckLabel:      varchar('truck_label', { length: 100 }).notNull(),",
+            "  status:          deviceStatusEnum('status').notNull().default('unknown'),",
+            "  lastSeenAt:      timestamp('last_seen_at', { withTimezone: true }),",
+            "  firmwareVersion: varchar('firmware_version', { length: 20 }),",
+            "  alertConfig:     json('alert_config').notNull().default({ temp_min_c: 2, temp_max_c: 8, humidity_max_pct: 85, vibration_max_g: 0.5 }),",
+            "  createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),",
+            "}, (t) => ({ deviceIdIdx: index('iot_devices_device_id_idx').on(t.deviceId), statusIdx: index('iot_devices_status_idx').on(t.status) }))",
+
+            "Add table: export const sensorReadings = pgTable('sensor_readings', {",
+            "  id:                  uuid('id').primaryKey().defaultRandom(),",
+            "  deviceId:            varchar('device_id', { length: 50 }).notNull(),",
+            "  recordedAt:          timestamp('recorded_at', { withTimezone: true }).notNull(),",
+            "  temperatureC:        real('temperature_c').notNull(),",
+            "  humidityPct:         real('humidity_pct').notNull(),",
+            "  vibrationMagnitude:  real('vibration_magnitude').notNull(),",
+            "  accelX:              real('accel_x').notNull(),",
+            "  accelY:              real('accel_y').notNull(),",
+            "  accelZ:              real('accel_z').notNull(),",
+            "}, (t) => ({",
+            "  deviceTimeIdx: index('sensor_readings_device_time_idx').on(t.deviceId, t.recordedAt),",
+            "  timeIdx:       index('sensor_readings_time_idx').on(t.recordedAt),",
+            "}))",
+
+            "Add table: export const sensorAlerts = pgTable('sensor_alerts', {",
+            "  id:          uuid('id').primaryKey().defaultRandom(),",
+            "  deviceId:    varchar('device_id', { length: 50 }).notNull(),",
+            "  driverId:    uuid('driver_id').references(() => users.id, { onDelete: 'set null' }),",
+            "  alertType:   sensorAlertTypeEnum('alert_type').notNull(),",
+            "  value:       real('value').notNull(),",
+            "  threshold:   real('threshold').notNull(),",
+            "  status:      sensorAlertStatusEnum('status').notNull().default('active'),",
+            "  triggeredAt: timestamp('triggered_at', { withTimezone: true }).notNull(),",
+            "  ackedAt:     timestamp('acked_at', { withTimezone: true }),",
+            "  ackedBy:     uuid('acked_by').references(() => users.id, { onDelete: 'set null' }),",
+            "}, (t) => ({",
+            "  deviceStatusIdx: index('sensor_alerts_device_status_idx').on(t.deviceId, t.status),",
+            "  statusTimeIdx:   index('sensor_alerts_status_time_idx').on(t.status, t.triggeredAt),",
+            "}))",
+
+            "Run: npm run db:generate && npm run db:migrate"
+          ]
+        },
+
+        {
+          "file": "schemas/sensor.schema.ts",
+          "action": "CREATE",
+          "content": "import { z } from 'zod';\n\nexport const SensorReadingSchema = z.object({\n  deviceId:           z.string().min(3).max(50),\n  ts:                 z.number().positive(),\n  temperature_c:      z.number().min(-40).max(80),\n  humidity_pct:       z.number().min(0).max(100),\n  vibration_magnitude:z.number().min(0).max(20),\n  accel_x:            z.number(),\n  accel_y:            z.number(),\n  accel_z:            z.number(),\n  firmware_version:   z.string().optional(),\n});\n\nexport const SensorThresholdSchema = z.object({\n  temp_min_c:        z.number().min(-40).max(80),\n  temp_max_c:        z.number().min(-40).max(80),\n  humidity_max_pct:  z.number().min(0).max(100),\n  vibration_max_g:   z.number().min(0).max(20),\n}).refine(d => d.temp_min_c < d.temp_max_c, {\n  message: 'temp_min_c must be less than temp_max_c',\n});\n\nexport const DeviceRegisterSchema = z.object({\n  deviceId:    z.string().regex(/^[a-z0-9-]{3,50}$/, { message: 'deviceId must be lowercase letters, numbers, hyphens only' }),\n  truckLabel:  z.string().min(2).max(100),\n  driverId:    z.string().uuid().optional(),\n  alertConfig: SensorThresholdSchema.optional(),\n});\n\nexport type SensorReading    = z.infer<typeof SensorReadingSchema>;\nexport type SensorThreshold  = z.infer<typeof SensorThresholdSchema>;\nexport type DeviceRegister   = z.infer<typeof DeviceRegisterSchema>;\n\nexport const DEFAULT_ALERT_CONFIG: SensorThreshold = {\n  temp_min_c:       2,\n  temp_max_c:       8,\n  humidity_max_pct: 85,\n  vibration_max_g:  0.5,\n};"
+        },
+
+        {
+          "file": "schemas/env.schema.ts",
+          "action": "MODIFY — add two fields to the existing EnvSchema z.object({})",
+          "add_fields": [
+            "MQTT_URL:      z.string().url()  — required, e.g. mqtt://trucknet:password@localhost:1883",
+            "MQTT_PASSWORD: z.string().min(8) — required, must match Mosquitto passwd config"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-2",
+      "name": "Infrastructure Agent",
+      "priority": 1,
+      "title": "Mosquitto MQTT broker in Docker + lib helpers",
+      "description": "Add Eclipse Mosquitto to docker-compose, create the Mosquitto config, add the Redis-style safe client pattern for MQTT, and add sensor threshold evaluation helpers.",
+
+      "files_to_modify": [
+        "docker-compose.yml",
+        ".env.example"
+      ],
+      "files_to_create": [
+        "docker/mosquitto/mosquitto.conf",
+        "docker/mosquitto/passwd.example",
+        "docker/mosquitto/README.md",
+        "lib/sensor-thresholds.ts"
+      ],
+
+      "tasks": [
+
+        {
+          "file": "docker-compose.yml",
+          "action": "ADD service and volumes",
+          "add_service": {
+            "mosquitto": {
+              "image": "eclipse-mosquitto:2",
+              "container_name": "trucknet-mosquitto",
+              "restart": "unless-stopped",
+              "ports": ["1883:1883", "9001:9001"],
+              "volumes": [
+                "./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro",
+                "./docker/mosquitto/passwd:/mosquitto/config/passwd:ro",
+                "mosquitto_data:/mosquitto/data",
+                "mosquitto_log:/mosquitto/log"
+              ],
+              "healthcheck": {
+                "test": "mosquitto_sub -h localhost -t '$$SYS/#' -C 1 -u trucknet -P ${MQTT_PASSWORD} -W 3 || exit 1",
+                "interval": "30s",
+                "timeout": "10s",
+                "retries": 3
+              }
+            }
+          },
+          "add_to_app_service_environment": [
+            "MQTT_URL=mqtt://trucknet:${MQTT_PASSWORD}@mosquitto:1883",
+            "MQTT_PASSWORD=${MQTT_PASSWORD}"
+          ],
+          "add_to_sensor_worker_service": {
+            "sensor-worker": {
+              "build": ".",
+              "command": "node --require ts-node/register workers/sensor-consumer.ts",
+              "restart": "unless-stopped",
+              "depends_on": ["postgres", "mosquitto"],
+              "environment": [
+                "DATABASE_URL=${DATABASE_URL}",
+                "ABLY_API_KEY=${ABLY_API_KEY}",
+                "MQTT_URL=mqtt://trucknet:${MQTT_PASSWORD}@mosquitto:1883",
+                "MQTT_PASSWORD=${MQTT_PASSWORD}"
+              ]
+            }
+          },
+          "add_volumes": [
+            "mosquitto_data:",
+            "mosquitto_log:"
+          ]
+        },
+
+        {
+          "file": "docker/mosquitto/mosquitto.conf",
+          "action": "CREATE",
+          "content": "# TruckNet Mosquitto MQTT Broker Configuration\n\n# TCP listener for ESP32 devices and internal worker\nlistener 1883\n\n# WebSocket listener (optional — for browser-based tools)\nlistener 9001\nprotocol websockets\n\n# Authentication — no anonymous connections\nallow_anonymous false\npassword_file /mosquitto/config/passwd\n\n# Persistence — queues QoS 1 messages for offline clients\npersistence true\npersistence_location /mosquitto/data/\n\n# Logging\nlog_dest file /mosquitto/log/mosquitto.log\nlog_dest stdout\nlog_type error\nlog_type warning\nlog_type information\nlog_type subscribe\nconnection_messages true\n\n# Session config\nmax_keepalive 120\nmax_queued_messages 100\n\n# Packet size — must fit sensor JSON payload (~400 bytes)\nmessage_size_limit 4096"
+        },
+
+        {
+          "file": "docker/mosquitto/README.md",
+          "action": "CREATE",
+          "content": "# Mosquitto MQTT Broker\n\n## Generating the passwd file\n\nThe `passwd` file stores hashed MQTT credentials.\nGenerate it with:\n\n```bash\n# Run once — replace YOUR_PASSWORD with the value from your .env MQTT_PASSWORD\ndocker run --rm eclipse-mosquitto:2 \\\n  mosquitto_passwd -b /dev/stdout trucknet YOUR_PASSWORD > docker/mosquitto/passwd\n```\n\nCommit the generated `passwd` file (it contains only the hash, not the plain password).\n\n## Topic structure\n\n| Topic | Publisher | Subscriber | Notes |\n|-------|-----------|------------|-------|\n| trucknet/sensors/{deviceId}/readings | ESP32 | sensor-worker | QoS 1, every 5s |\n| trucknet/sensors/{deviceId}/status | ESP32 + broker LWT | sensor-worker | QoS 1, retained |\n| trucknet/sensors/{deviceId}/command | sensor-worker | ESP32 | QoS 1 |\n\n## Test connectivity\n\n```bash\n# Subscribe to all sensor topics\ndocker exec -it trucknet-mosquitto \\\n  mosquitto_sub -h localhost -t 'trucknet/sensors/#' \\\n  -u trucknet -P YOUR_PASSWORD -v\n\n# Publish a test message\ndocker exec -it trucknet-mosquitto \\\n  mosquitto_pub -h localhost -t 'trucknet/sensors/truck-001/readings' \\\n  -m '{\"deviceId\":\"truck-001\",\"ts\":1000,\"temperature_c\":4.2,\"humidity_pct\":67.3,\"vibration_magnitude\":0.04,\"accel_x\":0.01,\"accel_y\":-0.01,\"accel_z\":1.0}' \\\n  -u trucknet -P YOUR_PASSWORD\n```"
+        },
+
+        {
+          "file": "lib/sensor-thresholds.ts",
+          "action": "CREATE",
+          "content": "import { db } from '@/db';\nimport { iotDevices } from '@/db/schema';\nimport { DEFAULT_ALERT_CONFIG, SensorThreshold } from '@/schemas/sensor.schema';\n\nexport type AlertType = 'temp_high' | 'temp_low' | 'humidity_high' | 'vibration_high';\n\nexport interface ThresholdBreach {\n  type:      AlertType;\n  value:     number;\n  threshold: number;\n}\n\nexport interface AlertConfig extends SensorThreshold {}\n\n/**\n * Load all device alert configs into a Map.\n * Called on worker startup and refreshed every 5 minutes.\n */\nexport async function loadDeviceConfigs(): Promise<Map<string, AlertConfig>> {\n  const devices = await db.select({\n    deviceId:    iotDevices.deviceId,\n    alertConfig: iotDevices.alertConfig,\n  }).from(iotDevices);\n\n  const map = new Map<string, AlertConfig>();\n  for (const device of devices) {\n    const config = (device.alertConfig as AlertConfig) ?? DEFAULT_ALERT_CONFIG;\n    map.set(device.deviceId, config);\n  }\n  return map;\n}\n\n/**\n * Evaluate a sensor reading against thresholds.\n * Returns an array of breaches (can be multiple per reading).\n * Empty array = no breach.\n */\nexport function evaluateThresholds(\n  reading: { temperature_c: number; humidity_pct: number; vibration_magnitude: number },\n  config:  AlertConfig\n): ThresholdBreach[] {\n  const breaches: ThresholdBreach[] = [];\n\n  if (reading.temperature_c > config.temp_max_c) {\n    breaches.push({ type: 'temp_high', value: reading.temperature_c, threshold: config.temp_max_c });\n  }\n  if (reading.temperature_c < config.temp_min_c) {\n    breaches.push({ type: 'temp_low', value: reading.temperature_c, threshold: config.temp_min_c });\n  }\n  if (reading.humidity_pct > config.humidity_max_pct) {\n    breaches.push({ type: 'humidity_high', value: reading.humidity_pct, threshold: config.humidity_max_pct });\n  }\n  if (reading.vibration_magnitude > config.vibration_max_g) {\n    breaches.push({ type: 'vibration_high', value: reading.vibration_magnitude, threshold: config.vibration_max_g });\n  }\n\n  return breaches;\n}"
+        },
+
+        {
+          "file": ".env.example",
+          "action": "APPEND — add these two lines",
+          "lines": [
+            "MQTT_URL=mqtt://trucknet:your_mqtt_password@localhost:1883",
+            "MQTT_PASSWORD=your_mqtt_password"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-3",
+      "name": "MQTT Worker Agent",
+      "priority": 2,
+      "title": "workers/sensor-consumer.ts — MQTT ingestion, DB persist, Ably fan-out",
+      "description": "Create the sensor-consumer worker. Follows the exact same pattern as workers/stress-signal-consumer.ts. Subscribes to MQTT, validates with Zod, persists to DB, evaluates thresholds, publishes to Ably.",
+
+      "packages_to_install": ["mqtt@^5.0.0"],
+
+      "files_to_create": [
+        "workers/sensor-consumer.ts"
+      ],
+
+      "tasks": [
+        {
+          "file": "workers/sensor-consumer.ts",
+          "action": "CREATE — full implementation",
+          "instructions": [
+            "// ─── Imports ──────────────────────────────────────────────────────────────────",
+            "import mqtt from 'mqtt';",
+            "import Ably from 'ably';",
+            "import { db } from '@/db';",
+            "import { iotDevices, sensorReadings, sensorAlerts } from '@/db/schema';",
+            "import { eq, and } from 'drizzle-orm';",
+            "import { SensorReadingSchema } from '@/schemas/sensor.schema';",
+            "import { loadDeviceConfigs, evaluateThresholds, AlertConfig } from '@/lib/sensor-thresholds';",
+            "import { DEFAULT_ALERT_CONFIG } from '@/schemas/sensor.schema';",
+            "",
+            "// ─── Config ───────────────────────────────────────────────────────────────────",
+            "const MQTT_URL                 = process.env.MQTT_URL!;",
+            "const ABLY_API_KEY             = process.env.ABLY_API_KEY!;",
+            "const THRESHOLD_REFRESH_MS     = 5 * 60 * 1000; // refresh device configs every 5 min",
+            "const FLEET_SUMMARY_INTERVAL_MS = 10 * 1000;    // fleet_sensor_update every 10s",
+            "",
+            "// ─── State ────────────────────────────────────────────────────────────────────",
+            "let deviceConfigs = new Map<string, AlertConfig>();",
+            "",
+            "// ─── Ably REST client ─────────────────────────────────────────────────────────",
+            "const ably = new Ably.Rest({ key: ABLY_API_KEY });",
+            "",
+            "async function ablyPublish(channel: string, event: string, data: unknown) {",
+            "  try {",
+            "    await ably.channels.get(channel).publish(event, data);",
+            "  } catch (err) {",
+            "    console.error(`[Ably] Failed to publish ${event} on ${channel}:`, err);",
+            "  }",
+            "}",
+            "",
+            "// ─── MQTT client ──────────────────────────────────────────────────────────────",
+            "const mqttClient = mqtt.connect(MQTT_URL, {",
+            "  clientId:        'sensor-worker-' + Math.random().toString(16).slice(2),",
+            "  clean:           false,   // persistent session — receive queued QoS 1 messages on reconnect",
+            "  reconnectPeriod: 3000,",
+            "  connectTimeout:  10000,",
+            "});",
+            "",
+            "mqttClient.on('connect', () => {",
+            "  console.log('[MQTT] Connected to broker');",
+            "  mqttClient.subscribe('trucknet/sensors/+/readings', { qos: 1 }, (err) => {",
+            "    if (err) console.error('[MQTT] Subscribe readings error:', err);",
+            "    else console.log('[MQTT] Subscribed to trucknet/sensors/+/readings');",
+            "  });",
+            "  mqttClient.subscribe('trucknet/sensors/+/status', { qos: 1 }, (err) => {",
+            "    if (err) console.error('[MQTT] Subscribe status error:', err);",
+            "    else console.log('[MQTT] Subscribed to trucknet/sensors/+/status');",
+            "  });",
+            "});",
+            "",
+            "mqttClient.on('error',      (err) => console.error('[MQTT] Error:', err));",
+            "mqttClient.on('reconnect',  ()    => console.log('[MQTT] Reconnecting...'));",
+            "mqttClient.on('disconnect', ()    => console.log('[MQTT] Disconnected'));",
+            "",
+            "// ─── Message router ───────────────────────────────────────────────────────────",
+            "mqttClient.on('message', async (topic, payloadBuf) => {",
+            "  const parts    = topic.split('/'); // ['trucknet','sensors','{deviceId}','readings|status']",
+            "  const deviceId = parts[2];",
+            "  const msgType  = parts[3];",
+            "",
+            "  try {",
+            "    const raw = JSON.parse(payloadBuf.toString());",
+            "",
+            "    if (msgType === 'readings') await handleReading(deviceId, raw);",
+            "    if (msgType === 'status')   await handleStatus(deviceId, raw);",
+            "  } catch (err) {",
+            "    console.error(`[Worker] Failed to process ${topic}:`, err);",
+            "  }",
+            "});",
+            "",
+            "// ─── Readings handler ─────────────────────────────────────────────────────────",
+            "async function handleReading(deviceId: string, raw: unknown) {",
+            "  // 1. Validate",
+            "  const parsed = SensorReadingSchema.safeParse(raw);",
+            "  if (!parsed.success) {",
+            "    console.warn(`[Worker] Invalid reading from ${deviceId}:`, parsed.error.issues);",
+            "    return;",
+            "  }",
+            "  const data = parsed.data;",
+            "",
+            "  // 2. Persist reading",
+            "  await db.insert(sensorReadings).values({",
+            "    deviceId,",
+            "    recordedAt:          new Date(data.ts),",
+            "    temperatureC:        data.temperature_c,",
+            "    humidityPct:         data.humidity_pct,",
+            "    vibrationMagnitude:  data.vibration_magnitude,",
+            "    accelX:              data.accel_x,",
+            "    accelY:              data.accel_y,",
+            "    accelZ:              data.accel_z,",
+            "  });",
+            "",
+            "  // 3. Update device last_seen_at + firmware_version",
+            "  await db.update(iotDevices)",
+            "    .set({ lastSeenAt: new Date(), firmwareVersion: data.firmware_version ?? null })",
+            "    .where(eq(iotDevices.deviceId, deviceId));",
+            "",
+            "  // 4. Publish live reading to admin dashboard",
+            "  await ablyPublish(`sensors:${deviceId}`, 'sensor_reading', {",
+            "    deviceId,",
+            "    recordedAt:          new Date(data.ts).toISOString(),",
+            "    temperature_c:       data.temperature_c,",
+            "    humidity_pct:        data.humidity_pct,",
+            "    vibration_magnitude: data.vibration_magnitude,",
+            "  });",
+            "",
+            "  // 5. Evaluate thresholds",
+            "  const config   = deviceConfigs.get(deviceId) ?? DEFAULT_ALERT_CONFIG;",
+            "  const breaches = evaluateThresholds(data, config);",
+            "",
+            "  // 6. Insert alerts (with deduplication)",
+            "  for (const breach of breaches) {",
+            "    // Check if active alert of same type already exists — prevent alert storms",
+            "    const existing = await db.select({ id: sensorAlerts.id })",
+            "      .from(sensorAlerts)",
+            "      .where(and(",
+            "        eq(sensorAlerts.deviceId,  deviceId),",
+            "        eq(sensorAlerts.alertType, breach.type as any),",
+            "        eq(sensorAlerts.status,    'active'),",
+            "      ))",
+            "      .limit(1);",
+            "",
+            "    if (existing.length > 0) continue; // already alerting — skip",
+            "",
+            "    // Get device info for alert payload",
+            "    const device = await db.select({ truckLabel: iotDevices.truckLabel, driverId: iotDevices.driverId })",
+            "      .from(iotDevices).where(eq(iotDevices.deviceId, deviceId)).limit(1);",
+            "",
+            "    const [newAlert] = await db.insert(sensorAlerts).values({",
+            "      deviceId,",
+            "      driverId:    device[0]?.driverId ?? null,",
+            "      alertType:   breach.type as any,",
+            "      value:       breach.value,",
+            "      threshold:   breach.threshold,",
+            "      triggeredAt: new Date(),",
+            "    }).returning();",
+            "",
+            "    await ablyPublish('admin:sensors', 'sensor_alert', {",
+            "      alertId:     newAlert.id,",
+            "      deviceId,",
+            "      truckLabel:  device[0]?.truckLabel ?? deviceId,",
+            "      alertType:   breach.type,",
+            "      value:       breach.value,",
+            "      threshold:   breach.threshold,",
+            "      triggeredAt: newAlert.triggeredAt.toISOString(),",
+            "    });",
+            "",
+            "    console.warn(`[Alert] ${breach.type} on ${deviceId}: ${breach.value} > ${breach.threshold}`);",
+            "  }",
+            "}",
+            "",
+            "// ─── Status handler ───────────────────────────────────────────────────────────",
+            "async function handleStatus(deviceId: string, raw: { status: string; ts: number }) {",
+            "  const status = raw.status === 'online' ? 'online' : 'offline';",
+            "",
+            "  await db.update(iotDevices)",
+            "    .set({ status: status as any, lastSeenAt: new Date(raw.ts) })",
+            "    .where(eq(iotDevices.deviceId, deviceId));",
+            "",
+            "  await ablyPublish(`sensors:${deviceId}`, 'device_status', {",
+            "    deviceId,",
+            "    status,",
+            "    at: new Date(raw.ts).toISOString(),",
+            "  });",
+            "",
+            "  console.log(`[Status] ${deviceId} → ${status}`);",
+            "}",
+            "",
+            "// ─── Fleet summary broadcast ──────────────────────────────────────────────────",
+            "async function broadcastFleetSummary() {",
+            "  try {",
+            "    const devices = await db.select({",
+            "      deviceId:    iotDevices.deviceId,",
+            "      truckLabel:  iotDevices.truckLabel,",
+            "      status:      iotDevices.status,",
+            "      lastSeenAt:  iotDevices.lastSeenAt,",
+            "    }).from(iotDevices);",
+            "",
+            "    await ablyPublish('admin:sensors', 'fleet_sensor_update', devices);",
+            "  } catch (err) {",
+            "    console.error('[Worker] Fleet summary error:', err);",
+            "  }",
+            "}",
+            "",
+            "// ─── Bootstrap ────────────────────────────────────────────────────────────────",
+            "async function main() {",
+            "  console.log('[Worker] sensor-consumer starting...');",
+            "",
+            "  // Load threshold configs",
+            "  deviceConfigs = await loadDeviceConfigs();",
+            "  console.log(`[Worker] Loaded configs for ${deviceConfigs.size} devices`);",
+            "",
+            "  // Refresh threshold configs every 5 minutes",
+            "  setInterval(async () => {",
+            "    deviceConfigs = await loadDeviceConfigs();",
+            "    console.log(`[Worker] Refreshed configs for ${deviceConfigs.size} devices`);",
+            "  }, THRESHOLD_REFRESH_MS);",
+            "",
+            "  // Fleet summary broadcast every 10s",
+            "  setInterval(broadcastFleetSummary, FLEET_SUMMARY_INTERVAL_MS);",
+            "",
+            "  // Graceful shutdown",
+            "  process.on('SIGTERM', () => { console.log('[Worker] SIGTERM — shutting down'); mqttClient.end(); process.exit(0); });",
+            "  process.on('SIGINT',  () => { console.log('[Worker] SIGINT — shutting down');  mqttClient.end(); process.exit(0); });",
+            "}",
+            "",
+            "main().catch((err) => { console.error('[Worker] Fatal error:', err); process.exit(1); });"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-4",
+      "name": "Admin API Agent",
+      "priority": 2,
+      "title": "All /api/admin/sensors/* route handlers",
+      "description": "Create all 7 sensor API routes. Every route starts with requireAdminSession(). Guard is identical to existing admin routes.",
+
+      "files_to_create": [
+        "app/api/admin/sensors/route.ts",
+        "app/api/admin/sensors/[deviceId]/route.ts",
+        "app/api/admin/sensors/[deviceId]/readings/route.ts",
+        "app/api/admin/sensors/[deviceId]/thresholds/route.ts",
+        "app/api/admin/sensors/[deviceId]/register/route.ts",
+        "app/api/admin/sensors/alerts/route.ts",
+        "app/api/admin/sensors/alerts/[alertId]/acknowledge/route.ts"
+      ],
+
+      "tasks": [
+        {
+          "file": "app/api/admin/sensors/route.ts",
+          "method": "GET",
+          "description": "All registered devices with their latest reading and active alert count.",
+          "instructions": [
+            "requireAdminSession()",
+            "Query iotDevices JOIN (subquery: SELECT DISTINCT ON (device_id) * FROM sensor_readings ORDER BY device_id, recorded_at DESC) latest_reading",
+            "Also count active sensorAlerts per device",
+            "Return: { devices: AdminSensorDeviceView[] } — each item: { deviceId, truckLabel, status, lastSeenAt, firmwareVersion, latestReading: { temperatureC, humidityPct, vibrationMagnitude, recordedAt } | null, activeAlertCount: number }"
+          ]
+        },
+        {
+          "file": "app/api/admin/sensors/[deviceId]/route.ts",
+          "method": "GET",
+          "description": "Full device detail — latest reading, historical readings, active alerts.",
+          "query_params": "?range=1h|6h|24h|7d (default 1h)",
+          "instructions": [
+            "requireAdminSession()",
+            "Validate deviceId exists in iotDevices — 404 if not",
+            "Fetch device row + latest reading + readings array for the selected range (max 300 rows) + active alerts",
+            "Range to interval: 1h=1 hour, 6h=6 hours, 24h=1 day, 7d=7 days",
+            "Return: { device, latestReading, readings: SensorReading[], activeAlerts: SensorAlert[] }"
+          ]
+        },
+        {
+          "file": "app/api/admin/sensors/[deviceId]/readings/route.ts",
+          "method": "GET",
+          "description": "Paginated time-series readings for sparkline charts.",
+          "query_params": "?from=ISO&to=ISO&limit=300",
+          "instructions": [
+            "requireAdminSession()",
+            "Parse from/to as Date objects. Default: from = now-1h, to = now",
+            "Query sensorReadings WHERE deviceId=deviceId AND recordedAt BETWEEN from AND to ORDER BY recordedAt DESC LIMIT limit",
+            "Return: { readings: SensorReading[] }"
+          ]
+        },
+        {
+          "file": "app/api/admin/sensors/[deviceId]/thresholds/route.ts",
+          "method": "PATCH",
+          "description": "Update alert thresholds for a device.",
+          "instructions": [
+            "requireAdminSession()",
+            "Parse + validate body with SensorThresholdSchema — 400 on invalid",
+            "UPDATE iotDevices SET alertConfig=body WHERE deviceId=deviceId",
+            "Return: { success: true, alertConfig: updatedConfig }"
+          ]
+        },
+        {
+          "file": "app/api/admin/sensors/[deviceId]/register/route.ts",
+          "method": "POST",
+          "description": "Register a new IoT device before deployment.",
+          "instructions": [
+            "requireAdminSession()",
+            "Parse + validate body with DeviceRegisterSchema",
+            "Check unique constraint — 409 if deviceId already exists",
+            "INSERT iotDevices with alertConfig = body.alertConfig ?? DEFAULT_ALERT_CONFIG",
+            "Return 201: { device: newDevice }"
+          ]
+        },
+        {
+          "file": "app/api/admin/sensors/alerts/route.ts",
+          "method": "GET",
+          "description": "Fleet-wide sensor alerts, filterable.",
+          "query_params": "?status=active|acknowledged&deviceId=&page=1&limit=25",
+          "instructions": [
+            "requireAdminSession()",
+            "Build WHERE clause from query params",
+            "Query sensorAlerts JOIN iotDevices (for truckLabel) ORDER BY triggeredAt DESC",
+            "Paginate with LIMIT/OFFSET",
+            "Return: { alerts: SensorAlert[], total: number, page: number }"
+          ]
+        },
+        {
+          "file": "app/api/admin/sensors/alerts/[alertId]/acknowledge/route.ts",
+          "method": "PATCH",
+          "description": "Admin acknowledges a sensor alert.",
+          "instructions": [
+            "requireAdminSession()",
+            "UPDATE sensorAlerts SET status='acknowledged', ackedAt=NOW(), ackedBy=session.user.id WHERE id=alertId",
+            "404 if not found",
+            "Publish Ably event 'sensor_alert_acked' on channel 'admin:sensors' with { alertId, deviceId, ackedBy: session.user.id }",
+            "Return: { success: true }"
+          ]
+        },
+        {
+          "file": "app/api/admin/stats/route.ts",
+          "action": "MODIFY — add sensorAlertCount to existing stats response",
+          "instructions": [
+            "Add to existing stats query: COUNT of sensorAlerts WHERE status='active' as sensorAlertCount",
+            "Add to return object: sensorAlertCount"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-5",
+      "name": "Admin Dashboard UI Agent",
+      "priority": 3,
+      "title": "Sensors pages, live gauges, sparklines, alert panel, sidebar nav",
+      "description": "Create the full admin sensor monitoring UI. All components follow Warm Maritime Precision design system exactly. Use recharts for sparklines (install if not present).",
+
+      "packages_to_install": ["recharts@^2.12.0"],
+
+      "files_to_create": [
+        "app/(admin)/admin/sensors/page.tsx",
+        "app/(admin)/admin/sensors/[deviceId]/page.tsx",
+        "components/admin/sensors/SensorDeviceGrid.tsx",
+        "components/admin/sensors/SensorDeviceCard.tsx",
+        "components/admin/sensors/SensorGauge.tsx",
+        "components/admin/sensors/SensorSparkline.tsx",
+        "components/admin/sensors/SensorAlertPanel.tsx",
+        "components/admin/sensors/SensorAlertCard.tsx",
+        "components/admin/sensors/VibrationIndicator.tsx",
+        "components/admin/sensors/DeviceStatusDot.tsx"
+      ],
+      "files_to_modify": [
+        "components/admin/AdminSidebar.tsx",
+        "app/(admin)/admin/page.tsx"
+      ],
+
+      "tasks": [
+
+        {
+          "file": "components/admin/sensors/DeviceStatusDot.tsx",
+          "description": "Reusable status dot — online (sage pulse) / offline (gray) / unknown (muted).",
+          "props": "{ status: 'online' | 'offline' | 'unknown', size?: 'sm' | 'md' }",
+          "instructions": [
+            "size sm = 8px dot, md = 10px dot (default md)",
+            "online:  bg-[var(--sage)] with animate-live-pulse class",
+            "offline: bg-[var(--muted)] no animation",
+            "unknown: bg-[var(--hairline)] no animation",
+            "Wrap in a span with a tooltip title = status"
+          ]
+        },
+
+        {
+          "file": "components/admin/sensors/VibrationIndicator.tsx",
+          "description": "5-segment horizontal bar showing vibration intensity.",
+          "props": "{ magnitude: number }",
+          "design": [
+            "5 rectangles: h-1.5 w-5 rounded-full inline-flex gap-1",
+            "Thresholds: 0–0.1G → 0 segments lit, 0.1–0.25G → 1 (sage), 0.25–0.4G → 2-3 (honey), 0.4–0.6G → 4 (terra), 0.6G+ → 5 segments all terra + animate-sos-beat",
+            "Below bar: magnitude value + 'G' in font-mono text-[10px] text-[var(--muted)]",
+            "Each segment: transition-colors duration-300"
+          ]
+        },
+
+        {
+          "file": "components/admin/sensors/SensorGauge.tsx",
+          "description": "SVG semi-circular arc gauge. Used for temp, humidity, vibration.",
+          "props": "{ value: number, min: number, max: number, unit: string, label: string, warnMin?: number, warnMax?: number, size?: number }",
+          "design": [
+            "SVG viewBox 0 0 120 70 (half-circle). size prop controls rendered px width (default 160).",
+            "Background arc: stroke-dasharray computed for 180° sweep, stroke var(--hairline), strokeWidth 10",
+            "Value arc: same math, stroke computed by color rule below, strokeWidth 10, strokeLinecap round",
+            "Color rule: if value > warnMax or value < warnMin → var(--terra). If within 10% of limit → var(--honey). Else var(--sage).",
+            "Center text: Bricolage Grotesque 22px fill var(--ink) dominant-baseline middle text-anchor middle at cx=60 cy=52",
+            "Unit text: Instrument Sans 10px fill var(--muted) at cy=64",
+            "Label text: Instrument Sans 9px fill var(--subtle) at cy=74 — below arc",
+            "Animate: use CSS transition on stroke-dashoffset: transition: stroke-dashoffset 0.8s ease"
+          ]
+        },
+
+        {
+          "file": "components/admin/sensors/SensorSparkline.tsx",
+          "description": "Minimal recharts area sparkline. No axes, no grid, no tooltip — pure visual trend.",
+          "props": "{ readings: Array<{ recordedAt: string, value: number }>, color: string, height?: number, threshold?: number }",
+          "design": [
+            "Import from recharts: AreaChart, Area, ResponsiveContainer, ReferenceLine",
+            "ResponsiveContainer width='100%' height={height ?? 56}",
+            "AreaChart data={readings} margin={0}",
+            "Area dataKey='value' stroke={color} strokeWidth={1.5} fill={color} fillOpacity={0.08} isAnimationActive={true} animationDuration={400} dot={false}",
+            "If threshold prop: ReferenceLine y={threshold} stroke={color} strokeDasharray='4 2' strokeOpacity={0.5}",
+            "No XAxis, no YAxis, no CartesianGrid, no Tooltip"
+          ]
+        },
+
+        {
+          "file": "components/admin/sensors/SensorAlertCard.tsx",
+          "description": "Single alert row in the alert panel.",
+          "props": "{ alert: SensorAlert & { truckLabel: string }, onAcknowledge: (id: string) => void }",
+          "design": [
+            "Card: bg-[var(--terra-lt)] border border-[rgba(184,80,57,0.15)] rounded-xl p-3",
+            "Header row: pulsing terra dot (animate-sos-beat) + truckLabel fw-600 text-13 + time ago (font-mono 10px muted) right-aligned",
+            "Alert type row: icon + formatted label — 'temp_high' → '🌡️ Temperature High', 'temp_low' → '🌡️ Temperature Low', 'humidity_high' → '💧 Humidity High', 'vibration_high' → '📳 Vibration High'",
+            "Value vs threshold: text-13 font-mono — e.g. '9.2°C > 8.0°C limit' in terra color",
+            "Acknowledge button: btn-ghost btn-sm w-full mt-2 — 'Acknowledge'. Shows spinner while loading. Optimistic: remove card immediately on click.",
+            "Framer Motion AnimatePresence on the card — exit: opacity 0 + scale 0.95, duration 0.2s"
+          ]
+        },
+
+        {
+          "file": "components/admin/sensors/SensorAlertPanel.tsx",
+          "description": "Right sidebar panel — list of active sensor alerts with acknowledge action.",
+          "props": "{ deviceId?: string }",
+          "design": [
+            "Fetches GET /api/admin/sensors/alerts?status=active&deviceId={deviceId} on mount",
+            "Subscribes to Ably admin:sensors — on 'sensor_alert': prepend to list + toast.error with terra styling",
+            "On 'sensor_alert_acked': remove from list",
+            "Header: 🌡️ icon + 'Sensor Alerts' Bricolage Grotesque 13px fw-600 + terra count badge (animate-sos-beat if count > 0)",
+            "List: AnimatePresence, SensorAlertCard per alert",
+            "Empty state: shield emoji + 'No active sensor alerts' + 'All cargo conditions within normal limits' subtitle in muted",
+            "handleAcknowledge: PATCH /api/admin/sensors/alerts/{id}/acknowledge → remove from local state"
+          ]
+        },
+
+        {
+          "file": "components/admin/sensors/SensorDeviceCard.tsx",
+          "description": "Card tile for the device grid on /admin/sensors.",
+          "props": "{ device: AdminSensorDeviceView, onClick: () => void }",
+          "design": [
+            "Card: bg-[var(--surface)] border border-[var(--hairline)] rounded-xl shadow-xs hover:shadow-md hover:-translate-y-px transition-all duration-200 cursor-pointer p-4",
+            "Header row: <DeviceStatusDot status={device.status} /> + truckLabel text-14 fw-700 Bricolage Grotesque + device.deviceId font-mono text-10 text-[var(--muted)]",
+            "If activeAlertCount > 0: terra count badge top-right corner (absolute position)",
+            "Three metric rows (each: icon + label + value + color indicator):",
+            "  🌡️ Temp: value + '°C' — sage if in range, terra if out, honey if near limit",
+            "  💧 Humidity: value + '%' — same color logic",
+            "  📳 Vibration: <VibrationIndicator magnitude={device.latestReading.vibrationMagnitude} />",
+            "Footer: 'Last seen' + relative time in font-mono text-10 text-[var(--subtle)]",
+            "Null state (no reading yet): show three skeleton rows with animate-pulse bg-[var(--hairline-2)]"
+          ]
+        },
+
+        {
+          "file": "components/admin/sensors/SensorDeviceGrid.tsx",
+          "description": "Responsive grid of SensorDeviceCards.",
+          "props": "{ devices: AdminSensorDeviceView[] }",
+          "design": [
+            "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
+            "Framer Motion: each card has initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} with index-based delay (i * 0.04s)",
+            "onClick: router.push('/admin/sensors/' + device.deviceId)",
+            "Empty state: no devices registered — CpuIcon + 'No devices registered' + 'Register your first ESP32 via the API' subtitle"
+          ]
+        },
+
+        {
+          "file": "app/(admin)/admin/sensors/page.tsx",
+          "description": "Fleet sensors overview page.",
+          "instructions": [
+            "Fetch GET /api/admin/sensors on mount",
+            "Subscribe to Ably admin:sensors — on 'fleet_sensor_update': merge updated device data into local state (match by deviceId)",
+            "Layout: same two-panel pattern as admin home",
+            "Left (flex-1): PageHeader eyebrow='Container Monitoring' title='Fleet Sensors' subtitle='Live cargo conditions across all active trucks' + <SensorDeviceGrid devices={devices} />",
+            "Right (w-72 shrink-0): <SensorAlertPanel /> (no deviceId filter — show all fleet alerts)",
+            "Show loading skeleton (grid of 4 pulsing cards) while fetching",
+            "Page entrance: Framer Motion opacity 0 + translateY 8px → visible, 0.28s"
+          ]
+        },
+
+        {
+          "file": "app/(admin)/admin/sensors/[deviceId]/page.tsx",
+          "description": "Single device detail page.",
+          "instructions": [
+            "Fetch GET /api/admin/sensors/{deviceId} on mount (includes latest reading + 1h history + active alerts)",
+            "Subscribe to Ably sensors:{deviceId} channel:",
+            "  on 'sensor_reading': update latestReading state + prepend to readings array (slice to 300)",
+            "  on 'device_status': update device.status in local state",
+            "Time range selector: pill buttons [1h, 6h, 24h, 7d]. On change: fetch GET /api/admin/sensors/{deviceId}/readings?range=X",
+            "Layout: two columns desktop, single column mobile",
+            "Top: back button (← /admin/sensors) + PageHeader truck_label + deviceId font-mono + DeviceStatusDot + last seen time",
+            "Left column: three SensorGauge components:",
+            "  Temperature: min=-20 max=40 warnMin=2 warnMax=8 unit='°C' label='Temperature'",
+            "  Humidity: min=0 max=100 warnMax=85 unit='%' label='Humidity'",
+            "  Vibration: min=0 max=2 warnMax=0.5 unit='G' label='Vibration'",
+            "Right column: three SensorSparkline charts:",
+            "  Each: section title + current value + threshold dashed line + sparkline",
+            "  Temperature sparkline: color=var(--navy)",
+            "  Humidity sparkline: color=var(--slate)",
+            "  Vibration sparkline: color=var(--terra)",
+            "Below: <SensorAlertPanel deviceId={deviceId} /> (filtered to this device only)",
+            "Gauges animate on every Ably reading update"
+          ]
+        },
+
+        {
+          "file": "components/admin/AdminSidebar.tsx",
+          "action": "MODIFY",
+          "instructions": [
+            "Import CpuIcon from lucide-react",
+            "Add nav item between 'SOS Alerts' and 'Messages':",
+            "  { href: '/admin/sensors', label: 'Sensors', icon: CpuIcon }",
+            "Add terra badge showing sensorAlertCount — fetch from /api/admin/stats alongside existing counts",
+            "Badge: same pattern as the existing SOS badge — animate-sos-beat if count > 0"
+          ]
+        },
+
+        {
+          "file": "app/(admin)/admin/page.tsx",
+          "action": "MODIFY",
+          "instructions": [
+            "Add 'Sensor Alerts' stat card to StatsBar: terra accent color, CpuIcon, value=stats.sensorAlertCount",
+            "After the FleetMap + SosPanel row, add a SectionTitle 'Sensor Health' with count pill",
+            "Below that: a horizontal scroll container (overflow-x-auto, flex gap-3, pb-2) containing compact SensorDeviceCard for each device",
+            "Compact card variant: show only truck_label + status dot + single line with temp/humidity/vibration values side by side",
+            "Clicking a compact card: navigate to /admin/sensors/{deviceId}",
+            "Fetch devices from GET /api/admin/sensors (reuse existing fetch in useEffect)",
+            "Subscribe to admin:sensors fleet_sensor_update — update device list in real time"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-6",
+      "name": "ESP32 Firmware Agent",
+      "priority": 2,
+      "title": "Create isolated esp32/ folder — complete self-contained firmware",
+      "description": "Create a fully isolated esp32/ directory at the monorepo root. This directory contains EVERYTHING the ESP32 needs: C++ Arduino sketch, all headers, JSON payload builder, MQTT client, watchdog, OTA, wiring docs, setup guide, Python test tools. It must be completely self-contained — no imports from the Next.js app, no shared node_modules.",
+
+      "critical_rules": [
+        "NEVER import from ../src/ or any Next.js file. This is standalone C++ + Python.",
+        "credentials.h MUST be in .gitignore — verify before finishing",
+        "credentials.example.h MUST be committed with placeholder values",
+        "ArduinoJson MUST be v6.x — do NOT use v7.x API (StaticJsonDocument is v6)",
+        "PubSubClient buffer size MUST be set to 512 — default 256 truncates the sensor payload",
+        "LWT MUST be set inside client.connect() call — NOT as a separate publish",
+        "ESP32 pins are 3.3V — both sensors must be wired to 3.3V, NOT 5V. Document clearly.",
+        "NTP sync must happen before first publish. Fall back to millis() with a console warning if NTP fails."
+      ],
+
+      "folder_structure_to_create": {
+        "esp32/": {
+          "src/": ["main.ino", "config.h", "sensors.h", "sensors.cpp", "payload.h", "payload.cpp", "mqtt_client.h", "mqtt_client.cpp", "ota.h", "ota.cpp", "watchdog.h", "watchdog.cpp"],
+          "config/": ["credentials.h (GITIGNORED)", "credentials.example.h (COMMITTED)"],
+          "docs/": ["WIRING.md", "SETUP.md", "PAYLOAD_SPEC.md", "TROUBLESHOOTING.md"],
+          "tools/": ["test_mqtt.py", "monitor.py"],
+          "platformio.ini": "PlatformIO alternative to Arduino IDE",
+          "libraries.txt": "All required libraries with install commands",
+          ".gitignore": "Must include config/credentials.h",
+          "README.md": "Quick start + hardware BOM"
+        }
+      },
+
+      "files": [
+
+        {
+          "file": "esp32/.gitignore",
+          "content": "# CRITICAL — never commit real WiFi or MQTT passwords\nconfig/credentials.h\n\n# Arduino IDE build artifacts\nbuild/\n.cache/\n*.elf\n*.bin\n*.map\n\n# PlatformIO\n.pio/\n.vscode/\n\n# Python tools\n__pycache__/\n*.pyc\ntools/venv/\n*.egg-info/"
+        },
+
+        {
+          "file": "esp32/libraries.txt",
+          "content": "# TruckNet ESP32 — Required Arduino Libraries\n# Install all of these before attempting to compile.\n\n== BOARD SUPPORT (install first) ==\nName:    ESP32 Arduino Core by Espressif Systems\nVersion: 2.0.14\nInstall: Arduino IDE → File → Preferences → Additional Board Manager URLs:\n         https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json\n         Then: Tools → Board → Boards Manager → search 'esp32' → Install 2.0.14\n\n== LIBRARIES ==\nName:    PubSubClient\nAuthor:  Nick O'Leary\nVersion: 2.8.0\nInstall: Arduino IDE → Sketch → Include Library → Manage Libraries → search 'PubSubClient' → Install\nPurpose: MQTT client\n\nName:    DHT sensor library\nAuthor:  Adafruit\nVersion: 1.4.6\nInstall: Manage Libraries → search 'DHT sensor library by Adafruit' → Install\n         Also install 'Adafruit Unified Sensor' when prompted\nPurpose: Read DHT22 temperature and humidity\n\nName:    Adafruit MPU6050\nAuthor:  Adafruit\nVersion: 2.2.6\nInstall: Manage Libraries → search 'Adafruit MPU6050' → Install\n         Accept all dependency installs (Adafruit Unified Sensor, Adafruit BusIO)\nPurpose: Read accelerometer and gyroscope via I2C\n\nName:    ArduinoJson\nAuthor:  Benoit Blanchon\nVersion: 6.21.5  ← MUST be v6.x — do NOT install v7.x (different API)\nInstall: Manage Libraries → search 'ArduinoJson' → install version 6.21.5\nPurpose: JSON serialization for MQTT payloads\n\n== PLATFORMIO ALTERNATIVE ==\nSee platformio.ini in this directory."
+        },
+
+        {
+          "file": "esp32/platformio.ini",
+          "content": "[env:esp32dev]\nplatform       = espressif32@6.4.0\nboard          = esp32dev\nframework      = arduino\nmonitor_speed  = 115200\nbuild_flags    = -DCORE_DEBUG_LEVEL=0\nlib_deps       =\n    knolleary/PubSubClient @ ^2.8\n    adafruit/DHT sensor library @ ^1.4.6\n    adafruit/Adafruit MPU6050 @ ^2.2.6\n    bblanchon/ArduinoJson @ ^6.21.5\nbuild_src_filter = +<src/*>"
+        },
+
+        {
+          "file": "esp32/config/credentials.example.h",
+          "content": "#pragma once\n\n// ─────────────────────────────────────────────────────────────────────────────\n//  TruckNet ESP32 — Credentials Template\n//\n//  1. Copy this file:  cp credentials.example.h credentials.h\n//  2. Fill in your real values in credentials.h\n//  3. credentials.h is in .gitignore — it will never be committed\n// ─────────────────────────────────────────────────────────────────────────────\n\n// WiFi network the truck connects to (hotspot or depot WiFi)\n#define WIFI_SSID         \"YOUR_WIFI_SSID\"\n#define WIFI_PASSWORD     \"YOUR_WIFI_PASSWORD\"\n\n// MQTT broker credentials — must match Mosquitto passwd file\n// Get MQTT_PASSWORD from your server .env file\n#define MQTT_USERNAME     \"trucknet\"\n#define MQTT_PASSWORD     \"YOUR_MQTT_PASSWORD\"\n\n// OTA password — used to push firmware updates over WiFi after first flash\n#define OTA_PASSWORD      \"YOUR_OTA_PASSWORD\""
+        },
+
+        {
+          "file": "esp32/src/config.h",
+          "content": "#pragma once\n\n// credentials.h is gitignored — copy from credentials.example.h\n#include \"../config/credentials.h\"\n\n// ─────────────────────────────────────────────────────────────────────────────\n//  TruckNet ESP32 — Central Configuration\n//  CHANGE DEVICE_ID and MQTT_BROKER_HOST before flashing each unit.\n// ─────────────────────────────────────────────────────────────────────────────\n\n// ── DEVICE (change per unit) ──────────────────────────────────────────────────\n// Must match a row registered in iot_devices table via POST /api/admin/sensors/{deviceId}/register\n// Format: lowercase, numbers, hyphens only. Examples: truck-001, truck-042\n#define DEVICE_ID           \"truck-001\"\n#define FIRMWARE_VERSION    \"1.0.0\"\n\n// ── BROKER (change to your server IP or domain) ───────────────────────────────\n// Docker internal: use service name 'mosquitto' inside compose network\n// External access: your server's public IP or domain, e.g. \"mqtt.mydomain.com\"\n#define MQTT_BROKER_HOST        \"192.168.1.100\"\n#define MQTT_BROKER_PORT        1883\n#define MQTT_QOS                1\n#define MQTT_KEEPALIVE_SECONDS  60\n#define MQTT_RECONNECT_DELAY_MS 3000\n#define MQTT_MAX_PACKET_SIZE    512  // default 256 is too small for our payload\n\n// ── WIFI ─────────────────────────────────────────────────────────────────────\n#define WIFI_RECONNECT_INTERVAL_MS  5000\n#define WIFI_MAX_RETRIES            20\n\n// ── PINS ─────────────────────────────────────────────────────────────────────\n#define DHT_PIN             4      // DHT22 data → GPIO4 (with 10kΩ pull-up to 3.3V)\n#define DHT_TYPE            DHT22\n#define MPU_SDA_PIN         21     // MPU6050 SDA → GPIO21\n#define MPU_SCL_PIN         22     // MPU6050 SCL → GPIO22\n#define LED_PIN             2      // onboard LED — most ESP32 DevKit V1 boards\n#define LED_BLINK_ON_PUBLISH true  // blink on every successful MQTT publish\n\n// ── TIMING ───────────────────────────────────────────────────────────────────\n#define READ_INTERVAL_MS            5000   // sensor read + MQTT publish interval\n#define STATUS_PUBLISH_INTERVAL_MS  30000  // heartbeat 'online' status\n#define WATCHDOG_TIMEOUT_SECONDS    30     // hardware reset if loop stalls\n\n// ── LOCAL THRESHOLDS (onboard LED warning only) ───────────────────────────────\n// Server-side thresholds in iot_devices.alert_config are authoritative for admin alerts.\n#define TEMP_WARN_MAX_C        8.0f\n#define TEMP_WARN_MIN_C        2.0f\n#define HUMIDITY_WARN_MAX_PCT  85.0f\n#define VIBRATION_WARN_MAX_G   0.5f"
+        },
+
+        {
+          "file": "esp32/src/sensors.h",
+          "content": "#pragma once\n\n// ─────────────────────────────────────────────────────────────────────────────\n//  TruckNet ESP32 — Sensor Interface\n//  DHT22  → temperature + humidity (GPIO4)\n//  MPU6050 → 3-axis accelerometer, vibration magnitude (I2C)\n// ─────────────────────────────────────────────────────────────────────────────\n\nstruct DHT22Reading {\n  float temperature_c;\n  float humidity_pct;\n  bool  valid;\n};\n\nstruct MPU6050Reading {\n  float accel_x;  // G-force\n  float accel_y;\n  float accel_z;\n  float gyro_x;   // rad/s\n  float gyro_y;\n  float gyro_z;\n  bool  valid;\n};\n\nstruct SensorBundle {\n  DHT22Reading   dht;\n  MPU6050Reading mpu;\n  float          vibration_magnitude;  // sqrt(ax²+ay²+az²) in G\n  unsigned long  timestamp_ms;         // millis() at read time\n};\n\nbool         initSensors();   // returns false if MPU6050 not found on I2C\nDHT22Reading readDHT22();     // up to 3 retries, 2s apart\nMPU6050Reading readMPU6050(); // returns { valid: false } on I2C error\nfloat        computeVibrationMagnitude(float ax, float ay, float az);\nSensorBundle readAll();       // combines both sensors into one bundle"
+        },
+
+        {
+          "file": "esp32/src/sensors.cpp",
+          "content": "#include \"sensors.h\"\n#include \"config.h\"\n#include <DHT.h>\n#include <Adafruit_MPU6050.h>\n#include <Adafruit_Sensor.h>\n#include <Wire.h>\n#include <math.h>\n\nstatic DHT             dht(DHT_PIN, DHT_TYPE);\nstatic Adafruit_MPU6050 mpu;\nstatic bool            mpuReady = false;\n\nbool initSensors() {\n  Serial.println(\"[Sensors] Initializing...\");\n  dht.begin();\n  Serial.println(\"[Sensors] DHT22 ready on GPIO\" + String(DHT_PIN));\n\n  Wire.begin(MPU_SDA_PIN, MPU_SCL_PIN);\n  if (!mpu.begin()) {\n    Serial.println(\"[Sensors][ERROR] MPU6050 not found — check wiring: SDA→GPIO21, SCL→GPIO22, VCC→3.3V, AD0→GND\");\n    mpuReady = false;\n    return false;\n  }\n\n  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);\n  mpu.setGyroRange(MPU6050_RANGE_500_DEG);\n  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);\n\n  // Warm-up: discard first 10 readings\n  Serial.print(\"[Sensors] MPU6050 warm-up\");\n  for (int i = 0; i < 10; i++) {\n    sensors_event_t a, g, t; mpu.getEvent(&a, &g, &t); delay(50); Serial.print(\".\");\n  }\n  Serial.println(\" done\");\n\n  mpuReady = true;\n  return true;\n}\n\nDHT22Reading readDHT22() {\n  for (int i = 0; i < 3; i++) {\n    float t = dht.readTemperature();\n    float h = dht.readHumidity();\n    if (!isnan(t) && !isnan(h)) return { t, h, true };\n    if (i < 2) { Serial.println(\"[Sensors][WARN] DHT22 retry \" + String(i+1) + \"/3\"); delay(2000); }\n  }\n  Serial.println(\"[Sensors][ERROR] DHT22 failed after 3 attempts\");\n  return { 0, 0, false };\n}\n\nMPU6050Reading readMPU6050() {\n  if (!mpuReady) return { 0,0,0,0,0,0, false };\n  sensors_event_t a, g, t;\n  mpu.getEvent(&a, &g, &t);\n  return {\n    a.acceleration.x / 9.81f,\n    a.acceleration.y / 9.81f,\n    a.acceleration.z / 9.81f,\n    g.gyro.x, g.gyro.y, g.gyro.z,\n    true\n  };\n}\n\nfloat computeVibrationMagnitude(float ax, float ay, float az) {\n  return sqrt(ax*ax + ay*ay + az*az);\n}\n\nSensorBundle readAll() {\n  SensorBundle b;\n  b.timestamp_ms        = millis();\n  b.dht                 = readDHT22();\n  b.mpu                 = readMPU6050();\n  b.vibration_magnitude = b.mpu.valid ? computeVibrationMagnitude(b.mpu.accel_x, b.mpu.accel_y, b.mpu.accel_z) : 0.0f;\n  return b;\n}"
+        },
+
+        {
+          "file": "esp32/src/payload.h",
+          "content": "#pragma once\n#include \"sensors.h\"\n#include <Arduino.h>\n\nvoid           syncNTP();                                     // call once after WiFi connects\nunsigned long long getCurrentEpochMs();                       // NTP epoch ms, falls back to millis()\nString         buildReadingPayload(const SensorBundle& b);    // main sensor JSON payload\nString         buildStatusPayload(const char* status);        // online/offline status payload\nString         buildLwtPayload();                             // LWT offline payload (same as offline status)"
+        },
+
+        {
+          "file": "esp32/src/payload.cpp",
+          "content": "#include \"payload.h\"\n#include \"config.h\"\n#include <ArduinoJson.h>\n#include <time.h>\n\nstatic bool          ntpSynced  = false;\nstatic time_t        bootEpoch  = 0;\nstatic unsigned long bootMs     = 0;\n\nvoid syncNTP() {\n  Serial.print(\"[NTP] Syncing\");\n  configTime(0, 0, \"pool.ntp.org\", \"time.google.com\");\n  struct tm ti;\n  int retries = 0;\n  while (!getLocalTime(&ti) && retries < 20) { delay(500); Serial.print(\".\"); retries++; }\n  if (retries < 20) {\n    bootEpoch = time(nullptr); bootMs = millis(); ntpSynced = true;\n    Serial.println(\" OK: \" + String((long)bootEpoch));\n  } else {\n    Serial.println(\" FAILED — using millis() fallback\");\n  }\n}\n\nunsigned long long getCurrentEpochMs() {\n  if (ntpSynced) return ((unsigned long long)bootEpoch * 1000ULL) + (millis() - bootMs);\n  return (unsigned long long)millis();\n}\n\nString buildReadingPayload(const SensorBundle& b) {\n  StaticJsonDocument<512> doc;\n  doc[\"deviceId\"]             = DEVICE_ID;\n  doc[\"ts\"]                   = getCurrentEpochMs();\n  doc[\"temperature_c\"]        = round(b.dht.temperature_c * 10.0f) / 10.0f;\n  doc[\"humidity_pct\"]         = round(b.dht.humidity_pct  * 10.0f) / 10.0f;\n  doc[\"vibration_magnitude\"]  = round(b.vibration_magnitude * 1000.0f) / 1000.0f;\n  doc[\"accel_x\"]              = round(b.mpu.accel_x * 1000.0f) / 1000.0f;\n  doc[\"accel_y\"]              = round(b.mpu.accel_y * 1000.0f) / 1000.0f;\n  doc[\"accel_z\"]              = round(b.mpu.accel_z * 1000.0f) / 1000.0f;\n  doc[\"firmware_version\"]     = FIRMWARE_VERSION;\n  String out; serializeJson(doc, out); return out;\n}\n\nString buildStatusPayload(const char* status) {\n  StaticJsonDocument<128> doc;\n  doc[\"deviceId\"] = DEVICE_ID; doc[\"status\"] = status; doc[\"ts\"] = getCurrentEpochMs();\n  String out; serializeJson(doc, out); return out;\n}\n\nString buildLwtPayload() { return buildStatusPayload(\"offline\"); }"
+        },
+
+        {
+          "file": "esp32/src/mqtt_client.h",
+          "content": "#pragma once\n#include <WiFi.h>\n#include <PubSubClient.h>\n\nextern unsigned long currentReadIntervalMs;  // modified by set_interval command\n\nvoid initMqtt(WiFiClient& wc);   // sets up PubSubClient — does NOT connect\nbool ensureConnected();          // reconnect with backoff — publishes online + subscribes on connect\nbool publishReading(const String& payload);\nbool publishStatus(const String& payload, bool retained);\nvoid mqttLoop();                 // must be called every loop iteration\nbool mqttConnected();"
+        },
+
+        {
+          "file": "esp32/src/mqtt_client.cpp",
+          "content": "#include \"mqtt_client.h\"\n#include \"config.h\"\n#include \"payload.h\"\n#include <ArduinoJson.h>\n\nstatic WiFiClient*   _wc              = nullptr;\nstatic PubSubClient* _client          = nullptr;\nstatic unsigned long _lastReconnectAt = 0;\nstatic unsigned long _backoff         = MQTT_RECONNECT_DELAY_MS;\n\nstatic char _topicReadings[80];\nstatic char _topicStatus[80];\nstatic char _topicCommand[80];\n\nunsigned long currentReadIntervalMs = READ_INTERVAL_MS;\n\nstatic void onMessage(char* topic, byte* payload, unsigned int len) {\n  String msg; for (unsigned int i = 0; i < len; i++) msg += (char)payload[i];\n  Serial.println(\"[MQTT] Command: \" + msg);\n  StaticJsonDocument<128> doc;\n  if (deserializeJson(doc, msg)) return;\n  const char* cmd = doc[\"cmd\"];\n  if (cmd && strcmp(cmd, \"set_interval\") == 0) {\n    int s = constrain((int)doc[\"intervalSeconds\"], 1, 60);\n    currentReadIntervalMs = (unsigned long)s * 1000UL;\n    Serial.println(\"[MQTT] Interval → \" + String(s) + \"s\");\n  }\n}\n\nstatic bool connectMqtt() {\n  String cid = String(\"esp32-\") + DEVICE_ID;\n  String lwt = buildLwtPayload();\n  Serial.print(\"[MQTT] Connecting as \" + cid + \"...\");\n  bool ok = _client->connect(cid.c_str(), MQTT_USERNAME, MQTT_PASSWORD,\n                              _topicStatus, MQTT_QOS, true, lwt.c_str());\n  if (!ok) { Serial.println(\" failed rc=\" + String(_client->state())); return false; }\n  Serial.println(\" OK\");\n  String online = buildStatusPayload(\"online\");\n  _client->publish(_topicStatus, online.c_str(), true);\n  _client->subscribe(_topicCommand, MQTT_QOS);\n  _backoff = MQTT_RECONNECT_DELAY_MS;\n  return true;\n}\n\nvoid initMqtt(WiFiClient& wc) {\n  _wc     = &wc;\n  _client = new PubSubClient(wc);\n  snprintf(_topicReadings, sizeof(_topicReadings), \"trucknet/sensors/%s/readings\", DEVICE_ID);\n  snprintf(_topicStatus,   sizeof(_topicStatus),   \"trucknet/sensors/%s/status\",   DEVICE_ID);\n  snprintf(_topicCommand,  sizeof(_topicCommand),  \"trucknet/sensors/%s/command\",  DEVICE_ID);\n  _client->setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);\n  _client->setCallback(onMessage);\n  _client->setKeepAlive(MQTT_KEEPALIVE_SECONDS);\n  _client->setBufferSize(MQTT_MAX_PACKET_SIZE);  // CRITICAL — default 256 truncates payload\n}\n\nbool ensureConnected() {\n  if (_client->connected()) return true;\n  unsigned long now = millis();\n  if (now - _lastReconnectAt < _backoff) return false;\n  _lastReconnectAt = now;\n  bool ok = connectMqtt();\n  if (!ok) _backoff = min(_backoff * 2, 30000UL);\n  return ok;\n}\n\nbool publishReading(const String& p) {\n  return _client->publish(_topicReadings, p.c_str(), false);\n}\nbool publishStatus(const String& p, bool retained) {\n  return _client->publish(_topicStatus, p.c_str(), retained);\n}\nvoid mqttLoop()     { if (_client) _client->loop(); }\nbool mqttConnected(){ return _client && _client->connected(); }"
+        },
+
+        {
+          "file": "esp32/src/watchdog.h",
+          "content": "#pragma once\n#include <stdint.h>\nvoid initWatchdog(uint32_t timeoutSeconds);  // must call in setup()\nvoid feedWatchdog();                          // must call every loop iteration\nvoid disableWatchdog();                       // call before OTA to prevent reset during flash"
+        },
+
+        {
+          "file": "esp32/src/watchdog.cpp",
+          "content": "#include \"watchdog.h\"\n#include <esp_task_wdt.h>\n\nvoid initWatchdog(uint32_t s) {\n  esp_task_wdt_init(s, true);   // true = panic (reboot) on timeout\n  esp_task_wdt_add(NULL);       // watch main task\n  Serial.println(\"[WDT] Watchdog armed — \" + String(s) + \"s timeout\");\n}\nvoid feedWatchdog()    { esp_task_wdt_reset(); }\nvoid disableWatchdog() { esp_task_wdt_delete(NULL); }"
+        },
+
+        {
+          "file": "esp32/src/ota.h",
+          "content": "#pragma once\nvoid initOTA(const char* hostname);  // call once after WiFi connects\nvoid handleOTA();                    // call every loop iteration"
+        },
+
+        {
+          "file": "esp32/src/ota.cpp",
+          "content": "#include \"ota.h\"\n#include \"watchdog.h\"\n#include <ArduinoOTA.h>\n\nvoid initOTA(const char* hostname) {\n  ArduinoOTA.setHostname(hostname);\n  ArduinoOTA.setPassword(OTA_PASSWORD);\n  ArduinoOTA.onStart([]() {\n    disableWatchdog();  // prevent reset during flash\n    Serial.println(\"[OTA] Starting update...\");\n  });\n  ArduinoOTA.onEnd([]()   { Serial.println(\"\\n[OTA] Done — rebooting\"); });\n  ArduinoOTA.onProgress([](unsigned int p, unsigned int t) {\n    Serial.printf(\"[OTA] %u%%\\r\", (p * 100) / t);\n  });\n  ArduinoOTA.onError([](ota_error_t e) {\n    Serial.println(\"[OTA][ERROR] \" + String(e));\n  });\n  ArduinoOTA.begin();\n  Serial.println(\"[OTA] Ready — hostname: \" + String(hostname) + \".local\");\n}"
+        },
+
+        {
+          "file": "esp32/src/main.ino",
+          "content": "// ─────────────────────────────────────────────────────────────────────────────\n//  TruckNet ESP32 Firmware — main.ino\n//  Reads DHT22 + MPU6050 every READ_INTERVAL_MS\n//  Publishes JSON to MQTT broker (Mosquitto)\n//  Connects to: trucknet/sensors/{DEVICE_ID}/readings\n// ─────────────────────────────────────────────────────────────────────────────\n\n#include \"config.h\"\n#include \"sensors.h\"\n#include \"payload.h\"\n#include \"mqtt_client.h\"\n#include \"ota.h\"\n#include \"watchdog.h\"\n#include <WiFi.h>\n\nstatic WiFiClient    wifiClient;\nstatic unsigned long lastReadTime   = 0;\nstatic unsigned long lastStatusTime = 0;\nstatic bool          sensorsOk      = false;\n\n// ── WiFi ─────────────────────────────────────────────────────────────────────\nvoid connectWiFi() {\n  Serial.print(\"[WiFi] Connecting to \" + String(WIFI_SSID));\n  WiFi.mode(WIFI_STA);\n  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);\n  int retries = 0;\n  while (WiFi.status() != WL_CONNECTED && retries < WIFI_MAX_RETRIES) {\n    delay(WIFI_RECONNECT_INTERVAL_MS); Serial.print(\".\"); retries++;\n  }\n  if (WiFi.status() != WL_CONNECTED) {\n    Serial.println(\"\\n[WiFi][ERROR] Failed — restarting in 5s\");\n    delay(5000); ESP.restart();\n  }\n  Serial.println(\"\\n[WiFi] Connected: \" + WiFi.localIP().toString());\n}\n\n// ── Setup ────────────────────────────────────────────────────────────────────\nvoid setup() {\n  Serial.begin(115200);\n  delay(200);\n  Serial.println();\n  Serial.println(\"┌──────────────────────────────────────┐\");\n  Serial.println(\"│  TruckNet ESP32  v\" + String(FIRMWARE_VERSION) + \"              │\");\n  Serial.println(\"│  Device: \" + String(DEVICE_ID) + \"                    │\");\n  Serial.println(\"└──────────────────────────────────────┘\");\n\n  initWatchdog(WATCHDOG_TIMEOUT_SECONDS);\n  pinMode(LED_PIN, OUTPUT);\n  digitalWrite(LED_PIN, HIGH);  // LED on during boot\n\n  connectWiFi();\n  syncNTP();\n  initOTA(DEVICE_ID);\n\n  sensorsOk = initSensors();\n  if (!sensorsOk) Serial.println(\"[WARN] Sensor init failed — will retry in loop\");\n\n  initMqtt(wifiClient);\n  ensureConnected();\n\n  digitalWrite(LED_PIN, LOW);  // LED off = ready\n  Serial.println(\"[TruckNet] Operational. Publishing every \" + String(READ_INTERVAL_MS / 1000) + \"s\");\n}\n\n// ── Loop ─────────────────────────────────────────────────────────────────────\nvoid loop() {\n  feedWatchdog();\n  handleOTA();\n\n  // WiFi guard\n  if (WiFi.status() != WL_CONNECTED) {\n    Serial.println(\"[WiFi] Lost connection — reconnecting\");\n    connectWiFi();\n    return;\n  }\n\n  // MQTT guard\n  if (!ensureConnected()) { delay(500); return; }\n  mqttLoop();\n\n  unsigned long now = millis();\n\n  // ── Sensor read + publish ─────────────────────────────────────────────────\n  if (now - lastReadTime >= currentReadIntervalMs) {\n    lastReadTime = now;\n\n    if (!sensorsOk) { sensorsOk = initSensors(); }\n\n    SensorBundle bundle = readAll();\n\n    if (bundle.dht.valid && bundle.mpu.valid) {\n      String payload = buildReadingPayload(bundle);\n      bool   ok      = publishReading(payload);\n\n      if (ok) {\n        if (LED_BLINK_ON_PUBLISH) { digitalWrite(LED_PIN, HIGH); delay(30); digitalWrite(LED_PIN, LOW); }\n        Serial.println(\"[READ] T:\" + String(bundle.dht.temperature_c, 1) +\n                       \"C  H:\" + String(bundle.dht.humidity_pct, 1) +\n                       \"%  V:\" + String(bundle.vibration_magnitude, 3) + \"G\");\n      } else {\n        Serial.println(\"[READ][WARN] Publish failed\");\n      }\n    } else {\n      Serial.println(\"[READ][WARN] Sensor read failed — skipping\");\n    }\n  }\n\n  // ── Heartbeat status publish ──────────────────────────────────────────────\n  if (now - lastStatusTime >= STATUS_PUBLISH_INTERVAL_MS) {\n    lastStatusTime = now;\n    publishStatus(buildStatusPayload(\"online\"), true);\n  }\n}"
+        },
+
+        {
+          "file": "esp32/tools/test_mqtt.py",
+          "content": "#!/usr/bin/env python3\n\"\"\"\nTruckNet MQTT Test Subscriber\nVerifies that ESP32 is publishing sensor readings correctly.\n\nUsage:\n  pip install paho-mqtt\n  python3 test_mqtt.py --host 192.168.1.100 --password your_mqtt_password\n  python3 test_mqtt.py --host 192.168.1.100 --password your_mqtt_password --device truck-001\n\"\"\"\n\nimport paho.mqtt.client as mqtt\nimport json\nimport argparse\nimport datetime\nimport sys\n\n# ANSI color codes\nGREEN  = '\\033[92m'\nYELLOW = '\\033[93m'\nRED    = '\\033[91m'\nCYAN   = '\\033[96m'\nDIM    = '\\033[2m'\nRESET  = '\\033[0m'\n\n# Default thresholds (matches DEFAULT_ALERT_CONFIG)\nTHRESHOLDS = {\n    'temp_min': 2.0, 'temp_max': 8.0,\n    'humidity_max': 85.0, 'vibration_max': 0.5,\n}\n\n\ndef color_value(val, lo=None, hi=None):\n    \"\"\"Return colored string: green=ok, yellow=near, red=breached.\"\"\"\n    if hi is not None and val > hi:   return RED + str(val) + RESET\n    if lo is not None and val < lo:   return RED + str(val) + RESET\n    return GREEN + str(val) + RESET\n\n\ndef on_connect(client, userdata, flags, rc):\n    if rc == 0:\n        topic = f\"trucknet/sensors/{userdata['device']}/#\"\n        print(f\"{CYAN}[Connected]{RESET} Subscribed to {topic}\\n\")\n        client.subscribe(topic, qos=1)\n    else:\n        print(f\"{RED}[Error]{RESET} Connection failed rc={rc}\")\n        sys.exit(1)\n\n\ndef on_message(client, userdata, msg):\n    ts   = datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]\n    kind = msg.topic.split('/')[-1]  # readings / status / command\n\n    try:\n        data = json.loads(msg.payload.decode())\n    except Exception:\n        print(f\"{DIM}[{ts}]{RESET} {msg.topic}: {msg.payload}\")\n        return\n\n    if kind == 'readings':\n        t = data.get('temperature_c', 0)\n        h = data.get('humidity_pct', 0)\n        v = data.get('vibration_magnitude', 0)\n        t_str = color_value(round(t, 1), THRESHOLDS['temp_min'], THRESHOLDS['temp_max'])\n        h_str = color_value(round(h, 1), hi=THRESHOLDS['humidity_max'])\n        v_str = color_value(round(v, 3), hi=THRESHOLDS['vibration_max'])\n        fw    = data.get('firmware_version', '?')\n        print(f\"{DIM}[{ts}]{RESET} {CYAN}{data.get('deviceId')}{RESET}  \"\n              f\"🌡 {t_str}°C  💧 {h_str}%  📳 {v_str}G  {DIM}fw:{fw}{RESET}\")\n\n    elif kind == 'status':\n        status = data.get('status', '?')\n        color  = GREEN if status == 'online' else RED\n        print(f\"{DIM}[{ts}]{RESET} {CYAN}{data.get('deviceId')}{RESET}  \"\n              f\"Status: {color}{status.upper()}{RESET}\")\n\n    else:\n        print(f\"{DIM}[{ts}] {msg.topic}:{RESET} {json.dumps(data)}\")\n\n\ndef main():\n    parser = argparse.ArgumentParser(description='TruckNet MQTT Test Subscriber')\n    parser.add_argument('--host',     required=True,            help='MQTT broker host/IP')\n    parser.add_argument('--port',     type=int, default=1883,   help='MQTT broker port (default 1883)')\n    parser.add_argument('--username', default='trucknet',       help='MQTT username (default: trucknet)')\n    parser.add_argument('--password', required=True,            help='MQTT password (from .env MQTT_PASSWORD)')\n    parser.add_argument('--device',   default='#',              help='Device ID filter (default: # = all)')\n    args = parser.parse_args()\n\n    client = mqtt.Client(userdata={'device': args.device})\n    client.username_pw_set(args.username, args.password)\n    client.on_connect = on_connect\n    client.on_message = on_message\n\n    print(f\"Connecting to {args.host}:{args.port} as {args.username}...\")\n    client.connect(args.host, args.port, keepalive=60)\n    client.loop_forever()\n\n\nif __name__ == '__main__':\n    main()"
+        },
+
+        {
+          "file": "esp32/tools/monitor.py",
+          "content": "#!/usr/bin/env python3\n\"\"\"\nTruckNet ESP32 Serial Monitor\nAdds timestamps and color to ESP32 debug output.\n\nUsage:\n  pip install pyserial\n  python3 monitor.py --port /dev/ttyUSB0    # Linux\n  python3 monitor.py --port /dev/tty.usbserial-*  # macOS\n  python3 monitor.py --port COM3            # Windows\n\"\"\"\n\nimport serial\nimport argparse\nimport datetime\nimport sys\n\nRED    = '\\033[91m'; YELLOW = '\\033[93m'; GREEN  = '\\033[92m'\nCYAN   = '\\033[96m'; BLUE   = '\\033[94m'; DIM    = '\\033[2m'; RESET  = '\\033[0m'\n\nCOLOR_MAP = {\n    '[READ]':    GREEN,\n    '[WiFi]':    BLUE,\n    '[MQTT]':    CYAN,\n    '[NTP]':     CYAN,\n    '[OTA]':     CYAN,\n    '[WDT]':     DIM,\n    '[Sensors]': GREEN,\n    '[WARN]':    YELLOW,\n    '[ERROR]':   RED,\n    '[Alert]':   RED,\n    '[TruckNet]':GREEN,\n}\n\ndef colorize(line):\n    for key, color in COLOR_MAP.items():\n        if key in line:\n            return color + line + RESET\n    return line\n\ndef main():\n    parser = argparse.ArgumentParser(description='ESP32 Serial Monitor with timestamps')\n    parser.add_argument('--port',  required=True,       help='Serial port e.g. /dev/ttyUSB0 or COM3')\n    parser.add_argument('--baud',  type=int, default=115200)\n    args = parser.parse_args()\n\n    try:\n        ser = serial.Serial(args.port, args.baud, timeout=1)\n        print(f\"{GREEN}Monitoring {args.port} at {args.baud} baud. Ctrl+C to exit.{RESET}\\n\")\n    except serial.SerialException as e:\n        print(f\"{RED}Cannot open {args.port}: {e}{RESET}\"); sys.exit(1)\n\n    try:\n        while True:\n            line = ser.readline().decode('utf-8', errors='replace').rstrip()\n            if line:\n                ts = datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]\n                print(f\"{DIM}[{ts}]{RESET} {colorize(line)}\")\n    except KeyboardInterrupt:\n        print(f\"\\n{DIM}Monitor closed.{RESET}\")\n    finally:\n        ser.close()\n\nif __name__ == '__main__':\n    main()"
+        },
+
+        {
+          "file": "esp32/docs/WIRING.md",
+          "content": "# TruckNet ESP32 — Wiring Guide\n\n> ⚠️ ESP32 GPIO pins operate at **3.3V**. Connect both sensors to **3.3V**, NOT 5V.\n\n## Bill of Materials\n\n| Component | Qty | ~Cost |\n|-----------|-----|-------|\n| ESP32 DevKit V1 (30 or 38 pin) | 1 | $7 |\n| DHT22 (AM2302) sensor | 1 | $4 |\n| MPU6050 GY-521 module | 1 | $2 |\n| 10kΩ resistor | 1 | $0.10 |\n| Breadboard + jumper wires | 1 set | $3 |\n| **Total** | | **~$16** |\n\n## DHT22 Connections\n\n| DHT22 Pin | ESP32 Pin | Notes |\n|-----------|-----------|-------|\n| Pin 1 VCC | 3.3V | NOT 5V |\n| Pin 2 DATA | GPIO4 | Add 10kΩ pull-up between VCC and DATA |\n| Pin 3 NC | — | Leave unconnected |\n| Pin 4 GND | GND | |\n\n## MPU6050 Connections\n\n| MPU6050 Pin | ESP32 Pin | Notes |\n|-------------|-----------|-------|\n| VCC | 3.3V | NOT 5V |\n| GND | GND | |\n| SDA | GPIO21 | I2C data |\n| SCL | GPIO22 | I2C clock |\n| AD0 | GND | Sets I2C address to 0x68 |\n| INT | — | Not used |\n\n## Circuit Diagram\n\n```\n              ESP32 DevKit V1\n         ┌──────────────────────┐\n 3.3V ───┤ 3V3            GND   ├─── GND (common ground)\n         │                      │\nGPIO4 ───┤ D4             D21   ├─── SDA ──► MPU6050\n         │                      │\n         │                D22   ├─── SCL ──► MPU6050\n         └──────────────────────┘\n\nDHT22                          MPU6050 (GY-521)\n┌─────────┐                    ┌──────────────┐\n│ 1: VCC  ├──── 3.3V           │ VCC  ├── 3.3V│\n│ 2: DATA ├──── GPIO4          │ GND  ├── GND │\n│         │     │              │ SDA  ├── D21 │\n│         │    10kΩ            │ SCL  ├── D22 │\n│         │     │              │ AD0  ├── GND │\n│         └─ 3.3V              └──────────────┘\n│ 3: NC   │\n│ 4: GND  ├──── GND\n└─────────┘\n```\n\n## Installation Notes\n\n- Mount the MPU6050 **flat and level** inside the container for accurate vibration baseline\n- Run the DHT22 cable away from heat sources inside the container\n- In production: use a small weatherproof enclosure (IP65 or better) for the ESP32 + breadboard\n- Power options: USB power bank, or tap the truck's 12V/24V supply via a 5V buck converter"
+        },
+
+        {
+          "file": "esp32/docs/SETUP.md",
+          "content": "# TruckNet ESP32 — Setup Guide\n\n## Step 1 — Install Arduino IDE 2.x\nDownload from https://www.arduino.cc/en/software\n\n## Step 2 — Add ESP32 Board Support\n1. Arduino IDE → File → Preferences\n2. Additional Board Manager URLs — paste:\n   `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`\n3. Tools → Board → Boards Manager → search **esp32 by Espressif Systems** → Install **2.0.14**\n\n## Step 3 — Install Libraries\nSee `libraries.txt` for all 4 required libraries with exact install steps.\n\n## Step 4 — Configure Credentials\n```bash\ncd esp32/config\ncp credentials.example.h credentials.h\n```\nEdit `credentials.h` — fill in:\n- `WIFI_SSID` + `WIFI_PASSWORD` → truck WiFi or hotspot\n- `MQTT_PASSWORD` → value from your server `.env` file\n- `OTA_PASSWORD` → any password for OTA firmware updates\n\n## Step 5 — Set Device ID\nEdit `esp32/src/config.h`:\n```cpp\n#define DEVICE_ID  \"truck-042\"   // unique per physical device\n```\n\n## Step 6 — Register the Device in TruckNet\nBefore flashing, register this device ID in the database:\n```bash\ncurl -X POST https://your-server/api/admin/sensors/truck-042/register \\\n  -H 'Content-Type: application/json' \\\n  -H 'Cookie: your-admin-session-cookie' \\\n  -d '{\"deviceId\":\"truck-042\",\"truckLabel\":\"Volvo FH16 — AB-123-CD\"}'\n```\nOr use the TruckNet admin panel if the UI is built.\n\n## Step 7 — Set Broker Host\nEdit `esp32/src/config.h`:\n```cpp\n#define MQTT_BROKER_HOST  \"192.168.1.100\"  // your server IP or domain\n```\n\n## Step 8 — Flash\n1. Connect ESP32 via USB\n2. Tools → Board → **DOIT ESP32 DEVKIT V1**\n3. Tools → Port → select your port (`/dev/ttyUSB0`, `/dev/tty.usbserial-*`, or `COM3`)\n4. Sketch → **Upload** (Ctrl+U)\n\n## Step 9 — Verify\n```bash\n# Watch Serial Monitor (115200 baud) — you should see:\n# [WiFi] Connected: 192.168.x.x\n# [NTP] Syncing... OK: 1709577600\n# [MQTT] Connecting as esp32-truck-042... OK\n# [READ] T:4.2C  H:67.3%  V:0.043G\n\n# Or use the Python test tool:\npip install paho-mqtt\npython3 esp32/tools/test_mqtt.py --host 192.168.1.100 --password YOUR_MQTT_PASSWORD\n```\n\n## OTA Updates (after first USB flash)\nSubsequent firmware updates can be pushed over WiFi:\n1. Arduino IDE → Tools → Port → select **Network ports** → `truck-042.local`\n2. Sketch → Upload — enters OTA mode, prompts for OTA_PASSWORD"
+        },
+
+        {
+          "file": "esp32/docs/TROUBLESHOOTING.md",
+          "content": "# TruckNet ESP32 — Troubleshooting\n\n## WiFi not connecting\n- Check WIFI_SSID and WIFI_PASSWORD in credentials.h (exact case, no extra spaces)\n- Ensure the truck WiFi/hotspot is on 2.4GHz — ESP32 does NOT support 5GHz\n- Check WIFI_MAX_RETRIES in config.h — increase to 40 in low-signal environments\n\n## MQTT connection failed (rc=-2)\n- rc=-2 = broker unreachable. Check MQTT_BROKER_HOST IP/domain in config.h\n- Verify Mosquitto is running: `docker ps | grep mosquitto`\n- Check firewall: port 1883 must be open between truck network and server\n- Test from laptop: `mosquitto_sub -h HOST -t 'test' -u trucknet -P PASSWORD`\n\n## MQTT connection failed (rc=4 or rc=5)\n- rc=4/5 = authentication failed. Check MQTT_USERNAME and MQTT_PASSWORD match Mosquitto passwd file\n- Regenerate passwd: see docker/mosquitto/README.md\n\n## DHT22 read failed\n- Check wiring: DATA pin → GPIO4, 10kΩ pull-up between VCC and DATA\n- DHT22 needs 1–2s between reads — already handled by retry logic\n- Some DHT22 clones need `use_pulseio=True` — if using PIO, check library docs\n\n## MPU6050 not found\n- Check wiring: SDA→GPIO21, SCL→GPIO22, VCC→3.3V (NOT 5V), AD0→GND\n- Check I2C address: AD0→GND = 0x68, AD0→3.3V = 0x69\n- Run I2C scanner sketch to confirm address\n\n## Readings not appearing in admin dashboard\n- Check sensor-consumer worker is running: `docker logs sensor-worker -f`\n- Check ABLY_API_KEY is set in sensor-worker container environment\n- Verify device is registered in iot_devices table: `SELECT * FROM iot_devices WHERE device_id='truck-042'`\n\n## Payload too large / truncated\n- Ensure MQTT_MAX_PACKET_SIZE is 512 in config.h (not the default 256)\n- client.setBufferSize(512) must be called — already done in mqtt_client.cpp"
+        },
+
+        {
+          "file": "esp32/docs/PAYLOAD_SPEC.md",
+          "content": "# TruckNet MQTT Payload Specification\n\n## Topic: `trucknet/sensors/{deviceId}/readings`\nPublisher: ESP32 | QoS: 1 | Retained: false | Interval: 5s (configurable via command)\n\n```json\n{\n  \"deviceId\": \"truck-042\",\n  \"ts\": 1709577600000,\n  \"temperature_c\": 4.2,\n  \"humidity_pct\": 67.3,\n  \"vibration_magnitude\": 0.043,\n  \"accel_x\": 0.012,\n  \"accel_y\": -0.008,\n  \"accel_z\": 1.001,\n  \"firmware_version\": \"1.0.0\"\n}\n```\n\n| Field | Type | Range | Source |\n|-------|------|-------|--------|\n| deviceId | string | — | config.h DEVICE_ID |\n| ts | number | Unix ms | NTP-synced, millis() fallback |\n| temperature_c | float | -40 to 80 | DHT22, 1dp |\n| humidity_pct | float | 0 to 100 | DHT22, 1dp |\n| vibration_magnitude | float | 0 to 20 | sqrt(ax²+ay²+az²) in G, 3dp |\n| accel_x/y/z | float | -8 to 8 | MPU6050 in G, 3dp |\n| firmware_version | string | — | config.h FIRMWARE_VERSION |\n\n## Topic: `trucknet/sensors/{deviceId}/status`\nQoS: 1 | Retained: **true**\n- Online (on connect): `{\"deviceId\":\"truck-042\",\"status\":\"online\",\"ts\":1709577600000}`\n- Offline LWT (broker auto-publishes on disconnect): `{\"deviceId\":\"truck-042\",\"status\":\"offline\",\"ts\":1709577600000}`\n\n## Topic: `trucknet/sensors/{deviceId}/command`\nPublisher: server | Subscriber: ESP32\n```json\n{ \"cmd\": \"set_interval\", \"intervalSeconds\": 10 }\n```\nClamps intervalSeconds between 1 and 60."
+        },
+
+        {
+          "file": "esp32/README.md",
+          "content": "# TruckNet ESP32 Firmware\n\nStandalone firmware for the ESP32 DevKit V1 installed in each truck container.\nReads temperature, humidity, and vibration every 5 seconds.\nPublishes JSON via MQTT to the TruckNet Mosquitto broker.\n\n```\nESP32 → MQTT (Mosquitto) → sensor-consumer worker → PostgreSQL + Ably → Admin Dashboard\n```\n\n## Hardware BOM (~$16 total vs $70+ for Raspberry Pi)\n\n| Component | Qty | ~Cost |\n|-----------|-----|-------|\n| ESP32 DevKit V1 | 1 | $7 |\n| DHT22 (AM2302) | 1 | $4 |\n| MPU6050 GY-521 | 1 | $2 |\n| 10kΩ resistor | 1 | $0.10 |\n| Breadboard + wires | 1 | $3 |\n\n## Quick Start (5 steps)\n\n1. **Wire sensors** → `docs/WIRING.md`\n2. **Install Arduino IDE + libraries** → `docs/SETUP.md`\n3. **Configure credentials**:\n   ```bash\n   cp esp32/config/credentials.example.h esp32/config/credentials.h\n   # Edit credentials.h with your WiFi + MQTT passwords\n   ```\n4. **Set device ID** in `src/config.h` → `#define DEVICE_ID \"truck-001\"`\n5. **Register + flash** → `docs/SETUP.md` steps 6–9\n\n## Files\n\n```\nesp32/\n├── src/\n│   ├── main.ino          ← entry point (setup + loop)\n│   ├── config.h          ← all configuration (edit before flashing)\n│   ├── sensors.h/cpp     ← DHT22 + MPU6050 drivers\n│   ├── payload.h/cpp     ← JSON builder (matches backend SensorReadingSchema)\n│   ├── mqtt_client.h/cpp ← MQTT with LWT + reconnect + command handler\n│   ├── ota.h/cpp         ← OTA firmware updates over WiFi\n│   └── watchdog.h/cpp    ← hardware watchdog (auto-reboot on stall)\n├── config/\n│   ├── credentials.example.h  ← COMMITTED template\n│   └── credentials.h          ← GITIGNORED (your real secrets)\n├── docs/\n│   ├── WIRING.md\n│   ├── SETUP.md\n│   ├── PAYLOAD_SPEC.md\n│   └── TROUBLESHOOTING.md\n├── tools/\n│   ├── test_mqtt.py      ← subscribe + pretty-print all sensor readings\n│   └── monitor.py        ← colored serial monitor with timestamps\n├── platformio.ini        ← PlatformIO alternative to Arduino IDE\n├── libraries.txt         ← required libraries + install commands\n└── README.md\n```\n\n## Troubleshooting → `docs/TROUBLESHOOTING.md`"
+        }
+      ]
+    }
+  ],
+
+  "post_execution_checklist": [
+    "[ ] npm install mqtt recharts completed without errors",
+    "[ ] npm run db:generate && npm run db:migrate created 3 new tables: iot_devices, sensor_readings, sensor_alerts",
+    "[ ] docker-compose.yml has mosquitto service and sensor-worker service",
+    "[ ] docker/mosquitto/passwd file generated (see docker/mosquitto/README.md)",
+    "[ ] .env.local has MQTT_URL and MQTT_PASSWORD",
+    "[ ] workers/sensor-consumer.ts compiles without TypeScript errors",
+    "[ ] All /api/admin/sensors/* routes return 401 when called without admin session",
+    "[ ] /admin/sensors page renders (may show empty state if no devices registered yet)",
+    "[ ] esp32/ folder exists at monorepo root",
+    "[ ] esp32/.gitignore includes config/credentials.h",
+    "[ ] esp32/config/credentials.example.h is present with placeholder values",
+    "[ ] esp32/config/credentials.h does NOT exist (developer must create it manually)",
+    "[ ] All 12 files in esp32/src/ exist: main.ino, config.h, sensors.h, sensors.cpp, payload.h, payload.cpp, mqtt_client.h, mqtt_client.cpp, ota.h, ota.cpp, watchdog.h, watchdog.cpp",
+    "[ ] esp32/tools/test_mqtt.py and monitor.py are executable Python scripts",
+    "[ ] AdminSidebar has Sensors nav item with alert badge",
+    "[ ] Admin overview page has Sensor Alerts stat card and SensorSummaryStrip"
+  ],
+
+  "verification_e2e": [
+    "1. Start Docker: docker-compose up -d",
+    "2. Run: python3 esp32/tools/test_mqtt.py --host localhost --password YOUR_PASSWORD",
+    "3. Register test device: POST /api/admin/sensors/truck-001/register",
+    "4. Simulate ESP32 publish: docker exec trucknet-mosquitto mosquitto_pub -h localhost -t 'trucknet/sensors/truck-001/readings' -m '{\"deviceId\":\"truck-001\",\"ts\":1709577600000,\"temperature_c\":4.2,\"humidity_pct\":67.3,\"vibration_magnitude\":0.04,\"accel_x\":0.01,\"accel_y\":-0.01,\"accel_z\":1.0,\"firmware_version\":\"1.0.0\"}' -u trucknet -P YOUR_PASSWORD",
+    "5. Check DB: SELECT * FROM sensor_readings ORDER BY recorded_at DESC LIMIT 1",
+    "6. Open /admin/sensors — device card appears with live values",
+    "7. Simulate breach (temp > 8): send temperature_c: 12.5 → sensor_alert row created → toast appears on admin dashboard",
+    "8. Flash real ESP32 → all 4 steps in docs/SETUP.md → Serial Monitor shows [READ] lines"
+  ]
+}
