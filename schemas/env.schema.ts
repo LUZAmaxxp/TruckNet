@@ -34,6 +34,13 @@ export const EnvSchema = z.object({
   // Optional in local dev: only required when running the sensor-consumer worker.
   MQTT_URL:      z.string().url({ message: "MQTT_URL must be a valid URL, e.g. mqtt://trucknet:password@localhost:1883" }).optional(),
   MQTT_PASSWORD: z.string().min(8, { message: "MQTT_PASSWORD must be at least 8 characters" }).optional(),
+  // SMTP — for automated ESG report emails to HR (FEAT-008)
+  // When unset, email dispatch is gracefully skipped.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.string().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

@@ -1,0 +1,507 @@
+{
+  "project": "TruckNet",
+  "version": "0.1.0",
+  "description": "Full-stack fleet management platform for truck drivers and fleet admins. Covers real-time GPS tracking, driver-to-driver messaging (text + voice), SOS stress signals, LiveKit voice/video calls, IoT container sensor monitoring via ESP32/MQTT, and a full admin operations dashboard.",
+  "lastUpdated": "2026-03-06",
+
+  "techStack": {
+    "framework": "Next.js 14 (App Router)",
+    "language": "TypeScript",
+    "auth": "NextAuth v5 (Credentials provider, JWT sessions)",
+    "database": "PostgreSQL 16 + Drizzle ORM",
+    "realtime": "Ably v2 (pub/sub — server REST + client Realtime SDK)",
+    "messageQueue": "Apache Kafka (KRaft mode, no ZooKeeper) via KafkaJS",
+    "iotBroker": "Eclipse Mosquitto 2 (MQTT v5)",
+    "webrtc": "LiveKit SFU (livekit-server-sdk + @livekit/components-react)",
+    "maps": "Leaflet + react-leaflet",
+    "routing": "OSRM public API",
+    "cache": "Redis 7 (OSRM route cache, LRU 128 MB)",
+    "styling": "Tailwind CSS v3 + CSS variables (design system: navy, sage, terra, honey, base)",
+    "validation": "Zod",
+    "testing": "Vitest (unit), Playwright (E2E)",
+    "containerisation": "Docker + docker-compose"
+  },
+
+  "features": [
+    {
+      "id": "FEAT-001",
+      "name": "Authentication & Role-Based Access Control",
+      "status": "implemented",
+      "description": "Email/password registration and login. Two roles: driver and admin. Admin registration gated by invite code. Bcrypt password hashing. JWT sessions via NextAuth v5. Edge-safe middleware enforces route protection and per-route rate limiting.",
+      "routes": [
+        "POST /api/auth/register",
+        "GET  /api/auth/ably-token",
+        "GET  /api/auth/socket-token",
+             "/api/auth/[...nextauth]"
+      ],
+      "pages": [
+        "app/(auth)/login/page.tsx",
+        "app/(auth)/register/page.tsx"
+      ],
+      "keyFiles": [
+        "auth.ts",
+        "auth.config.ts",
+        "middleware.ts",
+        "lib/auth-helpers.ts",
+        "schemas/user.schema.ts"
+      ],
+      "dbTables": ["users"],
+      "rateLimits": {
+        "register": "5 requests / hour / IP",
+        "stress": "3 requests / 10 min / user",
+        "voice": "10 requests / min / user"
+      }
+    },
+    {
+      "id": "FEAT-002",
+      "name": "User Profile & Avatar Upload",
+      "status": "implemented",
+      "description": "View own profile (name, email, unique @tag, avatar). Upload and replace profile photo stored on disk in public/uploads/ (persisted via Docker volume).",
+      "routes": [
+        "GET  /api/profile",
+        "POST /api/profile/upload-avatar"
+      ],
+      "pages": ["app/(protected)/profile/page.tsx"],
+      "keyFiles": [
+        "app/api/profile/route.ts",
+        "app/api/profile/upload-avatar/route.ts"
+      ],
+      "dbTables": ["users"],
+      "storage": "Local disk — public/uploads/ (Docker volume: uploads_data)"
+    },
+    {
+      "id": "FEAT-003",
+      "name": "Friend System",
+      "status": "implemented",
+      "description": "Find other drivers by @tag. Send, accept, or reject friend requests. View accepted friends list. Peek at a friend's last known GPS location. Real-time Ably notifications for request received and request accepted events.",
+      "routes": [
+        "POST  /api/friends/request",
+        "GET   /api/friends/list",
+        "PATCH /api/friends/[id]/accept",
+        "PATCH /api/friends/[id]/reject",
+        "GET   /api/friends/[id]/location",
+        "GET   /api/users?tag=…"
+      ],
+      "pages": ["app/(protected)/friends/page.tsx"],
+      "keyFiles": [
+        "app/api/friends/request/route.ts",
+        "app/api/friends/list/route.ts",
+        "app/api/friends/[id]/accept/route.ts",
+        "app/api/friends/[id]/reject/route.ts",
+        "app/api/friends/[id]/location/route.ts",
+        "app/api/users/route.ts"
+      ],
+      "dbTables": ["friend_requests"],
+      "ablyEvents": ["friend_request_received", "friend_request_accepted"]
+    },
+    {
+      "id": "FEAT-004",
+      "name": "Real-Time GPS Tracking & Fleet Map",
+      "status": "implemented",
+      "description": "Drivers broadcast GPS coordinates every 20 seconds. Server upserts to DB and pushes a personalised nearby-driver list (within 50 km radius via Haversine) to each driver via Ably. Interactive Leaflet map shows nearby drivers as pins with names, avatars, distances. Clicking a pin opens messaging/call actions. Drivers can plot OSRM routes to a destination (result cached in Redis) and share live ETA as an overlay visible to admin.",
+      "routes": [
+        "POST            /api/drivers/location",
+        "GET             /api/drivers/nearby",
+        "GET|POST|DELETE /api/drivers/route",
+        "GET             /api/geocode?q=…"
+      ],
+      "pages": [
+        "app/(protected)/map/page.tsx",
+        "app/(protected)/dashboard/page.tsx"
+      ],
+      "keyFiles": [
+        "components/map/DriverMap.tsx",
+        "components/map/RouteSetupModal.tsx",
+        "components/map/RouteInfoBar.tsx",
+        "lib/haversine.ts",
+        "lib/osrm.ts",
+        "lib/route-cache.ts"
+      ],
+      "dbTables": ["driver_locations", "driver_routes"],
+      "ablyChannels": {
+        "drivers": ["driver_location_updated", "driver_route_set", "driver_route_cleared"],
+        "user:<userId>": ["nearby_driver_update"]
+      }
+    },
+    {
+      "id": "FEAT-005",
+      "name": "Messaging — Text & Voice",
+      "status": "implemented",
+      "description": "Real-time 1-on-1 text chat between friends with delivered/read status. Voice messages: record audio in-browser (MediaRecorder), upload to server, deliver URL to recipient with duration display and playback UI. Both trigger Ably notifications for out-of-chat delivery.",
+      "routes": [
+        "POST  /api/text-messages",
+        "GET   /api/text-messages/conversations",
+        "PATCH /api/text-messages/[id]/read",
+        "POST  /api/voice-messages",
+        "PATCH /api/voice-messages/[id]/status",
+        "POST  /api/upload"
+      ],
+      "pages": ["app/(protected)/messages/page.tsx"],
+      "keyFiles": [
+        "components/messages/FriendsSidebar.tsx",
+        "components/messages/ChatPanel.tsx",
+        "hooks/useVoiceRecorder.ts"
+      ],
+      "dbTables": ["text_messages", "voice_messages"],
+      "ablyEvents": ["text_message_received", "voice_message_received"],
+      "storage": "Local disk — public/uploads/"
+    },
+    {
+      "id": "FEAT-006",
+      "name": "SOS / Stress Signals",
+      "status": "implemented",
+      "description": "Driver triggers an SOS with one tap. Signal persisted to DB, published to Kafka topic trucknet.stress-signals. Stress-worker consumer fans out to all nearby drivers (≤50 km) via Ably. Receiving drivers get in-app toast. Failed Kafka messages go to a dead-letter queue after max retries. Admins can view and resolve all signals.",
+      "routes": [
+        "POST  /api/stress-signals",
+        "GET   /api/stress-signals/active",
+        "PATCH /api/stress-signals/[id]/resolve",
+        "GET   /api/admin/sos",
+        "GET   /api/admin/sos/stream  (SSE)",
+        "PATCH /api/admin/sos/[id]/resolve"
+      ],
+      "pages": [
+        "app/(protected)/stress/page.tsx",
+        "app/(admin)/admin/sos/page.tsx"
+      ],
+      "keyFiles": [
+        "workers/stress-signal-consumer.ts",
+        "lib/kafka.ts",
+        "lib/kafka-topics.ts",
+        "lib/admin-sos-stream.ts",
+        "schemas/stress.schema.ts"
+      ],
+      "dbTables": ["stress_signals"],
+      "kafkaTopics": ["trucknet.stress-signals", "trucknet.stress-signals.dlq"],
+      "ablyChannels": {
+        "user:<userId>": ["stress_signal_alert"],
+        "stress:alerts": ["stress_signal_alert"]
+      }
+    },
+    {
+      "id": "FEAT-007",
+      "name": "IoT Container Sensor Monitoring",
+      "status": "implemented",
+      "description": "ESP32 microcontrollers mounted on trucks publish temperature, humidity, and vibration (MPU6050 accelerometer) readings every 5 s to Eclipse Mosquitto via MQTT. A standalone sensor-worker subscribes, validates with Zod, persists to DB, evaluates configurable per-device thresholds, raises sensor alerts, and fans data to admin in real-time via Ably. Admin can register new devices, view reading history charts (sparklines + gauges), configure thresholds, and acknowledge alerts. ESP32 firmware included in /esp32 folder with full setup documentation.",
+      "routes": [
+        "GET              /api/admin/sensors",
+        "POST             /api/admin/sensors/[deviceId]/register",
+        "GET|PATCH        /api/admin/sensors/[deviceId]",
+        "GET              /api/admin/sensors/[deviceId]/readings",
+        "GET|PATCH        /api/admin/sensors/[deviceId]/thresholds",
+        "GET              /api/admin/sensors/alerts",
+        "PATCH            /api/admin/sensors/alerts/[alertId]"
+      ],
+      "pages": [
+        "app/(admin)/admin/sensors/page.tsx",
+        "app/(admin)/admin/sensors/[deviceId]/page.tsx"
+      ],
+      "components": [
+        "components/admin/sensors/DeviceStatusDot.tsx",
+        "components/admin/sensors/VibrationIndicator.tsx",
+        "components/admin/sensors/SensorGauge.tsx",
+        "components/admin/sensors/SensorSparkline.tsx",
+        "components/admin/sensors/SensorAlertCard.tsx",
+        "components/admin/sensors/SensorAlertPanel.tsx",
+        "components/admin/sensors/SensorDeviceCard.tsx",
+        "components/admin/sensors/SensorDeviceGrid.tsx"
+      ],
+      "keyFiles": [
+        "workers/sensor-consumer.ts",
+        "lib/sensor-thresholds.ts",
+        "schemas/sensor.schema.ts",
+        "docker/mosquitto/mosquitto.conf",
+        "esp32/src/main.ino",
+        "esp32/src/config.h",
+        "esp32/src/sensors.cpp",
+        "esp32/src/mqtt_client.cpp",
+        "esp32/config/credentials.example.h",
+        "esp32/docs/SETUP.md",
+        "esp32/docs/WIRING.md",
+        "esp32/docs/PAYLOAD_SPEC.md"
+      ],
+      "dbTables": ["iot_devices", "sensor_readings", "sensor_alerts"],
+      "mqttTopics": [
+        "trucknet/sensors/+/readings  (QoS 1 — sensor payload every 5s)",
+        "trucknet/sensors/+/status    (QoS 1 — LWT offline + heartbeat online)"
+      ],
+      "ablyChannels": {
+        "sensors:<deviceId>": ["sensor_reading", "device_status"],
+        "admin:sensors": ["sensor_alert", "sensor_alert_acked", "fleet_sensor_update"]
+      },
+      "esp32": {
+        "board": "DOIT ESP32 DEVKIT V1",
+        "framework": "Arduino (PlatformIO)",
+        "sensors": ["DHT22 (temperature + humidity)", "MPU6050 (3-axis accelerometer)"],
+        "libraries": ["PubSubClient 2.8.0", "DHT sensor library 1.4.6", "Adafruit MPU6050 2.2.6", "ArduinoJson 6.21.5"],
+        "features": ["QoS 1 MQTT", "hardware watchdog", "OTA firmware update", "NTP time sync", "LWT offline status"]
+      },
+      "alertTypes": ["temp_high", "temp_low", "humidity_high", "vibration_high"]
+    },
+    {
+      "id": "FEAT-008",
+      "name": "Voice & Video Calls (LiveKit)",
+      "status": "implemented",
+      "description": "1-on-1 WebRTC voice or video calls between friends using LiveKit SFU. Caller initiates — server creates a LiveKit room, pre-generates JWTs for both parties, notifies callee via Ably call_incoming event. Callee can accept or decline. Call state (ongoing/completed/missed/declined) and duration are persisted. Admins can filter and browse full call history.",
+      "routes": [
+        "POST /api/calls/initiate",
+        "GET  /api/calls/token",
+        "GET  /api/calls/[roomName]",
+        "POST /api/calls/[roomName]/decline",
+        "GET  /api/calls/history",
+        "GET  /api/admin/calls"
+      ],
+      "pages": [
+        "app/(protected)/calls/[roomName]/page.tsx",
+        "app/(admin)/admin/calls/page.tsx"
+      ],
+      "keyFiles": [
+        "lib/livekit-server.ts",
+        "components/calls/CallButton.tsx",
+        "livekit.yaml"
+      ],
+      "dbTables": ["call_history"],
+      "ablyEvents": ["call_incoming", "call_declined", "call_missed", "call_ended"],
+      "tokenTtl": "8 hours (scoped to single room)"
+    },
+    {
+      "id": "FEAT-009",
+      "name": "Admin Dashboard",
+      "status": "implemented",
+      "description": "Full fleet operations panel for admin users only. Protected by requireAdminSession(). Includes stats bar (KPI cards: totalDrivers, onlineDrivers, activeSos, ongoingCalls, callsToday, msgsToday, sensorAlerts), live fleet Leaflet map, active SOS panel, paginated drivers/calls/messages tables, IoT sensor monitoring grid, and sensor alert panel. Sidebar shows live badge counts for SOS and sensor alerts.",
+      "routes": [
+        "GET /api/admin/stats",
+        "GET /api/admin/drivers",
+        "GET /api/admin/drivers/live",
+        "GET /api/admin/drivers/[driverId]/route",
+        "GET /api/admin/routes/active"
+      ],
+      "pages": [
+        "app/(admin)/admin/page.tsx",
+        "app/(admin)/admin/layout.tsx",
+        "app/(admin)/admin/drivers/page.tsx",
+        "app/(admin)/admin/sos/page.tsx",
+        "app/(admin)/admin/calls/page.tsx",
+        "app/(admin)/admin/messages/page.tsx",
+        "app/(admin)/admin/sensors/page.tsx",
+        "app/(admin)/admin/sensors/[deviceId]/page.tsx"
+      ],
+      "components": [
+        "components/admin/AdminSidebar.tsx",
+        "components/admin/StatsBar.tsx",
+        "components/admin/FleetMap.tsx",
+        "components/admin/SosPanel.tsx",
+        "components/admin/DriverTable.tsx",
+        "components/admin/CallHistoryTable.tsx"
+      ]
+    }
+  ],
+
+  "database": {
+    "engine": "PostgreSQL 16",
+    "orm": "Drizzle ORM",
+    "migrations": "db/migrations/",
+    "tables": [
+      {
+        "name": "users",
+        "columns": ["id", "name", "email", "password_hash", "tag", "tag_number", "profile_image_url", "role (driver|admin)", "created_at"],
+        "constraints": ["email UNIQUE", "tag UNIQUE"]
+      },
+      {
+        "name": "driver_locations",
+        "columns": ["id", "user_id FK→users", "latitude", "longitude", "updated_at"],
+        "notes": "Upserted on each location broadcast"
+      },
+      {
+        "name": "driver_routes",
+        "columns": ["id", "driver_id FK→users", "origin_lat", "origin_lng", "destination_lat", "destination_lng", "destination_label", "route_geometry (JSON GeoJSON)", "distance_meters", "duration_seconds", "status (active|completed|cancelled)", "created_at", "completed_at"]
+      },
+      {
+        "name": "text_messages",
+        "columns": ["id", "sender_id FK→users", "receiver_id FK→users", "content", "status (delivered|read)", "created_at"],
+        "indexes": ["(sender_id, receiver_id)"]
+      },
+      {
+        "name": "voice_messages",
+        "columns": ["id", "sender_id FK→users", "receiver_id FK→users", "audio_url", "duration_seconds", "status (delivered|listened)", "created_at"]
+      },
+      {
+        "name": "stress_signals",
+        "columns": ["id", "user_id FK→users", "latitude", "longitude", "status (active|resolved)", "created_at"],
+        "indexes": ["(status, created_at)"]
+      },
+      {
+        "name": "friend_requests",
+        "columns": ["id", "sender_id FK→users", "receiver_id FK→users", "status (pending|accepted|rejected)", "created_at"],
+        "constraints": ["UNIQUE (sender_id, receiver_id)"]
+      },
+      {
+        "name": "call_history",
+        "columns": ["id", "room_name UNIQUE", "caller_id FK→users", "callee_id FK→users", "call_type (voice|video)", "status (ongoing|completed|missed|declined)", "started_at", "ended_at", "duration_seconds", "created_at"]
+      },
+      {
+        "name": "iot_devices",
+        "columns": ["device_id (PK text)", "truck_label", "status (online|offline|unknown)", "driver_id FK→users nullable", "last_seen_at", "firmware_version", "alert_config (JSON)", "created_at"]
+      },
+      {
+        "name": "sensor_readings",
+        "columns": ["id", "device_id FK→iot_devices", "temperature_c", "humidity_pct", "vibration_magnitude", "accel_x", "accel_y", "accel_z", "recorded_at"],
+        "indexes": ["(device_id, recorded_at)"],
+        "notes": "Time-series data, ~1 row per 5 seconds per device"
+      },
+      {
+        "name": "sensor_alerts",
+        "columns": ["id", "device_id FK→iot_devices", "alert_type (temp_high|temp_low|humidity_high|vibration_high)", "value", "threshold", "status (active|acknowledged|resolved)", "triggered_at", "acked_by FK→users nullable", "acked_at nullable"]
+      }
+    ]
+  },
+
+  "realtime": {
+    "provider": "Ably v2",
+    "tokenEndpoint": "GET /api/auth/ably-token",
+    "channels": {
+      "user:<userId>": {
+        "direction": "server → specific client",
+        "events": ["nearby_driver_update", "text_message_received", "voice_message_received", "friend_request_received", "friend_request_accepted", "call_incoming", "call_declined", "call_missed", "call_ended", "stress_signal_alert"]
+      },
+      "drivers": {
+        "direction": "server → all clients",
+        "events": ["driver_location_updated", "driver_route_set", "driver_route_cleared"]
+      },
+      "stress:alerts": {
+        "direction": "server → all clients",
+        "events": ["stress_signal_alert"]
+      },
+      "sensors:<deviceId>": {
+        "direction": "sensor-worker → admin device detail page",
+        "events": ["sensor_reading", "device_status"]
+      },
+      "admin:sensors": {
+        "direction": "sensor-worker → admin fleet page",
+        "events": ["sensor_alert", "sensor_alert_acked", "fleet_sensor_update"]
+      }
+    }
+  },
+
+  "workers": [
+    {
+      "name": "stress-signal-consumer",
+      "file": "workers/stress-signal-consumer.ts",
+      "dockerService": "stress-worker",
+      "transport": "Kafka",
+      "consumes": ["trucknet.stress-signals"],
+      "produces": "Ably: user:<driverId> + stress:alerts",
+      "errorHandling": "Retry with exponential backoff, dead-letter to trucknet.stress-signals.dlq"
+    },
+    {
+      "name": "sensor-consumer",
+      "file": "workers/sensor-consumer.ts",
+      "dockerService": "sensor-worker",
+      "transport": "MQTT (Eclipse Mosquitto)",
+      "consumes": ["trucknet/sensors/+/readings", "trucknet/sensors/+/status"],
+      "produces": "PostgreSQL (sensor_readings, sensor_alerts, iot_devices) + Ably (sensors:<deviceId>, admin:sensors)",
+      "errorHandling": "Zod validation rejects malformed payloads; alert deduplication prevents duplicate active alerts"
+    }
+  ],
+
+  "dockerServices": [
+    { "name": "postgres",      "image": "postgres:16-alpine",               "ports": ["5433:5432"], "purpose": "Primary database" },
+    { "name": "app",           "image": "custom (Dockerfile)",              "ports": ["3000:3000"], "purpose": "Next.js application" },
+    { "name": "livekit",       "image": "livekit/livekit-server:latest",    "ports": ["7880", "7881", "7882/udp"], "purpose": "WebRTC SFU" },
+    { "name": "redis",         "image": "redis:7-alpine",                   "ports": ["6379:6379"], "purpose": "OSRM route cache (LRU 128 MB)" },
+    { "name": "redisinsight",  "image": "redis/redisinsight:latest",        "ports": ["5540:5540"], "purpose": "Redis browser GUI" },
+    { "name": "kafka",         "image": "confluentinc/cp-kafka:7.4.0",      "ports": ["9092:9092"], "purpose": "Message broker (KRaft, no ZooKeeper)" },
+    { "name": "kafka-ui",      "image": "provectuslabs/kafka-ui:latest",    "ports": ["8080:8080"], "purpose": "Kafka topic / consumer-lag GUI" },
+    { "name": "stress-worker", "image": "custom (Dockerfile.worker)",       "ports": [],           "purpose": "Stress signal Kafka consumer" },
+    { "name": "sensor-worker", "image": "custom (Dockerfile.worker)",       "ports": [],           "purpose": "MQTT IoT sensor consumer + DB writer" },
+    { "name": "mosquitto",     "image": "eclipse-mosquitto:2",              "ports": ["1883:1883", "9001:9001"], "purpose": "MQTT broker for ESP32 devices" }
+  ],
+
+  "environmentVariables": [
+    { "name": "DATABASE_URL",       "required": true,  "notes": "PostgreSQL connection string" },
+    { "name": "NEXTAUTH_SECRET",    "required": true,  "notes": "JWT signing secret, min 10 chars" },
+    { "name": "NEXTAUTH_URL",       "required": true,  "notes": "App canonical URL" },
+    { "name": "ABLY_API_KEY",       "required": true,  "notes": "Ably REST + Realtime" },
+    { "name": "KAFKA_BROKERS",      "required": true,  "default": "localhost:9092", "notes": "Comma-separated broker addresses" },
+    { "name": "KAFKA_ENABLED",      "required": true,  "default": "false", "notes": "Toggle Kafka; falls back to direct Ably on false" },
+    { "name": "LIVEKIT_URL",        "required": false, "notes": "LiveKit SFU URL (wss://…)" },
+    { "name": "LIVEKIT_API_KEY",    "required": false, "notes": "LiveKit API key" },
+    { "name": "LIVEKIT_API_SECRET", "required": false, "notes": "LiveKit API secret" },
+    { "name": "ADMIN_INVITE_CODE",  "required": false, "notes": "Required when registering role=admin, min 8 chars" },
+    { "name": "REDIS_URL",          "required": false, "notes": "Redis URL for OSRM route cache" },
+    { "name": "MQTT_URL",           "required": false, "notes": "mqtt://user:pass@host:1883 — sensor worker only. @ in password must be %40" },
+    { "name": "MQTT_PASSWORD",      "required": false, "notes": "Plain MQTT password — used by docker-compose healthcheck and sensor worker" },
+    { "name": "SOCKET_PORT",        "required": false, "notes": "Port override for Socket.IO" }
+  ],
+
+  "apiRoutes": {
+    "auth": [
+      "POST   /api/auth/register",
+      "GET    /api/auth/ably-token",
+      "GET    /api/auth/socket-token",
+      "       /api/auth/[...nextauth]"
+    ],
+    "profile": [
+      "GET    /api/profile",
+      "POST   /api/profile/upload-avatar"
+    ],
+    "users": [
+      "GET    /api/users?tag=…"
+    ],
+    "friends": [
+      "POST   /api/friends/request",
+      "GET    /api/friends/list",
+      "PATCH  /api/friends/[id]/accept",
+      "PATCH  /api/friends/[id]/reject",
+      "GET    /api/friends/[id]/location"
+    ],
+    "drivers": [
+      "POST            /api/drivers/location",
+      "GET             /api/drivers/nearby",
+      "GET|POST|DELETE /api/drivers/route",
+      "GET             /api/geocode?q=…"
+    ],
+    "messages": [
+      "POST   /api/text-messages",
+      "GET    /api/text-messages/conversations",
+      "PATCH  /api/text-messages/[id]/read",
+      "POST   /api/voice-messages",
+      "PATCH  /api/voice-messages/[id]/status",
+      "POST   /api/upload"
+    ],
+    "stress": [
+      "POST   /api/stress-signals",
+      "GET    /api/stress-signals/active",
+      "PATCH  /api/stress-signals/[id]/resolve"
+    ],
+    "calls": [
+      "POST   /api/calls/initiate",
+      "GET    /api/calls/token",
+      "GET    /api/calls/[roomName]",
+      "POST   /api/calls/[roomName]/decline",
+      "GET    /api/calls/history"
+    ],
+    "admin": [
+      "GET    /api/admin/stats",
+      "GET    /api/admin/drivers",
+      "GET    /api/admin/drivers/live",
+      "GET    /api/admin/drivers/[driverId]/route",
+      "GET    /api/admin/routes/active",
+      "GET    /api/admin/sos",
+      "GET    /api/admin/sos/stream  (SSE)",
+      "PATCH  /api/admin/sos/[id]/resolve",
+      "GET    /api/admin/calls",
+      "GET    /api/admin/sensors",
+      "POST   /api/admin/sensors/[deviceId]/register",
+      "GET    /api/admin/sensors/[deviceId]",
+      "PATCH  /api/admin/sensors/[deviceId]",
+      "GET    /api/admin/sensors/[deviceId]/readings",
+      "GET    /api/admin/sensors/[deviceId]/thresholds",
+      "PATCH  /api/admin/sensors/[deviceId]/thresholds",
+      "GET    /api/admin/sensors/alerts",
+      "PATCH  /api/admin/sensors/alerts/[alertId]"
+    ],
+    "misc": [
+      "GET    /api/health"
+    ]
+  }
+}

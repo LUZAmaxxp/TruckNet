@@ -1,0 +1,832 @@
+{
+  "meta": {
+    "id": "FEAT-008-COMPLETE",
+    "project": "TruckNet",
+    "date": "2026-03-06",
+    "title": "Driver ESG Report — Complete Implementation (ISO 26000 / CSRD)",
+    "description": "Full feature addition to TruckNet. Adds data collection for everything the company needs to report under CSRD + ISO 26000, then exports a structured PDF + CSV that HR uploads directly into the ESG/RSE platform for automatic observation extraction. Zero manual data entry on the ESG side.",
+
+    "csrd_coverage_target": {
+      "ESRS_E1": "GHG Scope 1 (direct fleet emissions) + Scope 2 (electric vehicles if applicable) + energy intensity",
+      "ESRS_E5": "Fuel consumption, energy use per km, empty run ratio",
+      "ESRS_S1": "Working hours, overtime, rest periods, accident frequency rate, training hours, certifications",
+      "ESRS_S1_diversity": "Gender, age group, contract type per driver",
+      "ESRS_G1": "Compliance incidents, regulatory stops, maintenance record"
+    },
+
+    "what_this_adds_to_trucknet": [
+      "Shift log — driver start/end shift, breaks, overtime (new data collection)",
+      "Vehicle maintenance log — service records, inspections, fuel fills (new data collection)",
+      "Driver training & certification tracker — courses, licenses, expiry dates (new data collection)",
+      "Driver diversity profile — gender, age group, contract type (new data collection)",
+      "Empty run tracker — return trips with no cargo (enhancement to existing trip model)",
+      "Fleet ESG benchmark card — driver vs fleet average on PDF cover (new report section)",
+      "Automated quarterly report scheduler — auto-generate + email HR (new background job)",
+      "Structured PDF/CSV export optimised for ESG platform OCR extraction (existing FEAT-008 base)"
+    ],
+
+    "esg_platform_ocr_guarantee": "Section 6 of every PDF contains a clean two-column structured table with exact ESG platform normalized_key strings as visible text labels. PaddleOCR + Grok extract observations on first pass with zero ambiguity."
+  },
+
+  "subagents": [
+
+    {
+      "id": "SA-1",
+      "name": "Foundation Agent",
+      "priority": 1,
+      "title": "DB schema — all new tables + updated existing tables + Zod schemas",
+      "description": "All new tables needed to collect the missing data. Minimal changes to existing tables. All PKs UUIDv7, all tables include company_id for RLS.",
+
+      "files_to_modify": ["db/schema.ts"],
+      "files_to_create": ["schemas/driver-esg-report.schema.ts"],
+
+      "tasks": [
+        {
+          "file": "db/schema.ts",
+          "action": "APPEND all new tables + MODIFY existing transport_trips table",
+
+          "new_enums": [
+            "export const reportPeriodEnum = pgEnum('report_period', ['weekly', 'monthly', 'quarterly', 'custom'])",
+            "export const shiftStatusEnum = pgEnum('shift_status', ['active', 'completed', 'cancelled'])",
+            "export const maintenanceTypeEnum = pgEnum('maintenance_type', ['oil_change', 'tire_replacement', 'brake_service', 'technical_inspection', 'filter_replacement', 'battery', 'bodywork', 'fuel_fill', 'other'])",
+            "export const trainingTypeEnum = pgEnum('training_type', ['license_renewal', 'adr_certification', 'eco_driving', 'defensive_driving', 'first_aid', 'cargo_handling', 'digital_tools', 'other'])",
+            "export const contractTypeEnum = pgEnum('contract_type', ['cdi', 'cdd', 'interim', 'apprenticeship', 'other'])",
+            "export const genderEnum = pgEnum('gender', ['male', 'female', 'non_binary', 'prefer_not_to_say'])"
+          ],
+
+          "modify_existing_transport_trips": [
+            "ADD COLUMN: is_empty_run boolean('is_empty_run').notNull().default(false)  — true when truck returns with no cargo",
+            "ADD COLUMN: load_factor_pct real('load_factor_pct')  — cargo weight / max payload × 100; nullable"
+          ],
+
+          "new_tables": [
+
+            {
+              "name": "driver_profiles",
+              "description": "Extended driver diversity + HR profile. Separate from the core drivers table to keep sensitive data isolated. One-to-one with drivers.",
+              "columns": [
+                "profile_id: uuid PK defaultRandom()",
+                "company_id: uuid FK → companies CASCADE",
+                "driver_id: uuid FK → drivers CASCADE UNIQUE",
+                "gender: genderEnum nullable",
+                "birth_year: integer nullable  — year only, no full DOB for GDPR",
+                "nationality: varchar(100) nullable",
+                "contract_type: contractTypeEnum nullable",
+                "contract_start_date: date nullable",
+                "contract_end_date: date nullable  — null for CDI",
+                "weekly_hours_contractual: real nullable  — contractual hours per week",
+                "driving_license_categories: json default '[]'  — string[] e.g. ['B','C','CE','D']",
+                "license_obtained_year: integer nullable",
+                "created_at, updated_at, created_by"
+              ],
+              "indexes": ["company_id", "driver_id"]
+            },
+
+            {
+              "name": "driver_shifts",
+              "description": "Shift log — records actual working time per day per driver. Enables ESRS S1 working hours, overtime, rest period compliance.",
+              "columns": [
+                "shift_id: uuid PK defaultRandom()",
+                "company_id: uuid FK → companies CASCADE",
+                "driver_id: uuid FK → drivers CASCADE",
+                "trip_id: uuid FK → transport_trips nullable  — linked trip if applicable",
+                "shift_date: date notNull",
+                "started_at: timestamp with timezone notNull",
+                "ended_at: timestamp with timezone nullable  — null while shift active",
+                "break_minutes: integer notNull default 0  — total break time in minutes",
+                "driving_minutes: integer nullable  — computed: (ended_at - started_at) - break_minutes",
+                "overtime_minutes: integer notNull default 0  — minutes beyond contractual daily hours",
+                "night_shift: boolean notNull default false  — shift contains hours between 22h and 6h",
+                "status: shiftStatusEnum notNull default 'active'",
+                "driver_notes: text nullable",
+                "created_at, updated_at, created_by"
+              ],
+              "indexes": ["company_id", "driver_id", "shift_date"]
+            },
+
+            {
+              "name": "vehicle_maintenance_logs",
+              "description": "Vehicle service and maintenance records. Enables ESRS E5 (resource use) and G1 (regulatory compliance). One vehicle = one driver for fleet trucks.",
+              "columns": [
+                "maintenance_id: uuid PK defaultRandom()",
+                "company_id: uuid FK → companies CASCADE",
+                "driver_id: uuid FK → drivers nullable  — which driver's vehicle",
+                "vehicle_plate: varchar(20) notNull",
+                "maintenance_type: maintenanceTypeEnum notNull",
+                "performed_at: date notNull",
+                "odometer_km: real nullable  — odometer reading at service",
+                "cost_eur: real nullable",
+                "fuel_liters: real nullable  — for fuel_fill type only",
+                "fuel_type: fuelTypeEnum nullable  — for fuel_fill type",
+                "provider_name: varchar(200) nullable  — garage or service center name",
+                "next_due_at: date nullable  — next scheduled maintenance date",
+                "next_due_km: real nullable  — next maintenance at odometer km",
+                "regulatory_compliant: boolean notNull default true  — passed inspection / meets regulation",
+                "notes: text nullable",
+                "document_url: varchar(500) nullable  — invoice or certificate stored in R2",
+                "created_at, updated_at, created_by"
+              ],
+              "indexes": ["company_id", "driver_id", "vehicle_plate", "performed_at", "maintenance_type"]
+            },
+
+            {
+              "name": "driver_training_records",
+              "description": "Training and certification records per driver. Enables ESRS S1 training hours and ISO 26000 §6.4.7 human development. Also tracks license renewals.",
+              "columns": [
+                "training_id: uuid PK defaultRandom()",
+                "company_id: uuid FK → companies CASCADE",
+                "driver_id: uuid FK → drivers CASCADE",
+                "training_type: trainingTypeEnum notNull",
+                "title: varchar(200) notNull  — e.g. 'Formation éco-conduite ADEME', 'Renouvellement permis CE'",
+                "provider: varchar(200) nullable  — training organization name",
+                "completed_at: date notNull",
+                "duration_hours: real notNull  — training duration in hours",
+                "cost_eur: real nullable",
+                "certification_number: varchar(100) nullable",
+                "expiry_date: date nullable  — for certifications with expiry",
+                "passed: boolean notNull default true",
+                "notes: text nullable",
+                "document_url: varchar(500) nullable  — certificate stored in R2",
+                "created_at, updated_at, created_by"
+              ],
+              "indexes": ["company_id", "driver_id", "completed_at", "training_type", "expiry_date"]
+            },
+
+            {
+              "name": "driver_esg_reports",
+              "description": "Compiled ESG report record. References all source data and output files.",
+              "columns": [
+                "report_id: uuid PK defaultRandom()",
+                "company_id: uuid FK → companies CASCADE",
+                "driver_id: uuid FK → drivers CASCADE",
+                "period_type: reportPeriodEnum notNull",
+                "period_start: date notNull",
+                "period_end: date notNull",
+                "// ── Aggregated KPIs (snapshot at generation time) ──",
+                "total_trips: integer notNull default 0",
+                "empty_run_count: integer notNull default 0",
+                "empty_run_pct: real  — empty_run_count / total_trips × 100",
+                "total_distance_km: real notNull default 0",
+                "total_driving_hours: real notNull default 0",
+                "total_shift_hours: real notNull default 0  — from driver_shifts",
+                "total_overtime_hours: real notNull default 0",
+                "total_fuel_liters: real notNull default 0",
+                "total_ghg_kgco2eq: real notNull default 0  — Scope 1",
+                "ghg_intensity_per_km: real",
+                "ghg_intensity_per_tonne_km: real  — GHG / (cargo_weight_tonnes × distance_km); nullable",
+                "incident_count: integer notNull default 0",
+                "work_stoppage_count: integer notNull default 0",
+                "cargo_breach_count: integer notNull default 0",
+                "avg_cargo_temp_c: real",
+                "maintenance_count: integer notNull default 0",
+                "training_hours: real notNull default 0",
+                "certifications_count: integer notNull default 0",
+                "expiring_certifications_count: integer notNull default 0  — expiring within 90 days",
+                "// ── Source record IDs ──",
+                "trip_ids: json notNull default '[]'",
+                "shift_ids: json notNull default '[]'",
+                "incident_ids: json notNull default '[]'",
+                "maintenance_ids: json notNull default '[]'",
+                "training_ids: json notNull default '[]'",
+                "sensor_reading_count: integer notNull default 0",
+                "// ── Output files ──",
+                "pdf_url: varchar(500)",
+                "csv_url: varchar(500)",
+                "pdf_object_key: varchar(300)",
+                "csv_object_key: varchar(300)",
+                "// ── Status ──",
+                "status: varchar(20) notNull default 'generating'  — generating | ready | failed",
+                "error_message: text",
+                "generated_at: timestamp with timezone",
+                "generated_by: uuid FK → users nullable",
+                "created_at, updated_at"
+              ],
+              "indexes": ["company_id", "driver_id", "period_start + period_end", "status"]
+            },
+
+            {
+              "name": "esg_report_schedules",
+              "description": "Automated report generation schedules. When a schedule fires, it generates reports for all active drivers.",
+              "columns": [
+                "schedule_id: uuid PK defaultRandom()",
+                "company_id: uuid FK → companies CASCADE",
+                "period_type: reportPeriodEnum notNull  — 'monthly' | 'quarterly'",
+                "active: boolean notNull default true",
+                "hr_email: varchar(300) notNull  — email to send completed reports",
+                "language: varchar(10) notNull default 'fr'",
+                "next_run_at: date notNull  — computed on creation and after each run",
+                "last_run_at: date nullable",
+                "last_run_report_count: integer nullable",
+                "created_at, updated_at, created_by"
+              ]
+            }
+          ]
+        },
+
+        {
+          "file": "schemas/driver-esg-report.schema.ts",
+          "action": "CREATE — all Zod schemas",
+          "schemas_to_include": [
+            "GenerateDriverEsgReportSchema: { driver_id, period_type, period_start, period_end, language='fr' }",
+            "GenerateFleetEsgReportSchema: { period_type, period_start, period_end, language='fr', driver_ids?: UUID[] }",
+            "CreateShiftSchema: { driver_id, trip_id?, shift_date, started_at, break_minutes=0, driver_notes? }",
+            "CompleteShiftSchema: { ended_at?, overtime_minutes=0, night_shift=false }",
+            "CreateMaintenanceSchema: { vehicle_plate, maintenance_type, performed_at, odometer_km?, cost_eur?, fuel_liters?, fuel_type?, provider_name?, next_due_at?, next_due_km?, regulatory_compliant=true, notes? }",
+            "CreateTrainingSchema: { training_type, title, provider?, completed_at, duration_hours, cost_eur?, certification_number?, expiry_date?, passed=true, notes? }",
+            "UpdateDriverProfileSchema: { gender?, birth_year?, nationality?, contract_type?, contract_start_date?, contract_end_date?, weekly_hours_contractual?, driving_license_categories?, license_obtained_year? }",
+            "CreateEsgReportScheduleSchema: { period_type, hr_email, language='fr' }",
+            "EsgDataPackageSchema: full object with all aggregated fields — see SA-2 for field list"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-2",
+      "name": "Data Aggregator Agent",
+      "priority": 1,
+      "title": "lib/driver-esg-aggregator.ts — build complete EsgDataPackage",
+      "description": "Query all TruckNet tables for a driver + period and produce the structured EsgDataPackage. Single source of truth before rendering. All calculations documented with their CSRD/ISO reference.",
+
+      "files_to_create": ["lib/driver-esg-aggregator.ts"],
+
+      "esg_data_package_fields": {
+
+        "identity": [
+          "company_name, driver_name, driver_employee_id",
+          "gender (from driver_profiles — for diversity reporting ESRS S1)",
+          "age_group: '18-25' | '26-35' | '36-45' | '46-55' | '55+'  — derived from birth_year",
+          "contract_type (CDI/CDD/etc)",
+          "vehicle_plate, vehicle_type, fuel_type",
+          "driving_license_categories: string[]",
+          "period_start, period_end, generated_at"
+        ],
+
+        "transport_activity": [
+          "total_trips: number  — completed trips in period",
+          "empty_run_count: number  — trips with is_empty_run=true",
+          "empty_run_pct: number  — ESRS E1: empty running increases GHG intensity",
+          "total_distance_km: number",
+          "empty_distance_km: number  — distance driven empty",
+          "loaded_distance_km: number  — total_distance_km - empty_distance_km",
+          "avg_load_factor_pct: number  — average cargo fill rate",
+          "trips: TripSummary[]  — one per trip with all fields"
+        ],
+
+        "working_time": [
+          "total_shift_hours: number  — from driver_shifts (ESRS S1-7)",
+          "total_driving_hours: number  — sum of trip durations",
+          "total_break_hours: number",
+          "total_overtime_hours: number  — ESRS S1: overtime monitoring",
+          "night_shift_count: number  — ESRS S1: night work indicator",
+          "avg_daily_hours: number  — total_shift_hours / working_days_in_period",
+          "rest_compliance_pct: number  — % of days with adequate rest (≥11h between shifts, EU regulation 561/2006)",
+          "note: 'Calcul conformément au règlement européen 561/2006 sur les temps de conduite'"
+        ],
+
+        "ghg_emissions": [
+          "total_fuel_liters: number",
+          "ghg_factor_kgco2_per_liter: number  — ADEME Base Carbone 2024",
+          "ghg_scope1_kgco2eq: number  — direct emissions from company-owned vehicles",
+          "ghg_scope1_loaded_kgco2eq: number  — GHG on loaded trips only",
+          "ghg_scope1_empty_kgco2eq: number  — GHG on empty runs (waste emissions)",
+          "ghg_intensity_per_km: number  — kg CO2eq / km",
+          "ghg_intensity_per_tonne_km: number  — kg CO2eq / (tonne × km); null if no cargo weight data",
+          "fuel_from_maintenance: number  — fuel recorded in maintenance fuel_fill logs",
+          "note: 'GHG calculé selon ADEME Base Carbone 2024. Scope 1 = véhicules appartenant ou loués à l\\'entreprise.'"
+        ],
+
+        "health_safety": [
+          "incident_count: number  — work_accidents_frequency_rate (ISO 26000 §6.4.6)",
+          "work_stoppage_count: number",
+          "high_severity_count: number",
+          "accident_frequency_rate: number  — (incidents × 1_000_000) / total_shift_hours",
+          "incidents: IncidentSummary[]"
+        ],
+
+        "cargo_conditions": [
+          "sensor_reading_count: number",
+          "avg_cargo_temp_c, min_cargo_temp_c, max_cargo_temp_c",
+          "avg_cargo_humidity_pct",
+          "cargo_breach_count: number",
+          "cargo_breach_rate_pct: number"
+        ],
+
+        "vehicle_maintenance": [
+          "maintenance_count: number  — total service events in period",
+          "fuel_fill_count: number",
+          "inspection_count: number",
+          "regulatory_compliance_rate_pct: number  — % inspections passed",
+          "total_maintenance_cost_eur: number  — nullable if costs not entered",
+          "maintenance_records: MaintenanceSummary[]"
+        ],
+
+        "training_certifications": [
+          "training_hours_total: number  — ESRS S1 training indicator",
+          "training_count: number",
+          "certifications_active: number",
+          "certifications_expiring_90d: number  — expiring within 90 days of period_end",
+          "certifications_expired: number  — expired during period",
+          "training_records: TrainingSummary[]",
+          "license_categories: string[]"
+        ],
+
+        "diversity": [
+          "gender: string",
+          "age_group: string",
+          "contract_type: string",
+          "note: 'Données individuelles. Agréger sur la flotte pour les indicateurs diversité CSRD.'"
+        ],
+
+        "fleet_benchmark": [
+          "fleet_avg_ghg_intensity_per_km: number  — company average for comparison",
+          "fleet_avg_incident_rate: number",
+          "fleet_avg_training_hours: number",
+          "driver_vs_fleet_ghg_pct: number  — +/- % vs fleet average",
+          "driver_vs_fleet_incident_pct: number"
+        ]
+      },
+
+      "calculations": {
+        "ghg_scope1": "total_fuel_liters × ghg_factor_kgco2_per_liter — rounded 2dp",
+        "ghg_intensity_per_tonne_km": "ghg_scope1 / SUM(cargo_weight_kg/1000 × distance_km per trip) — null if any trip missing cargo_weight",
+        "accident_frequency_rate": "(incident_count × 1_000_000) / total_shift_hours — null if total_shift_hours = 0",
+        "rest_compliance": "For each consecutive pair of shifts: gap = shift2.started_at - shift1.ended_at. Compliant if gap >= 11 hours (EU Reg 561/2006). rest_compliance_pct = compliant_days / total_shift_days × 100",
+        "empty_run_pct": "empty_run_count / total_trips × 100",
+        "regulatory_compliance_rate": "inspections where regulatory_compliant=true / total inspections × 100",
+        "age_group": "current_year - birth_year → bucket into '18-25' | '26-35' | '36-45' | '46-55' | '55+'",
+        "fleet_benchmarks": "Run same aggregation across ALL drivers in company for same period, then compute averages. Exclude the current driver from fleet average."
+      }
+    },
+
+    {
+      "id": "SA-3",
+      "name": "PDF Template Agent",
+      "priority": 2,
+      "title": "lib/driver-esg-html-template.ts — complete ISO 26000 / CSRD report",
+      "description": "Full HTML template with all sections. Machine-readable structured table in Section 7 for ESG platform OCR. Fleet benchmark page. All text in French (default).",
+
+      "files_to_create": ["lib/driver-esg-html-template.ts", "lib/driver-esg-pdf.ts"],
+
+      "pdf_sections": [
+
+        {
+          "section": "PAGE DE COUVERTURE",
+          "content": [
+            "Company name (large)",
+            "Title: RAPPORT ESG/RSE — DONNÉES DE TRANSPORT",
+            "Subtitle: Rapport individuel conducteur — ISO 26000 / CSRD ESRS",
+            "Driver name + vehicle + period",
+            "Fleet benchmark mini-card: position vs fleet on GHG + Safety + Training (3 colored indicators: green/orange/red)",
+            "Generation date + TruckNet version",
+            "Blue info box: 'Ce document est optimisé pour import direct dans votre plateforme ESG/RSE via OCR automatique.'"
+          ]
+        },
+
+        {
+          "section": "1. IDENTIFICATION DU CONDUCTEUR",
+          "iso_ref": "ISO 26000 §4",
+          "content": [
+            "Two-column identity table:",
+            "  Conducteur | [driver_name]",
+            "  Matricule | [employee_id]",
+            "  Genre | [gender] — ESRS S1 diversité",
+            "  Groupe d'âge | [age_group] — ESRS S1 diversité",
+            "  Type de contrat | [contract_type] — ESRS S1",
+            "  Véhicule | [vehicle_type] — [vehicle_plate]",
+            "  Catégories de permis | [license_categories joined with ', ']",
+            "  Type de carburant | [fuel_type]",
+            "  Période | [period_start] → [period_end]"
+          ]
+        },
+
+        {
+          "section": "2. ACTIVITÉ DE TRANSPORT",
+          "iso_ref": "ISO 26000 §6.4 — Pratiques de travail",
+          "csrd_ref": "ESRS S1, ESRS E1",
+          "content": [
+            "KPI table:",
+            "  transport_trips_count | Trajets effectués | [value] | trajets",
+            "  transport_empty_run_count | Dont trajets à vide | [value] | trajets",
+            "  transport_empty_run_pct | Taux de roulage à vide | [value] | %  — (empty runs waste fuel/GHG)",
+            "  transport_total_distance_km | Distance totale | [value] | km",
+            "  transport_avg_load_factor_pct | Taux de chargement moyen | [value] | %",
+            "",
+            "Trajectories table: Réf | Date | Origine → Destination | km | Durée | Carburant | GHG | À vide | Incidents | Cargaison"
+          ]
+        },
+
+        {
+          "section": "3. TEMPS DE TRAVAIL",
+          "iso_ref": "ISO 26000 §6.4.3 — Conditions de travail",
+          "csrd_ref": "ESRS S1-7 — Temps de travail",
+          "content": [
+            "KPI table:",
+            "  transport_shift_hours_total | Heures de travail totales | [value] | heures",
+            "  transport_driving_hours_total | Dont heures de conduite | [value] | heures",
+            "  transport_overtime_hours_total | Heures supplémentaires | [value] | heures",
+            "  transport_night_shifts_count | Postes de nuit | [value] | postes",
+            "  transport_rest_compliance_pct | Conformité temps de repos | [value] | %",
+            "",
+            "Regulation box: 'Analyse effectuée selon le règlement EU 561/2006 — repos minimum 11h entre deux prises de service.'"
+          ]
+        },
+
+        {
+          "section": "4. ÉMISSIONS GES — SCOPE 1",
+          "iso_ref": "ISO 26000 §6.5.5 — Atténuation des changements climatiques",
+          "csrd_ref": "ESRS E1-6 — Émissions brutes GES Scope 1",
+          "content": [
+            "Methodology box: 'Véhicules appartenant à l\\'entreprise = Scope 1. Facteur ADEME Base Carbone 2024.'",
+            "",
+            "KPI table:",
+            "  transport_fuel_total_liters | Carburant total | [value] | L",
+            "  ghg_factor_kgco2_per_liter | Facteur d\\'émission ADEME | [value] | kg CO2eq/L",
+            "  ghg_scope1 | Émissions GES Scope 1 — transport | [value] | kg CO2eq",
+            "  ghg_scope1_loaded | Dont trajets chargés | [value] | kg CO2eq",
+            "  ghg_scope1_empty | Dont trajets à vide (émissions évitables) | [value] | kg CO2eq",
+            "  transport_ghg_intensity_kgco2_per_km | Intensité GES / km | [value] | kg CO2eq/km",
+            "  transport_ghg_intensity_per_tonne_km | Intensité GES / tonne-km | [value] | kg CO2eq/t-km",
+            "",
+            "Fleet benchmark bar: driver vs fleet average GHG intensity — color-coded"
+          ]
+        },
+
+        {
+          "section": "5. SANTÉ ET SÉCURITÉ AU TRAVAIL",
+          "iso_ref": "ISO 26000 §6.4.6 — Santé et sécurité",
+          "csrd_ref": "ESRS S1-14 — Taux d\\'accidents",
+          "content": [
+            "KPI table:",
+            "  work_accidents_frequency_rate | Incidents de transport | [value] | incidents",
+            "  transport_work_stoppages_count | Dont arrêts de travail | [value] | arrêts",
+            "  transport_high_severity_incidents | Incidents gravité haute/critique | [value] | incidents",
+            "  transport_accident_frequency_rate | Taux de fréquence (TF) | [value] | accidents/million h",
+            "",
+            "Formula box: 'TF = (Nombre d\\'accidents × 1 000 000) / Heures travaillées'",
+            "Incidents detail table",
+            "Green box if zero incidents"
+          ]
+        },
+
+        {
+          "section": "6. CONDITIONS DE TRANSPORT CARGAISON",
+          "iso_ref": "ISO 26000 §6.7 — Questions relatives aux consommateurs",
+          "csrd_ref": "ESRS G1 — Conduite des affaires",
+          "content": [
+            "KPI table:",
+            "  transport_sensor_readings_count | Mesures ESP32 | [value] | mesures",
+            "  transport_cargo_temp_avg_c | Température moy. | [value] | °C",
+            "  transport_cargo_temp_min_c | Température min. | [value] | °C",
+            "  transport_cargo_temp_max_c | Température max. | [value] | °C",
+            "  transport_cargo_humidity_avg_pct | Humidité moy. | [value] | %",
+            "  transport_cargo_condition_breaches | Dépassements seuils | [value] | dépassements",
+            "  transport_cargo_breach_rate_pct | Taux de dépassement | [value] | %"
+          ]
+        },
+
+        {
+          "section": "7. ENTRETIEN VÉHICULE",
+          "iso_ref": "ISO 26000 §6.5.4 — Utilisation durable des ressources",
+          "csrd_ref": "ESRS E5 — Utilisation des ressources / ESRS G1 — Conformité",
+          "content": [
+            "KPI table:",
+            "  vehicle_maintenance_count | Interventions d\\'entretien | [value] | interventions",
+            "  vehicle_inspection_count | Contrôles techniques | [value] | contrôles",
+            "  vehicle_regulatory_compliance_rate | Taux de conformité réglementaire | [value] | %",
+            "  vehicle_fuel_fill_count | Pleins de carburant | [value] | pleins",
+            "",
+            "Maintenance log table: Date | Type | Kilométrage | Prestataire | Conformité | Prochaine échéance",
+            "Alert row (red) for any maintenance with regulatory_compliant=false"
+          ]
+        },
+
+        {
+          "section": "8. FORMATION ET CERTIFICATIONS",
+          "iso_ref": "ISO 26000 §6.4.7 — Développement du capital humain",
+          "csrd_ref": "ESRS S1-13 — Formation et développement des compétences",
+          "content": [
+            "KPI table:",
+            "  employee_training_hours_avg | Heures de formation | [value] | heures",
+            "  driver_certifications_active | Certifications actives | [value] | certifications",
+            "  driver_certifications_expiring | Certifications à renouveler (90 j) | [value] | certifications",
+            "  driver_certifications_expired | Certifications expirées | [value] | certifications",
+            "",
+            "Training records table: Date | Type | Intitulé | Organisme | Durée (h) | Certification | Expiration",
+            "Orange alert if certifications_expiring > 0",
+            "Red alert if certifications_expired > 0"
+          ]
+        },
+
+        {
+          "section": "9. PROFIL DIVERSITÉ",
+          "iso_ref": "ISO 26000 §6.3.10 — Discrimination et groupes vulnérables",
+          "csrd_ref": "ESRS S1-12 — Diversité",
+          "content": [
+            "Note at top: 'Ces données individuelles sont destinées à être agrégées au niveau de la flotte pour produire les indicateurs CSRD de diversité.'",
+            "Simple table:",
+            "  employee_gender | Genre | [gender]",
+            "  employee_age_group | Groupe d\\'âge | [age_group]",
+            "  employee_contract_type | Type de contrat | [contract_type]",
+            "  driving_license_categories | Catégories permis | [categories]"
+          ]
+        },
+
+        {
+          "section": "10. DONNÉES STRUCTURÉES ESG — TABLE D\\'IMPORT",
+          "description": "THE OCR TARGET. Clean two-column table. Every observation on its own row. Machine-readable.",
+          "columns": "Clé de référence ESG | Libellé complet | Valeur | Unité | Norme | Période",
+          "all_rows": [
+            "transport_trips_count | Nombre de trajets | [v] | trajets | ISO 26000 §6.4 | [period]",
+            "transport_empty_run_count | Trajets à vide | [v] | trajets | ESRS E1 | [period]",
+            "transport_empty_run_pct | Taux roulage à vide | [v] | % | ESRS E1 | [period]",
+            "transport_total_distance_km | Distance totale | [v] | km | ISO 26000 §6.4 | [period]",
+            "transport_shift_hours_total | Heures de travail | [v] | heures | ESRS S1-7 | [period]",
+            "transport_driving_hours_total | Heures de conduite | [v] | heures | ESRS S1-7 | [period]",
+            "transport_overtime_hours_total | Heures supplémentaires | [v] | heures | ESRS S1-7 | [period]",
+            "transport_rest_compliance_pct | Conformité temps de repos | [v] | % | EU Reg 561/2006 | [period]",
+            "transport_fuel_total_liters | Carburant consommé | [v] | L | ESRS E5 | [period]",
+            "ghg_scope1 | Émissions GES Scope 1 transport | [v] | kg CO2eq | ESRS E1-6 | [period]",
+            "ghg_scope1_empty_runs | GES trajets à vide | [v] | kg CO2eq | ESRS E1-6 | [period]",
+            "transport_ghg_intensity_kgco2_per_km | Intensité GES/km | [v] | kg CO2eq/km | ESRS E1 | [period]",
+            "transport_ghg_intensity_per_tonne_km | Intensité GES/tonne-km | [v] | kg CO2eq/t-km | ESRS E1 | [period]",
+            "work_accidents_frequency_rate | Incidents de transport | [v] | incidents | ESRS S1-14 | [period]",
+            "transport_accident_frequency_rate | Taux de fréquence accidents | [v] | acc/million h | ESRS S1-14 | [period]",
+            "transport_work_stoppages_count | Arrêts de travail | [v] | arrêts | ESRS S1 | [period]",
+            "transport_cargo_temp_avg_c | Température moy. cargaison | [v] | °C | ISO 26000 §6.7 | [period]",
+            "transport_cargo_condition_breaches | Dépassements cargaison | [v] | dépassements | ISO 26000 §6.7 | [period]",
+            "vehicle_maintenance_count | Entretiens véhicule | [v] | interventions | ESRS E5 | [period]",
+            "vehicle_regulatory_compliance_rate | Conformité réglementaire véhicule | [v] | % | ESRS G1 | [period]",
+            "employee_training_hours_avg | Heures de formation | [v] | heures | ESRS S1-13 | [period]",
+            "driver_certifications_active | Certifications actives | [v] | certifications | ESRS S1-13 | [period]",
+            "employee_gender | Genre | [v] | — | ESRS S1-12 | [period]",
+            "employee_age_group | Groupe d'âge | [v] | — | ESRS S1-12 | [period]",
+            "employee_contract_type | Type de contrat | [v] | — | ESRS S1 | [period]"
+          ],
+          "footer": "Source: TruckNet. GES: facteur ADEME Base Carbone 2024 ([factor] kg CO2eq/L [fuel_type]). Temps de travail: règlement EU 561/2006."
+        },
+
+        {
+          "section": "AVERTISSEMENT",
+          "content": "Rapport généré automatiquement par TruckNet. Estimations GES selon ADEME Base Carbone 2024. Ne constitue pas une certification de conformité ESG/RSE. Destiné à alimenter le système de reporting ESG/RSE de l'entreprise conformément à la directive CSRD et au cadre ISO 26000."
+        }
+      ]
+    },
+
+    {
+      "id": "SA-4",
+      "name": "CSV + Scheduler Agent",
+      "priority": 2,
+      "title": "CSV exporter + automated quarterly scheduler",
+      "description": "CSV structured for ESG platform bulk import + BullMQ cron job that auto-generates reports on schedule.",
+
+      "files_to_create": [
+        "lib/driver-esg-csv.ts",
+        "workers/driver-esg-report-worker.ts",
+        "workers/esg-report-scheduler.ts"
+      ],
+
+      "tasks": [
+        {
+          "file": "lib/driver-esg-csv.ts",
+          "csv_columns": "normalized_key,label,value,unit,data_type,period_start,period_end,iso26000_ref,csrd_esrs_ref,driver_name,company_name,source",
+          "notes": [
+            "UTF-8 BOM for Excel compatibility",
+            "One row per KPI in EsgDataPackage",
+            "Null values exported as empty string — never 'null' or 'N/A'",
+            "Upload to R2: '{company_id}/driver-esg-reports/{driver_id}/{report_id}.csv'"
+          ]
+        },
+        {
+          "file": "workers/driver-esg-report-worker.ts",
+          "steps": [
+            "1. Load driverEsgReports record (get driver_id, period, language)",
+            "2. buildEsgDataPackage(company_id, driver_id, period_start, period_end)",
+            "3. buildDriverEsgHtml(data, language)",
+            "4. renderDriverEsgPdf(html, pdf_object_key) → upload R2",
+            "5. generateDriverEsgCsv(data) → upload R2",
+            "6. UPDATE driverEsgReports: status='ready', all KPI fields, generated_at=NOW()",
+            "7. Create Notification for requesting user",
+            "8. If report was triggered by schedule: send email to schedule.hr_email with PDF + CSV download links",
+            "On error: status='failed', error_message, retry once after 2 minutes"
+          ]
+        },
+        {
+          "file": "workers/esg-report-scheduler.ts",
+          "description": "BullMQ cron job. Runs daily at 06:00. Checks esg_report_schedules for entries where next_run_at <= today AND active=true. For each matching schedule, generates one report per active driver for the completed period. Updates next_run_at to next period end.",
+          "period_calculation": {
+            "monthly": "period = previous calendar month. next_run_at = last day of current month.",
+            "quarterly": "period = previous calendar quarter (Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec). next_run_at = last day of current quarter."
+          },
+          "email": "Send email via existing email provider (nodemailer or Resend). Subject: 'Rapports ESG conducteurs — [period] — [company_name]'. Body: list of drivers with PDF + CSV download links. Attach fleet summary CSV."
+        }
+      ]
+    },
+
+    {
+      "id": "SA-5",
+      "name": "API Agent",
+      "priority": 2,
+      "title": "All new REST routes",
+      "description": "All routes required for the new data collection forms + report generation. company_id always from session.",
+
+      "files_to_create": [
+        "app/api/drivers/[driverId]/shifts/route.ts",
+        "app/api/drivers/[driverId]/shifts/[shiftId]/route.ts",
+        "app/api/drivers/[driverId]/shifts/[shiftId]/complete/route.ts",
+        "app/api/drivers/[driverId]/maintenance/route.ts",
+        "app/api/drivers/[driverId]/maintenance/[maintenanceId]/route.ts",
+        "app/api/drivers/[driverId]/training/route.ts",
+        "app/api/drivers/[driverId]/training/[trainingId]/route.ts",
+        "app/api/drivers/[driverId]/profile/route.ts",
+        "app/api/drivers/esg-reports/route.ts",
+        "app/api/drivers/esg-reports/[reportId]/route.ts",
+        "app/api/drivers/esg-reports/[reportId]/download/route.ts",
+        "app/api/drivers/fleet-esg-report/route.ts",
+        "app/api/drivers/fleet-esg-summary/route.ts",
+        "app/api/esg-report-schedules/route.ts",
+        "app/api/esg-report-schedules/[scheduleId]/route.ts"
+      ],
+
+      "key_routes": [
+        "POST /api/drivers/[driverId]/shifts — start shift (body: CreateShiftSchema)",
+        "POST /api/drivers/[driverId]/shifts/[shiftId]/complete — end shift (body: CompleteShiftSchema). Computes driving_minutes = (ended_at - started_at) - break_minutes",
+        "GET  /api/drivers/[driverId]/shifts — list shifts, filter: ?from, ?to",
+        "POST /api/drivers/[driverId]/maintenance — log maintenance event (body: CreateMaintenanceSchema). If maintenance_type='fuel_fill': also updates running fuel total on driver record",
+        "GET  /api/drivers/[driverId]/maintenance — list maintenance, filter: ?type, ?from, ?to",
+        "POST /api/drivers/[driverId]/training — log training record (body: CreateTrainingSchema)",
+        "GET  /api/drivers/[driverId]/training — list training records + expiry alerts",
+        "GET  /api/drivers/[driverId]/training/expiring — certifications expiring within 90 days",
+        "GET/PATCH /api/drivers/[driverId]/profile — get/update diversity + HR profile",
+        "POST /api/drivers/esg-reports — generate report (async, returns 202)",
+        "GET  /api/drivers/esg-reports — list all reports for company",
+        "GET  /api/drivers/esg-reports/[reportId] — poll status + get metadata",
+        "GET  /api/drivers/esg-reports/[reportId]/download — fresh signed URLs (1h expiry)",
+        "POST /api/drivers/fleet-esg-report — generate combined fleet report",
+        "GET  /api/drivers/fleet-esg-summary — aggregated fleet KPIs (for dashboard)",
+        "GET/POST/PATCH/DELETE /api/esg-report-schedules — CRUD for automated schedules"
+      ]
+    },
+
+    {
+      "id": "SA-6",
+      "name": "UI Agent",
+      "priority": 3,
+      "title": "All new pages and components",
+      "description": "Full admin UI for data entry (shifts, maintenance, training, profile) + report generation + export. French labels throughout.",
+
+      "files_to_create": [
+        "app/(admin)/admin/drivers/page.tsx",
+        "app/(admin)/admin/drivers/[driverId]/page.tsx",
+        "app/(admin)/admin/drivers/esg-reports/page.tsx",
+        "app/(admin)/admin/drivers/esg-reports/[reportId]/page.tsx",
+        "app/(admin)/admin/drivers/schedule/page.tsx",
+        "components/admin/drivers/DriverFleetGrid.tsx",
+        "components/admin/drivers/DriverProfileForm.tsx",
+        "components/admin/drivers/ShiftLogForm.tsx",
+        "components/admin/drivers/ShiftLogTable.tsx",
+        "components/admin/drivers/MaintenanceLogForm.tsx",
+        "components/admin/drivers/MaintenanceLogTable.tsx",
+        "components/admin/drivers/TrainingLogForm.tsx",
+        "components/admin/drivers/TrainingLogTable.tsx",
+        "components/admin/drivers/CertificationAlertBadge.tsx",
+        "components/admin/drivers/GenerateEsgReportModal.tsx",
+        "components/admin/drivers/EsgReportKpiGrid.tsx",
+        "components/admin/drivers/FleetEsgBenchmarkChart.tsx",
+        "components/admin/drivers/EsgReportScheduleForm.tsx",
+        "components/admin/drivers/EmptyRunTracker.tsx"
+      ],
+      "files_to_modify": [
+        "components/admin/AdminSidebar.tsx",
+        "app/(admin)/admin/page.tsx"
+      ],
+
+      "key_pages": [
+        {
+          "page": "app/(admin)/admin/drivers/[driverId]/page.tsx",
+          "tabs": [
+            "Vue d'ensemble — KPI cards + recent activity",
+            "Trajets — trip table with empty run toggle per trip",
+            "Prises de service — ShiftLogTable + ShiftLogForm modal",
+            "Entretien véhicule — MaintenanceLogTable + MaintenanceLogForm modal",
+            "Formation — TrainingLogTable + TrainingLogForm modal + CertificationAlertBadge",
+            "Profil RH — DriverProfileForm (gender, age, contract, licenses)",
+            "Rapports ESG — past reports + GenerateEsgReportModal"
+          ]
+        },
+        {
+          "page": "app/(admin)/admin/drivers/schedule/page.tsx",
+          "description": "Automated report schedule configuration",
+          "content": [
+            "Current schedule card (if active): period type, HR email, next run date, last run summary",
+            "EsgReportScheduleForm: period type picker, HR email input, language selector, activate/deactivate toggle",
+            "History table: past automated runs with report count + download all ZIP button",
+            "Info box: 'Les rapports seront automatiquement générés et envoyés à [email] à la fin de chaque [période].'"
+          ]
+        },
+        {
+          "page": "app/(admin)/admin/drivers/esg-reports/[reportId]/page.tsx",
+          "sections": [
+            "Status banner (generating / ready / failed)",
+            "Download row: PDF button + CSV button + 'Copier le lien' button",
+            "Import instructions accordion: step-by-step how to upload to ESG platform",
+            "EsgReportKpiGrid: 9 KPI cards covering all CSRD topics",
+            "FleetEsgBenchmarkChart: radar chart comparing driver vs fleet average on 5 axes",
+            "Collapsible sections: Trajets | Incidents | Maintenance | Formation | Cargaison"
+          ]
+        }
+      ],
+
+      "key_components": [
+        {
+          "component": "ShiftLogForm",
+          "description": "Modal to log start/end of shift. Shows live duration counter while shift is active. Computes overtime automatically based on driver.weekly_hours_contractual / 5 per day."
+        },
+        {
+          "component": "CertificationAlertBadge",
+          "description": "Red/orange badge showing count of expired + expiring certifications. Shown on driver card and in sidebar. Clicking opens training tab filtered to expiring certs."
+        },
+        {
+          "component": "EmptyRunTracker",
+          "description": "Toggle on trip completion form: 'Trajet à vide (retour sans marchandise)'. When toggled, hides cargo fields. Updates trip.is_empty_run=true and keeps cargo_weight_kg=null."
+        },
+        {
+          "component": "FleetEsgBenchmarkChart",
+          "description": "recharts RadarChart. 5 axes: GHG intensity, Safety (inverted incident rate), Training hours, Cargo compliance, Vehicle compliance. Driver value vs fleet average. Driver line = navy, Fleet line = sage dashed."
+        },
+        {
+          "component": "GenerateEsgReportModal",
+          "fields": [
+            "Driver selector (or 'Tous les conducteurs' for fleet report)",
+            "Period type pills: Mensuel | Trimestriel | Personnalisé",
+            "Period picker based on selection",
+            "Data coverage preview: shows counts per data type — e.g. '12 trajets · 8 prises de service · 3 formations · 847 mesures ESP32'",
+            "Missing data warnings: 'Aucune prise de service enregistrée — les heures de travail seront estimées depuis les trajets' (orange)",
+            "Language selector",
+            "Generate button"
+          ]
+        }
+      ],
+
+      "sidebar_modifications": [
+        "Add 'Conducteurs' section with sub-items:",
+        "  — Vue flotte (/admin/drivers)",
+        "  — Rapports ESG (/admin/drivers/esg-reports)",
+        "  — Planification (/admin/drivers/schedule)",
+        "CertificationAlertBadge shown on 'Conducteurs' nav item if any certs expiring/expired"
+      ],
+
+      "dashboard_additions": [
+        "Transport ESG summary widget: total fleet GHG MTD, incident count, active trips",
+        "Certification alerts widget: drivers with expiring certifications",
+        "Last 3 ESG reports with download buttons"
+      ]
+    }
+  ],
+
+  "new_db_tables": [
+    "driver_profiles — diversity + HR data (ESRS S1-12)",
+    "driver_shifts — working time log (ESRS S1-7)",
+    "vehicle_maintenance_logs — service records (ESRS E5, G1)",
+    "driver_training_records — training + certifications (ESRS S1-13)",
+    "driver_esg_reports — compiled report records",
+    "esg_report_schedules — automated generation config"
+  ],
+
+  "csrd_coverage_achieved": {
+    "ESRS_E1": "ghg_scope1, ghg_intensity_per_km, ghg_intensity_per_tonne_km, empty_run_ghg, fuel_consumption",
+    "ESRS_E5": "fuel_liters, vehicle_maintenance_count, empty_run_ratio",
+    "ESRS_S1_7": "shift_hours, driving_hours, overtime_hours, rest_compliance_pct",
+    "ESRS_S1_12": "gender, age_group, contract_type",
+    "ESRS_S1_13": "training_hours, certifications_active, certifications_expiring",
+    "ESRS_S1_14": "incident_count, accident_frequency_rate, work_stoppages",
+    "ESRS_G1": "vehicle_compliance_rate, regulatory_inspections, incidents_reported_to_authority"
+  },
+
+  "what_hr_gets": [
+    "Per-driver PDF: 10 sections, structured import table, fleet benchmark radar chart",
+    "Per-driver CSV: one row per KPI, normalized_key column matches ESG platform exactly",
+    "Fleet PDF: one section per driver + fleet aggregates on cover page",
+    "Fleet CSV: all drivers combined",
+    "Auto-emailed quarterly to HR — zero manual action needed after setup"
+  ],
+
+  "post_execution_checklist": [
+    "[ ] 6 new tables created via db:migrate",
+    "[ ] transport_trips has is_empty_run + load_factor_pct columns",
+    "[ ] POST shifts/start → POST shifts/complete computes driving_minutes correctly",
+    "[ ] POST maintenance with fuel_fill type records fuel_liters",
+    "[ ] POST training creates record + triggers certification expiry check",
+    "[ ] GHG calc: 62L × 2.65 = 164.3 kg CO2eq ✓",
+    "[ ] Empty run GHG correctly split from loaded run GHG",
+    "[ ] Accident frequency rate: (incidents × 1_000_000) / shift_hours",
+    "[ ] Rest compliance uses EU Reg 561/2006 — 11h minimum between shifts",
+    "[ ] PDF section 10 table has all 25 normalized_key rows",
+    "[ ] CSV normalized_key column matches ESG platform soft reference list",
+    "[ ] Fleet benchmark RadarChart renders correctly",
+    "[ ] CertificationAlertBadge shows on sidebar when certs expiring",
+    "[ ] Schedule cron fires daily, generates reports on correct period boundary",
+    "[ ] Email sent to hr_email with PDF + CSV links on scheduled run",
+    "[ ] ESG platform: upload PDF → Review Queue shows ~25 candidate observations"
+  ]
+}

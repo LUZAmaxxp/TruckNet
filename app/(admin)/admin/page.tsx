@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { StatsBar } from "@/components/admin/StatsBar";
-import { FleetMap } from "@/components/admin/FleetMap";
+const FleetMap = dynamic(
+  () => import("@/components/admin/FleetMap").then((m) => m.FleetMap),
+  { ssr: false }
+);
 import { SosPanel } from "@/components/admin/SosPanel";
+import { EsgDashboardWidgets } from "@/components/admin/drivers/EsgDashboardWidgets";
 
 export type AdminStats = {
   totalDrivers: number;
@@ -149,6 +154,9 @@ export default function AdminDashboardPage() {
           />
         </div>
       </div>
+
+      {/* ESG dashboard widgets */}
+      <EsgDashboardWidgets />
     </div>
   );
 }

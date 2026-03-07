@@ -5,12 +5,20 @@
   "scripts": {
     "worker:stress": "tsx workers/stress-signal-consumer.ts",
     "worker:dev:stress": "tsx watch workers/stress-signal-consumer.ts",
+    "worker:esg": "tsx workers/driver-esg-report-worker.ts",
+    "worker:dev:esg": "tsx watch workers/driver-esg-report-worker.ts",
+    "worker:esg-scheduler": "tsx workers/esg-report-scheduler.ts",
+    "worker:dev:esg-scheduler": "tsx watch workers/esg-report-scheduler.ts",
     "kafka:setup": "tsx scripts/kafka-setup.ts"
   },
   "dependencies": {
     "ably": "^2.18.0",
+    "bullmq": "*",
+    "date-fns": "*",
     "drizzle-orm": "^0.30.10",
+    "ioredis": "^5.10.0",
     "kafkajs": "^2.2.4",
+    "nodemailer": "^7.0.7",
     "postgres": "^3.4.4",
     "zod": "^3.23.8"
   },

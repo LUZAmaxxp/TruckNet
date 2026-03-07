@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { FileBarChart, Calendar } from "lucide-react";
 import { DriverTable } from "@/components/admin/DriverTable";
 import type { DriverAdminEntry } from "@/components/admin/DriverTable";
 
@@ -53,11 +55,27 @@ export default function AdminDriversPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="font-display text-[22px] font-bold tracking-[-0.03em]" style={{ color: "var(--ink)" }}>Drivers</h1>
-        <p className="font-body text-[13px] mt-1" style={{ color: "var(--muted)" }}>
-          All registered drivers — {total} total
-        </p>
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h1 className="font-display text-[22px] font-bold tracking-[-0.03em]" style={{ color: "var(--ink)" }}>Drivers</h1>
+          <p className="font-body text-[13px] mt-1" style={{ color: "var(--muted)" }}>
+            All registered drivers — {total} total
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link href="/admin/drivers/schedule"
+            className="flex items-center gap-1.5 rounded-[10px] border px-3 py-2 text-[13px] font-medium"
+            style={{ borderColor: "var(--hairline)", color: "var(--muted)" }}>
+            <Calendar className="h-4 w-4" />
+            Schedules
+          </Link>
+          <Link href="/admin/drivers/esg-reports"
+            className="flex items-center gap-1.5 rounded-[10px] border px-3 py-2 text-[13px] font-medium"
+            style={{ borderColor: "var(--hairline)", color: "var(--muted)" }}>
+            <FileBarChart className="h-4 w-4" />
+            ESG Reports
+          </Link>
+        </div>
       </div>
 
       <DriverTable

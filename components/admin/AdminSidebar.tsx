@@ -4,17 +4,23 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
-import { LayoutDashboard, Users, AlertTriangle, PhoneCall, TruckIcon, MessageSquare, LogOut, Cpu } from "lucide-react";
+import { LayoutDashboard, Users, AlertTriangle, PhoneCall, MessageSquare, LogOut, Cpu, FileBarChart, Calendar } from "lucide-react";
 import { useSocket } from "@/hooks/useSocket";
 import { cn } from "@/lib/utils";
+import { CertificationAlertBadge } from "@/components/admin/drivers/CertificationAlertBadge";
 
 const NAV_ITEMS = [
   { href: "/admin",          label: "Overview",     icon: LayoutDashboard, exact: true },
-  { href: "/admin/drivers",  label: "Drivers",      icon: Users,           exact: false },
+  { href: "/admin/drivers",  label: "Drivers",      icon: Users,           exact: true },
   { href: "/admin/sos",      label: "SOS Alerts",   icon: AlertTriangle,   exact: false },
   { href: "/admin/sensors",  label: "Sensors",      icon: Cpu,             exact: false },
   { href: "/admin/messages", label: "Messages",     icon: MessageSquare,   exact: false },
   { href: "/admin/calls",    label: "Call History", icon: PhoneCall,       exact: false },
+];
+
+const ESG_ITEMS = [
+  { href: "/admin/drivers/esg-reports", label: "ESG Reports",  icon: FileBarChart },
+  { href: "/admin/drivers/schedule",    label: "Schedules",    icon: Calendar     },
 ];
 
 export function AdminSidebar() {
@@ -127,6 +133,28 @@ export function AdminSidebar() {
             </Link>
           );
         })}
+
+        {/* ESG / Drivers sub-section */}
+        <div className="pt-2">
+          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--muted)" }}>
+            ESG
+          </p>
+          {ESG_ITEMS.map(({ href, label, icon: Icon }) => {
+            const active = pathname.startsWith(href);
+            return (
+              <Link key={href} href={href}
+                className={cn(
+                  "relative flex items-center gap-3 rounded-[12px] px-3 py-[9px] text-[13px] font-medium transition-all duration-[0.18s]",
+                  active ? "bg-navy-lt text-navy font-semibold" : "text-[var(--muted)] hover:bg-base hover:text-ink-2"
+                )}>
+                {active && <span className="absolute left-0 top-[6px] bottom-[6px] w-[3px] rounded-full" style={{ background: "var(--navy)" }} />}
+                <Icon className="h-4 w-4 shrink-0" />
+                {label}
+                {label === "ESG Reports" && <CertificationAlertBadge days={90} />}
+              </Link>
+            );
+          })}
+        </div>
       </nav>
 
       {/* Bottom sign-out */}

@@ -12,6 +12,7 @@ import {
   unique,
   boolean,
   json,
+  date,
 } from "drizzle-orm/pg-core";
 import { type InferSelectModel, type InferInsertModel } from "drizzle-orm";
 
@@ -396,3 +397,341 @@ export type NewSensorReading = InferInsertModel<typeof sensorReadings>;
 
 export type SensorAlert = InferSelectModel<typeof sensorAlerts>;
 export type NewSensorAlert = InferInsertModel<typeof sensorAlerts>;
+
+// ===========================================================================
+// ESG / CSRD — FEAT-008
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// ESG Enums
+// ---------------------------------------------------------------------------
+
+export const fuelTypeEnum = pgEnum("fuel_type", [
+  "diesel",
+  "petrol",
+  "lpg",
+  "electric",
+  "hydrogen",
+  "cng",
+  "other",
+]);
+
+export const reportPeriodEnum = pgEnum("report_period", [
+  "weekly",
+  "monthly",
+  "quarterly",
+  "custom",
+]);
+
+export const shiftStatusEnum = pgEnum("shift_status", [
+  "active",
+  "completed",
+  "cancelled",
+]);
+
+export const maintenanceTypeEnum = pgEnum("maintenance_type", [
+  "oil_change",
+  "tire_replacement",
+  "brake_service",
+  "technical_inspection",
+  "filter_replacement",
+  "battery",
+  "bodywork",
+  "fuel_fill",
+  "other",
+]);
+
+export const trainingTypeEnum = pgEnum("training_type", [
+  "license_renewal",
+  "adr_certification",
+  "eco_driving",
+  "defensive_driving",
+  "first_aid",
+  "cargo_handling",
+  "digital_tools",
+  "other",
+]);
+
+export const contractTypeEnum = pgEnum("contract_type", [
+  "cdi",
+  "cdd",
+  "interim",
+  "apprenticeship",
+  "other",
+]);
+
+export const genderEnum = pgEnum("gender", [
+  "male",
+  "female",
+  "non_binary",
+  "prefer_not_to_say",
+]);
+
+// ---------------------------------------------------------------------------
+// transport_trips — trip log per driver, base for all ESG transport metrics
+// ---------------------------------------------------------------------------
+
+export const transportTrips = pgTable(
+  "transport_trips",
+  {
+    id:               uuid("id").primaryKey().defaultRandom(),
+    driverId:         uuid("driver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    routeId:          uuid("route_id").references(() => driverRoutes.id, { onDelete: "set null" }),
+    vehiclePlate:     varchar("vehicle_plate", { length: 20 }).notNull(),
+    originLabel:      text("origin_label"),
+    destinationLabel: text("destination_label"),
+    distanceKm:       real("distance_km"),
+    durationMinutes:  real("duration_minutes"),
+    fuelLiters:       real("fuel_liters"),
+    fuelType:         fuelTypeEnum("fuel_type"),
+    cargoWeightKg:    real("cargo_weight_kg"),
+    /** true when truck returns with no cargo — ESRS E1 empty run metric */
+    isEmptyRun:       boolean("is_empty_run").notNull().default(false),
+    /** cargo weight / max payload × 100; null if not tracked */
+    loadFactorPct:    real("load_factor_pct"),
+    startedAt:        timestamp("started_at",  { withTimezone: true }),
+    completedAt:      timestamp("completed_at", { withTimezone: true }),
+    status:           routeStatusEnum("status").notNull().default("active"),
+    createdAt:        timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy:        uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    driverIdIdx:      index("transport_trips_driver_id_idx").on(t.driverId),
+    statusIdx:        index("transport_trips_status_idx").on(t.status),
+    startedAtIdx:     index("transport_trips_started_at_idx").on(t.startedAt),
+    driverStatusIdx:  index("transport_trips_driver_status_idx").on(t.driverId, t.status),
+  })
+);
+
+export type TransportTrip    = InferSelectModel<typeof transportTrips>;
+export type NewTransportTrip = InferInsertModel<typeof transportTrips>;
+
+// ---------------------------------------------------------------------------
+// driver_profiles — HR / diversity profile (ESRS S1-12)
+// ---------------------------------------------------------------------------
+
+export const driverProfiles = pgTable(
+  "driver_profiles",
+  {
+    id:                       uuid("id").primaryKey().defaultRandom(),
+    /** 1-to-1 with users (role=driver) */
+    driverId:                 uuid("driver_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+    gender:                   genderEnum("gender"),
+    /** Year only (GDPR: no full DOB) */
+    birthYear:                integer("birth_year"),
+    nationality:              varchar("nationality", { length: 100 }),
+    contractType:             contractTypeEnum("contract_type"),
+    contractStartDate:        date("contract_start_date"),
+    /** null for CDI (permanent contract) */
+    contractEndDate:          date("contract_end_date"),
+    /** Contractual hours per week */
+    weeklyHoursContractual:   real("weekly_hours_contractual"),
+    /** string[] e.g. ['B','C','CE','D'] */
+    drivingLicenseCategories: json("driving_license_categories").notNull().default([]).$type<string[]>(),
+    licenseObtainedYear:      integer("license_obtained_year"),
+    createdAt:                timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt:                timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy:                uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    driverIdIdx: index("driver_profiles_driver_id_idx").on(t.driverId),
+  })
+);
+
+export type DriverProfile    = InferSelectModel<typeof driverProfiles>;
+export type NewDriverProfile = InferInsertModel<typeof driverProfiles>;
+
+// ---------------------------------------------------------------------------
+// driver_shifts — shift log (ESRS S1-7: working time, overtime, rest)
+// ---------------------------------------------------------------------------
+
+export const driverShifts = pgTable(
+  "driver_shifts",
+  {
+    id:              uuid("id").primaryKey().defaultRandom(),
+    driverId:        uuid("driver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    tripId:          uuid("trip_id").references(() => transportTrips.id, { onDelete: "set null" }),
+    shiftDate:       date("shift_date").notNull(),
+    startedAt:       timestamp("started_at",  { withTimezone: true }).notNull(),
+    /** null while shift is still active */
+    endedAt:         timestamp("ended_at",    { withTimezone: true }),
+    breakMinutes:    integer("break_minutes").notNull().default(0),
+    /** computed: (endedAt - startedAt) in minutes - breakMinutes */
+    drivingMinutes:  integer("driving_minutes"),
+    overtimeMinutes: integer("overtime_minutes").notNull().default(0),
+    /** shift spans 22:00-06:00 window */
+    nightShift:      boolean("night_shift").notNull().default(false),
+    status:          shiftStatusEnum("status").notNull().default("active"),
+    driverNotes:     text("driver_notes"),
+    createdAt:       timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt:       timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy:       uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    driverIdIdx:  index("driver_shifts_driver_id_idx").on(t.driverId),
+    shiftDateIdx: index("driver_shifts_shift_date_idx").on(t.shiftDate),
+    driverDateIdx:index("driver_shifts_driver_date_idx").on(t.driverId, t.shiftDate),
+  })
+);
+
+export type DriverShift    = InferSelectModel<typeof driverShifts>;
+export type NewDriverShift = InferInsertModel<typeof driverShifts>;
+
+// ---------------------------------------------------------------------------
+// vehicle_maintenance_logs — service records (ESRS E5, G1)
+// ---------------------------------------------------------------------------
+
+export const vehicleMaintenanceLogs = pgTable(
+  "vehicle_maintenance_logs",
+  {
+    id:                  uuid("id").primaryKey().defaultRandom(),
+    driverId:            uuid("driver_id").references(() => users.id, { onDelete: "set null" }),
+    vehiclePlate:        varchar("vehicle_plate", { length: 20 }).notNull(),
+    maintenanceType:     maintenanceTypeEnum("maintenance_type").notNull(),
+    performedAt:         date("performed_at").notNull(),
+    odometerKm:          real("odometer_km"),
+    costEur:             real("cost_eur"),
+    /** fuel_fill type only */
+    fuelLiters:          real("fuel_liters"),
+    fuelType:            fuelTypeEnum("fuel_type"),
+    providerName:        varchar("provider_name", { length: 200 }),
+    nextDueAt:           date("next_due_at"),
+    nextDueKm:           real("next_due_km"),
+    /** passed inspection / meets regulation */
+    regulatoryCompliant: boolean("regulatory_compliant").notNull().default(true),
+    notes:               text("notes"),
+    /** invoice/certificate URL */
+    documentUrl:         varchar("document_url", { length: 500 }),
+    createdAt:           timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt:           timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy:           uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    driverIdIdx:     index("vehicle_maintenance_driver_id_idx").on(t.driverId),
+    vehiclePlateIdx: index("vehicle_maintenance_plate_idx").on(t.vehiclePlate),
+    performedAtIdx:  index("vehicle_maintenance_performed_at_idx").on(t.performedAt),
+    typeIdx:         index("vehicle_maintenance_type_idx").on(t.maintenanceType),
+  })
+);
+
+export type VehicleMaintenanceLog    = InferSelectModel<typeof vehicleMaintenanceLogs>;
+export type NewVehicleMaintenanceLog = InferInsertModel<typeof vehicleMaintenanceLogs>;
+
+// ---------------------------------------------------------------------------
+// driver_training_records — training + certifications (ESRS S1-13)
+// ---------------------------------------------------------------------------
+
+export const driverTrainingRecords = pgTable(
+  "driver_training_records",
+  {
+    id:                  uuid("id").primaryKey().defaultRandom(),
+    driverId:            uuid("driver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    trainingType:        trainingTypeEnum("training_type").notNull(),
+    title:               varchar("title", { length: 200 }).notNull(),
+    provider:            varchar("provider", { length: 200 }),
+    completedAt:         date("completed_at").notNull(),
+    durationHours:       real("duration_hours").notNull(),
+    costEur:             real("cost_eur"),
+    certificationNumber: varchar("certification_number", { length: 100 }),
+    /** expiry date for certifications */
+    expiryDate:          date("expiry_date"),
+    passed:              boolean("passed").notNull().default(true),
+    notes:               text("notes"),
+    documentUrl:         varchar("document_url", { length: 500 }),
+    createdAt:           timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt:           timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy:           uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    driverIdIdx:    index("driver_training_driver_id_idx").on(t.driverId),
+    completedAtIdx: index("driver_training_completed_at_idx").on(t.completedAt),
+    trainingTypeIdx:index("driver_training_type_idx").on(t.trainingType),
+    expiryDateIdx:  index("driver_training_expiry_date_idx").on(t.expiryDate),
+  })
+);
+
+export type DriverTrainingRecord    = InferSelectModel<typeof driverTrainingRecords>;
+export type NewDriverTrainingRecord = InferInsertModel<typeof driverTrainingRecords>;
+
+// ---------------------------------------------------------------------------
+// driver_esg_reports — compiled report records (KPI snapshot + status)
+// ---------------------------------------------------------------------------
+
+export const driverEsgReports = pgTable(
+  "driver_esg_reports",
+  {
+    id:                          uuid("id").primaryKey().defaultRandom(),
+    driverId:                    uuid("driver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    periodType:                  reportPeriodEnum("period_type").notNull(),
+    periodStart:                 date("period_start").notNull(),
+    periodEnd:                   date("period_end").notNull(),
+    // ── KPI snapshot (stored at generation time) ──
+    totalTrips:                  integer("total_trips").notNull().default(0),
+    emptyRunCount:               integer("empty_run_count").notNull().default(0),
+    emptyRunPct:                 real("empty_run_pct"),
+    totalDistanceKm:             real("total_distance_km").notNull().default(0),
+    totalDrivingHours:           real("total_driving_hours").notNull().default(0),
+    totalShiftHours:             real("total_shift_hours").notNull().default(0),
+    totalOvertimeHours:          real("total_overtime_hours").notNull().default(0),
+    totalFuelLiters:             real("total_fuel_liters").notNull().default(0),
+    totalGhgKgco2eq:             real("total_ghg_kgco2eq").notNull().default(0),
+    ghgIntensityPerKm:           real("ghg_intensity_per_km"),
+    ghgIntensityPerTonneKm:      real("ghg_intensity_per_tonne_km"),
+    incidentCount:               integer("incident_count").notNull().default(0),
+    workStoppageCount:           integer("work_stoppage_count").notNull().default(0),
+    cargoBreachCount:            integer("cargo_breach_count").notNull().default(0),
+    avgCargoTempC:               real("avg_cargo_temp_c"),
+    maintenanceCount:            integer("maintenance_count").notNull().default(0),
+    trainingHours:               real("training_hours").notNull().default(0),
+    certificationsCount:         integer("certifications_count").notNull().default(0),
+    expiringCertificationsCount: integer("expiring_certifications_count").notNull().default(0),
+    // ── Source record IDs ──
+    tripIds:             json("trip_ids").notNull().default([]).$type<string[]>(),
+    shiftIds:            json("shift_ids").notNull().default([]).$type<string[]>(),
+    incidentIds:         json("incident_ids").notNull().default([]).$type<string[]>(),
+    maintenanceIds:      json("maintenance_ids").notNull().default([]).$type<string[]>(),
+    trainingIds:         json("training_ids").notNull().default([]).$type<string[]>(),
+    sensorReadingCount:  integer("sensor_reading_count").notNull().default(0),
+    // ── Status ──
+    /** generating | ready | failed */
+    status:         varchar("status", { length: 20 }).notNull().default("generating"),
+    errorMessage:   text("error_message"),
+    generatedAt:    timestamp("generated_at", { withTimezone: true }),
+    generatedBy:    uuid("generated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt:      timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt:      timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    driverIdIdx: index("driver_esg_reports_driver_id_idx").on(t.driverId),
+    periodIdx:   index("driver_esg_reports_period_idx").on(t.periodStart, t.periodEnd),
+    statusIdx:   index("driver_esg_reports_status_idx").on(t.status),
+  })
+);
+
+export type DriverEsgReport    = InferSelectModel<typeof driverEsgReports>;
+export type NewDriverEsgReport = InferInsertModel<typeof driverEsgReports>;
+
+// ---------------------------------------------------------------------------
+// esg_report_schedules — automated report generation config
+// ---------------------------------------------------------------------------
+
+export const esgReportSchedules = pgTable(
+  "esg_report_schedules",
+  {
+    id:                  uuid("id").primaryKey().defaultRandom(),
+    periodType:          reportPeriodEnum("period_type").notNull(),
+    active:              boolean("active").notNull().default(true),
+    /** email address to send completed reports to HR */
+    hrEmail:             varchar("hr_email", { length: 300 }).notNull(),
+    language:            varchar("language", { length: 10 }).notNull().default("fr"),
+    nextRunAt:           date("next_run_at").notNull(),
+    lastRunAt:           date("last_run_at"),
+    lastRunReportCount:  integer("last_run_report_count"),
+    createdAt:           timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt:           timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy:           uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  }
+);
+
+export type EsgReportSchedule    = InferSelectModel<typeof esgReportSchedules>;
+export type NewEsgReportSchedule = InferInsertModel<typeof esgReportSchedules>;

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Phone, Video, MessageSquare, MapPin, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { Phone, Video, MessageSquare, MapPin, Search, ChevronLeft, ChevronRight, ClipboardList } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -262,6 +263,16 @@ export function DriverTable({
                             <MapPin className="h-4 w-4" />
                           </a>
                         )}
+                        <Link
+                          href={`/admin/drivers/${driver.id}`}
+                          title="Driver detail & ESG"
+                          className="rounded-[8px] p-1.5 transition-colors"
+                          style={{ color: "var(--slate)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--navy-lt)"; e.currentTarget.style.color = "var(--navy)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--slate)"; }}
+                        >
+                          <ClipboardList className="h-4 w-4" />
+                        </Link>
                       </div>
                     </td>
                   </tr>

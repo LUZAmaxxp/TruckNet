@@ -41,7 +41,7 @@ services:
       # LiveKit – internal Docker network address
       LIVEKIT_URL: ws://livekit:7880
       LIVEKIT_API_KEY: devkey
-      LIVEKIT_API_SECRET: devsecretchangeinproduction
+      LIVEKIT_API_SECRET: devsecretchangeinproduction32xxx
       # Ably – real-time pub/sub (set your actual key here or via .env file)
       ABLY_API_KEY: ${ABLY_API_KEY}
       # Redis – OSRM route cache
@@ -62,8 +62,8 @@ services:
       - "7881:7881"   # RTC TCP
       - "7882:7882/udp" # RTC UDP
     volumes:
-      - ./livekit.yaml:/livekit.yaml
-    command: --config /livekit.yaml
+      - ./docker/livekit:/etc/livekit
+    command: --config /etc/livekit/livekit.yaml
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:7880/healthz || exit 1"]
       interval: 10s
@@ -166,7 +166,7 @@ services:
       NODE_ENV: production
       LIVEKIT_URL: ws://livekit:7880
       LIVEKIT_API_KEY: devkey
-      LIVEKIT_API_SECRET: devsecretchangeinproduction
+      LIVEKIT_API_SECRET: devsecretchangeinproduction32xxx
       ABLY_API_KEY: ${ABLY_API_KEY}
       KAFKA_BROKERS: kafka:29092
       KAFKA_ENABLED: "true"
@@ -193,6 +193,32 @@ services:
       MQTT_PASSWORD: ${MQTT_PASSWORD}
       KAFKA_BROKERS: kafka:29092
       KAFKA_ENABLED: "false"
+
+  # ── ESG Report Worker (BullMQ) ─────────────────────────────────────
+  # Processes driver-esg-reports queue jobs: aggregates KPIs, generates
+  # PDF/CSV via Puppeteer, emails HR. Requires Redis + Postgres.
+  esg-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.esg-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      ABLY_API_KEY: ${ABLY_API_KEY}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@trucknet.local}
 
   # ── Eclipse Mosquitto MQTT Broker ──────────────────────────────
   # Receives sensor readings from ESP32 devices on port 1883.
