@@ -170,6 +170,34 @@ export interface FleetSensorUpdatePayload {
   }[];
 }
 
+// ── Behaviour / Safety event payloads ────────────────────────────────────────
+
+export interface BehaviourEventPayload {
+  eventId:    string;
+  driverId:   string;
+  driverName: string;
+  tripId:     string;
+  eventType:  string;
+  severity:   "low" | "medium" | "high" | "critical";
+  source:     "gps" | "esp32" | "camera";
+  occurredAt: string;
+  score:      number | null;
+}
+
+export interface BehaviourReportReadyPayload {
+  reportId:    string;
+  tripId:      string;
+  driverId:    string;
+  globalScore: number;
+  status:      "ready";
+}
+
+export interface BehaviourReportFailedPayload {
+  tripId:   string;
+  driverId: string;
+  reason:   string;
+}
+
 export interface ServerToClientEvents {
   nearby_driver_update: (drivers: NearbyDriverEntry[]) => void;
   voice_message_received: (message: VoiceMessageAlert) => void;
@@ -190,6 +218,10 @@ export interface ServerToClientEvents {
   sensor_alert_acked: (payload: SensorAlertAckedPayload) => void;
   device_status: (payload: DeviceStatusPayload) => void;
   fleet_sensor_update: (payload: FleetSensorUpdatePayload) => void;
+  // Behaviour / Safety events
+  behaviour_event: (payload: BehaviourEventPayload) => void;
+  behaviour_report_ready: (payload: BehaviourReportReadyPayload) => void;
+  behaviour_report_failed: (payload: BehaviourReportFailedPayload) => void;
   error: (payload: { error: string; details?: ZodIssue[] }) => void;
 }
 

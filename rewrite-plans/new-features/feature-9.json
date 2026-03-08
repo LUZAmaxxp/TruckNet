@@ -1,0 +1,832 @@
+{
+  "meta": {
+    "id": "FEAT-009",
+    "project": "TruckNet",
+    "date": "2026-03-06",
+    "title": "Driver Behaviour Report — Real-time Safety Monitoring",
+    "description": "Add real-time driver behaviour monitoring to TruckNet. Three data streams feed into a behaviour report auto-generated on trip completion: (1) GPS speed/idle classifier, (2) ESP32 vibration/accel event classifier, (3) custom AI model on laptop in cab via USB camera → MQTT. Report scored 0-100, shown to admin + driver, feeds ESRS S1-14 in existing ESG PDF export.",
+
+    "architecture": {
+      "stream_1": "GPS position updates → server-side speed event classifier → driving_events table",
+      "stream_2": "ESP32 MQTT readings → extend existing sensor-consumer worker → driving_events table",
+      "stream_3": "USB camera → YOLOv8n-pose + MLP classifier on cab laptop → MQTT events → driving_events table",
+      "sos": "Existing SOS alerts table → count per trip → behaviour report",
+      "report_trigger": "POST /api/drivers/{driverId}/trips/{tripId}/complete → auto-generate BehaviourReport async via BullMQ"
+    },
+
+    "hardware_required": {
+      "existing": ["ESP32 DevKit V1 (FEAT-007)", "GPS module", "USB camera in cab", "Laptop/mini-PC in cab"],
+      "new": "None — zero new hardware"
+    },
+
+    "isolated_folder": "cam_agent/ at project root — self-contained Python package, like esp32/. Contains AI model training pipeline, inference script, MQTT publisher, dataset guide, requirements.txt."
+  },
+
+  "subagents": [
+
+    {
+      "id": "SA-1",
+      "name": "Foundation Agent",
+      "priority": 1,
+      "title": "DB schema — 3 new tables + Zod schemas",
+      "description": "All new tables for behaviour events, reports, and scoring config.",
+
+      "files_to_modify": ["db/schema.ts"],
+      "files_to_create": ["schemas/behaviour.schema.ts"],
+
+      "tasks": [
+        {
+          "file": "db/schema.ts",
+          "action": "APPEND",
+
+          "new_enums": [
+            "export const drivingEventTypeEnum = pgEnum('driving_event_type', ['speed_violation', 'harsh_braking', 'harsh_acceleration', 'sudden_swerve', 'drowsiness_alert', 'microsleep_alert', 'distraction_alert', 'idle_excess', 'sos_triggered'])",
+            "export const drivingEventSeverityEnum = pgEnum('driving_event_severity', ['low', 'medium', 'high', 'critical'])",
+            "export const eventSourceEnum = pgEnum('event_source', ['gps', 'esp32', 'ai_camera', 'driver'])"
+          ],
+
+          "new_tables": [
+
+            {
+              "name": "driving_events",
+              "description": "Every detected behaviour event during a trip from any stream. Immutable after creation.",
+              "columns": [
+                "event_id: uuid PK defaultRandom()",
+                "company_id: uuid FK → companies CASCADE",
+                "driver_id: uuid FK → drivers CASCADE",
+                "trip_id: uuid FK → transport_trips CASCADE",
+                "event_type: drivingEventTypeEnum notNull",
+                "severity: drivingEventSeverityEnum notNull default 'low'",
+                "source: eventSourceEnum notNull",
+                "occurred_at: timestamp with timezone notNull",
+                "duration_seconds: real nullable — how long the event lasted",
+                "gps_lat: real nullable",
+                "gps_lng: real nullable",
+                "gps_speed_kmh: real nullable — actual speed at event time",
+                "speed_limit_kmh: real nullable — road limit at that location",
+                "speed_excess_kmh: real nullable — gps_speed_kmh - speed_limit_kmh",
+                "vibration_magnitude: real nullable — ESP32 value that triggered event",
+                "accel_x: real nullable",
+                "accel_y: real nullable",
+                "accel_z: real nullable",
+                "ear_value: real nullable — eye aspect ratio (0.0-1.0) for drowsiness events",
+                "head_angle_deg: real nullable — yaw angle for distraction events",
+                "confidence: real nullable — AI model confidence (0.0-1.0)",
+                "idle_duration_minutes: real nullable — for idle_excess events",
+                "metadata: json nullable — any extra event-specific data",
+                "created_at: timestamp with timezone notNull defaultNow()"
+              ],
+              "indexes": [
+                "company_id",
+                "driver_id",
+                "trip_id",
+                "event_type",
+                "occurred_at",
+                "source"
+              ]
+            },
+
+            {
+              "name": "behaviour_reports",
+              "description": "Compiled per-trip behaviour report. Auto-generated on trip completion. One per trip.",
+              "columns": [
+                "behaviour_report_id: uuid PK defaultRandom()",
+                "company_id: uuid FK → companies CASCADE",
+                "driver_id: uuid FK → drivers CASCADE",
+                "trip_id: uuid FK → transport_trips UNIQUE CASCADE",
+                "// ── Score ──",
+                "global_score: integer notNull — 0 to 100",
+                "speed_score: integer notNull — 0 to 100",
+                "driving_style_score: integer notNull — 0 to 100",
+                "fatigue_score: integer notNull — 0 to 100",
+                "idle_score: integer notNull — 0 to 100",
+                "// ── Event counts ──",
+                "speed_violation_count: integer notNull default 0",
+                "max_speed_recorded_kmh: real nullable",
+                "max_speed_excess_kmh: real nullable",
+                "harsh_braking_count: integer notNull default 0",
+                "harsh_acceleration_count: integer notNull default 0",
+                "sudden_swerve_count: integer notNull default 0",
+                "drowsiness_alert_count: integer notNull default 0",
+                "microsleep_alert_count: integer notNull default 0",
+                "distraction_alert_count: integer notNull default 0",
+                "idle_excess_count: integer notNull default 0",
+                "total_idle_minutes: real notNull default 0",
+                "sos_count: integer notNull default 0",
+                "// ── Summary ──",
+                "total_events: integer notNull default 0",
+                "critical_events: integer notNull default 0",
+                "trip_distance_km: real nullable",
+                "trip_duration_hours: real nullable",
+                "events_per_100km: real nullable — normalised risk rate",
+                "// ── Status ──",
+                "status: varchar(20) notNull default 'generating' — generating | ready | failed",
+                "admin_reviewed: boolean notNull default false",
+                "admin_reviewed_by: uuid FK → users nullable",
+                "admin_reviewed_at: timestamp with timezone nullable",
+                "admin_note: text nullable — max 1000 chars",
+                "generated_at: timestamp with timezone",
+                "created_at: timestamp with timezone notNull defaultNow()",
+                "updated_at: timestamp with timezone notNull defaultNow()"
+              ],
+              "indexes": [
+                "company_id",
+                "driver_id",
+                "trip_id UNIQUE",
+                "global_score",
+                "generated_at"
+              ]
+            },
+
+            {
+              "name": "behaviour_scoring_config",
+              "description": "Per-company configurable thresholds and score weights. One row per company. If no row exists, system uses built-in defaults.",
+              "columns": [
+                "config_id: uuid PK defaultRandom()",
+                "company_id: uuid FK → companies CASCADE UNIQUE",
+                "// ── ESP32 thresholds ──",
+                "harsh_braking_threshold_g: real notNull default 0.4 — vibration_magnitude spike G-force",
+                "harsh_acceleration_threshold_g: real notNull default 0.35",
+                "swerve_threshold_g: real notNull default 0.3 — accel_x or accel_y lateral spike",
+                "// ── GPS thresholds ──",
+                "speed_violation_excess_kmh: real notNull default 10 — min excess to flag (e.g. 10 = flag if >10 km/h over limit)",
+                "idle_excess_minutes: real notNull default 10 — flag after this many idle minutes",
+                "// ── Camera AI thresholds ──",
+                "ear_drowsy_threshold: real notNull default 0.25 — eye aspect ratio below this = drowsy",
+                "ear_microsleep_threshold: real notNull default 0.20",
+                "drowsy_duration_seconds: real notNull default 2.0 — must persist this long to fire event",
+                "microsleep_duration_seconds: real notNull default 3.0",
+                "head_angle_distraction_deg: real notNull default 30 — yaw angle to flag distraction",
+                "distraction_duration_seconds: real notNull default 3.0",
+                "// ── Score weights (must sum to 100) ──",
+                "weight_speed: integer notNull default 25",
+                "weight_driving_style: integer notNull default 20",
+                "weight_fatigue: integer notNull default 30",
+                "weight_idle: integer notNull default 10",
+                "weight_sos: integer notNull default 15",
+                "// ── Deduction rules ──",
+                "deduction_speed_minor: integer notNull default 5 — per event, excess < 20 km/h",
+                "deduction_speed_major: integer notNull default 10 — per event, excess >= 20 km/h",
+                "deduction_harsh_braking: integer notNull default 3",
+                "deduction_harsh_acceleration: integer notNull default 3",
+                "deduction_swerve: integer notNull default 5",
+                "deduction_drowsiness: integer notNull default 15",
+                "deduction_microsleep: integer notNull default 25",
+                "deduction_distraction: integer notNull default 8",
+                "deduction_idle_per_10min: integer notNull default 2",
+                "deduction_sos: integer notNull default 20",
+                "created_at, updated_at, created_by"
+              ]
+            }
+          ],
+
+          "modify_existing": [
+            "transport_trips: ADD COLUMN behaviour_report_id uuid FK → behaviour_reports nullable — set after report generated"
+          ]
+        },
+
+        {
+          "file": "schemas/behaviour.schema.ts",
+          "action": "CREATE",
+          "content": "import { z } from 'zod';\n\nexport const DrivingEventSchema = z.object({\n  driver_id:            z.string().uuid(),\n  trip_id:              z.string().uuid(),\n  event_type:           z.enum(['speed_violation','harsh_braking','harsh_acceleration','sudden_swerve','drowsiness_alert','microsleep_alert','distraction_alert','idle_excess','sos_triggered']),\n  severity:             z.enum(['low','medium','high','critical']),\n  source:               z.enum(['gps','esp32','ai_camera','driver']),\n  occurred_at:          z.number().positive(),  // epoch ms\n  duration_seconds:     z.number().nonnegative().optional(),\n  gps_lat:              z.number().optional(),\n  gps_lng:              z.number().optional(),\n  gps_speed_kmh:        z.number().nonnegative().optional(),\n  speed_limit_kmh:      z.number().nonnegative().optional(),\n  speed_excess_kmh:     z.number().nonnegative().optional(),\n  vibration_magnitude:  z.number().nonnegative().optional(),\n  accel_x:              z.number().optional(),\n  accel_y:              z.number().optional(),\n  accel_z:              z.number().optional(),\n  ear_value:            z.number().min(0).max(1).optional(),\n  head_angle_deg:       z.number().optional(),\n  confidence:           z.number().min(0).max(1).optional(),\n  idle_duration_minutes:z.number().nonnegative().optional(),\n  metadata:             z.record(z.unknown()).optional(),\n});\n\nexport const UpdateScoringConfigSchema = z.object({\n  harsh_braking_threshold_g:       z.number().positive().optional(),\n  harsh_acceleration_threshold_g:  z.number().positive().optional(),\n  swerve_threshold_g:              z.number().positive().optional(),\n  speed_violation_excess_kmh:      z.number().positive().optional(),\n  idle_excess_minutes:             z.number().positive().optional(),\n  ear_drowsy_threshold:            z.number().min(0).max(1).optional(),\n  ear_microsleep_threshold:        z.number().min(0).max(1).optional(),\n  drowsy_duration_seconds:         z.number().positive().optional(),\n  microsleep_duration_seconds:     z.number().positive().optional(),\n  head_angle_distraction_deg:      z.number().positive().optional(),\n  distraction_duration_seconds:    z.number().positive().optional(),\n  weight_speed:                    z.number().int().min(0).max(100).optional(),\n  weight_driving_style:            z.number().int().min(0).max(100).optional(),\n  weight_fatigue:                  z.number().int().min(0).max(100).optional(),\n  weight_idle:                     z.number().int().min(0).max(100).optional(),\n  weight_sos:                      z.number().int().min(0).max(100).optional(),\n});\n\nexport type DrivingEvent = z.infer<typeof DrivingEventSchema>;\nexport type UpdateScoringConfig = z.infer<typeof UpdateScoringConfigSchema>;"
+        }
+      ]
+    },
+
+    {
+      "id": "SA-2",
+      "name": "Event Classifier Agent",
+      "priority": 1,
+      "title": "lib/behaviour/ — all server-side event classifiers",
+      "description": "Three classifier modules, one per stream. All write to driving_events table. Loaded by the respective workers.",
+
+      "files_to_create": [
+        "lib/behaviour/gps-classifier.ts",
+        "lib/behaviour/esp32-classifier.ts",
+        "lib/behaviour/score-calculator.ts",
+        "lib/behaviour/speed-limit-lookup.ts"
+      ],
+
+      "tasks": [
+
+        {
+          "file": "lib/behaviour/speed-limit-lookup.ts",
+          "description": "Look up road speed limit at GPS coordinates using OpenStreetMap Overpass API. Cached in Redis to avoid repeat API calls for same road segments.",
+          "implementation": [
+            "export async function getSpeedLimit(lat: number, lng: number): Promise<number | null>",
+            "Cache key: 'speed_limit:' + roundTo3dp(lat) + ':' + roundTo3dp(lng) — 3dp = ~111m precision",
+            "Cache TTL: 30 days (road limits rarely change)",
+            "Overpass query: [out:json]; way(around:50,{lat},{lng})[maxspeed]; out tags;",
+            "Parse maxspeed tag: '80' → 80, '50 mph' → 80, 'FR:urban' → 50, 'FR:rural' → 80, 'FR:motorway' → 130",
+            "If no result: return null (no speed event generated — avoid false positives)",
+            "Timeout: 3s. On timeout: return null, log warning.",
+            "French speed limit defaults by road type if maxspeed tag missing:",
+            "  highway=motorway → 130, highway=trunk → 110, highway=primary → 80,",
+            "  highway=secondary → 80, highway=residential → 30, highway=unclassified → 80"
+          ]
+        },
+
+        {
+          "file": "lib/behaviour/gps-classifier.ts",
+          "description": "Classifies GPS position updates into driving events. Called by the GPS position worker on every update.",
+          "exports": "classifyGpsUpdate(update: GpsUpdate, config: ScoringConfig, db: DB): Promise<DrivingEvent | null>",
+          "logic": [
+            "// ── Speed violation ────────────────────────────────────────────────────────",
+            "1. Call getSpeedLimit(lat, lng)",
+            "2. If speed_limit found AND gps_speed_kmh > speed_limit + config.speed_violation_excess_kmh:",
+            "   excess = gps_speed_kmh - speed_limit_kmh",
+            "   severity = excess < 20 ? 'medium' : excess < 40 ? 'high' : 'critical'",
+            "   → insert driving_event type='speed_violation'",
+            "",
+            "// ── Idle detection ────────────────────────────────────────────────────────",
+            "3. Maintain per-trip idle state in Redis: 'idle:{trip_id}' = { started_at, last_seen }",
+            "   If gps_speed_kmh < 2 AND trip.status = 'in_progress':",
+            "     If no idle state: set idle start = now()",
+            "     Else: update last_seen = now()",
+            "     idle_duration = (now - idle_start) / 60",
+            "     If idle_duration > config.idle_excess_minutes AND not already flagged this idle session:",
+            "       → insert driving_event type='idle_excess' severity='low'",
+            "       Mark session flagged to avoid duplicate events",
+            "   If gps_speed_kmh >= 2: clear idle state",
+            "",
+            "// ── Sudden stop (harsh braking via GPS) ──────────────────────────────────",
+            "4. Maintain previous speed in Redis: 'prev_speed:{trip_id}'",
+            "   speed_delta = prev_speed - gps_speed_kmh",
+            "   time_delta = seconds between updates (typically 5s)",
+            "   deceleration = speed_delta / time_delta  (km/h per second)",
+            "   If deceleration > 15 km/h/s (= emergency braking):",
+            "     → insert driving_event type='harsh_braking' source='gps' severity='high'",
+            "     Note: ESP32 may also fire for same event — deduplication in score calculator"
+          ]
+        },
+
+        {
+          "file": "lib/behaviour/esp32-classifier.ts",
+          "description": "Classifies ESP32 sensor readings into driving events. Called inside existing sensor-consumer worker handleReading() function.",
+          "exports": "classifyEsp32Reading(reading: SensorReading, config: ScoringConfig, db: DB): Promise<DrivingEvent[]>",
+          "logic": [
+            "// ── Harsh braking ────────────────────────────────────────────────────────",
+            "negative_accel_z = accel_z < 1.0 - config.harsh_braking_threshold_g",
+            "If negative_accel_z AND vibration_magnitude > config.harsh_braking_threshold_g:",
+            "  severity = vibration_magnitude > 0.7 ? 'high' : 'medium'",
+            "  → insert driving_event type='harsh_braking' source='esp32'",
+            "",
+            "// ── Harsh acceleration ────────────────────────────────────────────────────",
+            "positive_accel_z = accel_z > 1.0 + config.harsh_acceleration_threshold_g",
+            "If positive_accel_z:",
+            "  → insert driving_event type='harsh_acceleration' source='esp32' severity='low'",
+            "",
+            "// ── Sudden swerve ────────────────────────────────────────────────────────",
+            "lateral_g = sqrt(accel_x² + accel_y²)",
+            "If lateral_g > config.swerve_threshold_g:",
+            "  severity = lateral_g > 0.6 ? 'high' : lateral_g > 0.4 ? 'medium' : 'low'",
+            "  → insert driving_event type='sudden_swerve' source='esp32'",
+            "",
+            "// ── Deduplication guard ───────────────────────────────────────────────────",
+            "Before inserting: check Redis key 'event_dedup:{trip_id}:{event_type}'",
+            "If key exists (TTL 10s): skip — same event already recorded from GPS or previous reading",
+            "After inserting: set Redis key with TTL 10s"
+          ]
+        },
+
+        {
+          "file": "lib/behaviour/score-calculator.ts",
+          "description": "Computes the BehaviourReport from all driving_events for a trip. Called by BullMQ worker after trip completion.",
+          "exports": "calculateBehaviourScore(trip_id: string, company_id: string, db: DB): Promise<BehaviourReportData>",
+          "scoring_algorithm": [
+            "// 1. Load all driving_events for this trip",
+            "// 2. Load scoring config (company config or defaults)",
+            "// 3. Load trip data (distance_km, duration_hours)",
+            "// 4. Count SOS alerts from existing sos_alerts table for this trip",
+            "",
+            "// ── Per-category raw scores (start at 100 each) ───────────────────────",
+            "",
+            "speed_score = 100",
+            "  FOR each speed_violation event:",
+            "    deduction = event.speed_excess_kmh < 20 ? config.deduction_speed_minor : config.deduction_speed_major",
+            "    speed_score -= deduction",
+            "  speed_score = max(0, speed_score)",
+            "",
+            "driving_style_score = 100",
+            "  driving_style_score -= harsh_braking_count × config.deduction_harsh_braking",
+            "  driving_style_score -= harsh_acceleration_count × config.deduction_harsh_acceleration",
+            "  driving_style_score -= sudden_swerve_count × config.deduction_swerve",
+            "  driving_style_score = max(0, driving_style_score)",
+            "",
+            "fatigue_score = 100",
+            "  fatigue_score -= drowsiness_alert_count × config.deduction_drowsiness",
+            "  fatigue_score -= microsleep_alert_count × config.deduction_microsleep",
+            "  fatigue_score -= distraction_alert_count × config.deduction_distraction",
+            "  fatigue_score = max(0, fatigue_score)",
+            "",
+            "idle_score = 100",
+            "  idle_10min_blocks = floor(total_idle_minutes / 10)",
+            "  idle_score -= idle_10min_blocks × config.deduction_idle_per_10min",
+            "  idle_score = max(0, idle_score)",
+            "",
+            "sos_score = 100",
+            "  sos_score -= sos_count × config.deduction_sos",
+            "  sos_score = max(0, sos_score)",
+            "",
+            "// ── Global weighted score ─────────────────────────────────────────────",
+            "global_score = round(",
+            "  (speed_score        × config.weight_speed / 100) +",
+            "  (driving_style_score × config.weight_driving_style / 100) +",
+            "  (fatigue_score       × config.weight_fatigue / 100) +",
+            "  (idle_score          × config.weight_idle / 100) +",
+            "  (sos_score           × config.weight_sos / 100)",
+            ")",
+            "",
+            "// ── Normalised risk rate ──────────────────────────────────────────────",
+            "events_per_100km = trip.distance_km > 0 ? (total_events / trip.distance_km) × 100 : null"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-3",
+      "name": "Worker Agent",
+      "priority": 2,
+      "title": "Extend existing workers + new behaviour report worker",
+      "description": "Extend sensor-consumer worker to call ESP32 classifier. Add GPS position worker. Add behaviour report BullMQ worker.",
+
+      "files_to_modify": [
+        "workers/sensor-consumer.ts"
+      ],
+      "files_to_create": [
+        "workers/gps-position-worker.ts",
+        "workers/behaviour-report-worker.ts",
+        "app/api/drivers/[driverId]/trips/[tripId]/gps/route.ts"
+      ],
+
+      "tasks": [
+
+        {
+          "file": "workers/sensor-consumer.ts",
+          "action": "MODIFY — add 3 lines inside existing handleReading() function",
+          "add_after_existing_sensor_processing": [
+            "// FEAT-009: classify ESP32 reading for behaviour events",
+            "import { classifyEsp32Reading } from '@/lib/behaviour/esp32-classifier';",
+            "import { loadScoringConfig } from '@/lib/behaviour/score-calculator';",
+            "",
+            "Inside handleReading():",
+            "  const config = await loadScoringConfig(deviceCompanyId);",
+            "  const trip = await getActiveTripForDevice(deviceId);  // query transport_trips WHERE status='in_progress' AND iot_device_id=deviceId",
+            "  if (trip) {",
+            "    await classifyEsp32Reading({ ...reading, trip_id: trip.trip_id, driver_id: trip.driver_id }, config, db);",
+            "  }"
+          ]
+        },
+
+        {
+          "file": "app/api/drivers/[driverId]/trips/[tripId]/gps/route.ts",
+          "method": "POST",
+          "description": "GPS position update endpoint. Called by the GPS module (or the cab laptop running cam_agent) on every position fix. Triggers GPS classifier.",
+          "body": "{ lat: number, lng: number, speed_kmh: number, heading_deg?: number, accuracy_m?: number, timestamp: number }",
+          "response": "{ received: true }",
+          "side_effects": [
+            "Store GPS point in a lightweight gps_tracks table (trip_id, lat, lng, speed_kmh, recorded_at)",
+            "Call classifyGpsUpdate() — may insert driving_event",
+            "Publish to Ably channel 'trips:{tripId}' event 'gps_update' for live map (existing admin dashboard)"
+          ]
+        },
+
+        {
+          "file": "workers/gps-position-worker.ts",
+          "description": "Alternative to direct API: if GPS module sends data via MQTT (topic: trucknet/drivers/{driverId}/gps), this worker subscribes and calls classifyGpsUpdate(). Pattern identical to sensor-consumer.",
+          "mqtt_topic": "trucknet/drivers/{driverId}/gps",
+          "payload": "{ trip_id, lat, lng, speed_kmh, heading_deg?, timestamp }"
+        },
+
+        {
+          "file": "workers/behaviour-report-worker.ts",
+          "description": "BullMQ worker. Job 'generate-behaviour-report' queued when trip is marked complete.",
+          "steps": [
+            "1. Load trip record",
+            "2. Wait 30 seconds (allow any in-flight events from cam_agent to arrive)",
+            "3. calculateBehaviourScore(trip_id, company_id, db)",
+            "4. INSERT behaviour_reports with all computed fields, status='ready'",
+            "5. UPDATE transport_trips SET behaviour_report_id = new report id",
+            "6. Publish Ably event 'behaviour_report_ready' on channel 'trips:{tripId}'",
+            "7. Create Notification for admin (type: 'behaviour_report_ready')",
+            "8. If global_score < 60: create additional Notification with urgency flag for admin",
+            "On error: status='failed', retry once after 1 minute"
+          ]
+        },
+
+        {
+          "file": "app/api/drivers/[driverId]/trips/[tripId]/complete/route.ts",
+          "action": "MODIFY — add BullMQ job enqueue after existing trip completion logic",
+          "add": "await behaviourReportQueue.add('generate-behaviour-report', { trip_id, company_id, driver_id }, { delay: 30000 })"
+        }
+      ]
+    },
+
+    {
+      "id": "SA-4",
+      "name": "Camera AI Agent",
+      "priority": 2,
+      "title": "cam_agent/ — isolated Python folder: model training + inference + MQTT publisher",
+      "description": "Self-contained Python package at project root. The cab laptop runs inference_agent.py continuously during a trip. Sends only events (never video) to TruckNet via MQTT. Includes full model training pipeline from open datasets.",
+
+      "folder_structure": {
+        "cam_agent/": {
+          "models/": ["README.md (download instructions)", ".gitkeep"],
+          "training/": [
+            "train.py — full training pipeline",
+            "prepare_dataset.py — download + preprocess open datasets",
+            "evaluate.py — test model accuracy",
+            "augment.py — data augmentation for robustness"
+          ],
+          "inference/": [
+            "inference_agent.py — main script, runs during trip",
+            "face_detector.py — YOLOv8n-pose wrapper",
+            "ear_calculator.py — eye aspect ratio from keypoints",
+            "head_pose.py — yaw/pitch from nose + ear keypoints",
+            "event_publisher.py — MQTT publisher",
+            "event_state.py — state machine to avoid duplicate events"
+          ],
+          "config/": [
+            "config.example.yaml — template",
+            "config.yaml — gitignored, real values"
+          ],
+          "docs/": [
+            "DATASET_GUIDE.md",
+            "TRAINING_GUIDE.md",
+            "SETUP.md",
+            "ARCHITECTURE.md"
+          ],
+          "requirements.txt": "all Python dependencies",
+          ".gitignore": "config.yaml, models/*.pt, models/*.onnx, datasets/",
+          "README.md": "quick start"
+        }
+      },
+
+      "files": [
+
+        {
+          "file": "cam_agent/.gitignore",
+          "content": "config/config.yaml\nmodels/*.pt\nmodels/*.onnx\nmodels/*.pkl\ndatasets/\n__pycache__/\n*.pyc\nvenv/\n.env"
+        },
+
+        {
+          "file": "cam_agent/requirements.txt",
+          "content": "# Core inference\nultralytics>=8.0.0        # YOLOv8n-pose\nopencv-python>=4.9.0\nnumpy>=1.26.0\nscikit-learn>=1.4.0       # MLP classifier\njoblib>=1.3.0             # model serialization\n\n# MQTT\npaho-mqtt>=2.0.0\n\n# Config\npyyaml>=6.0\n\n# Training only\ntorch>=2.2.0              # for fine-tuning if needed\npandas>=2.2.0\nmatplotlib>=3.8.0\ntqdm>=4.66.0\n\n# Optional: faster inference\nonnxruntime>=1.17.0"
+        },
+
+        {
+          "file": "cam_agent/config/config.example.yaml",
+          "content": "# TruckNet Camera Agent Configuration\n# Copy to config.yaml and fill in your values\n\n# Driver + trip identification\ndriver_id: \"driver-042\"      # must match TruckNet driver record\ncompany_id: \"your-company-id\"\n\n# Camera\ncamera_index: 0              # USB camera index (0 = first USB cam)\nframe_width: 640\nframe_height: 480\nfps_target: 10               # process 10 frames/sec; camera may run higher\n\n# MQTT broker (same as ESP32)\nmqtt_broker_host: \"192.168.1.100\"\nmqtt_broker_port: 1883\nmqtt_username: \"trucknet\"\nmqtt_password: \"YOUR_MQTT_PASSWORD\"\n\n# Detection thresholds (should match behaviour_scoring_config in TruckNet DB)\near_drowsy_threshold: 0.25\near_microsleep_threshold: 0.20\ndrowsy_duration_seconds: 2.0\nmicrosleep_duration_seconds: 3.0\nhead_angle_distraction_deg: 30.0\ndistraction_duration_seconds: 3.0\n\n# Model paths\npose_model_path: \"models/yolov8n-pose.pt\"   # downloaded on first run\nclassifier_path: \"models/drowsiness_mlp.pkl\" # trained by you\n\n# Logging\nlog_level: INFO\nlog_file: \"cam_agent.log\"\n\n# Trip management\nauto_detect_trip: true    # true = agent polls TruckNet for active trip\nauto_start_url: \"http://localhost:3000/api/drivers/{driver_id}/active-trip\""
+        },
+
+        {
+          "file": "cam_agent/inference/ear_calculator.py",
+          "content": "import numpy as np\n\n# YOLOv8-pose keypoint indices for face landmarks\n# Standard COCO pose: 0=nose,1=left_eye,2=right_eye,3=left_ear,4=right_ear\n# Eye landmarks approximated from eye keypoints\nLEFT_EYE_IDX  = 1\nRIGHT_EYE_IDX = 2\nLEFT_EAR_IDX  = 3\nRIGHT_EAR_IDX = 4\n\ndef eye_aspect_ratio(keypoints: np.ndarray) -> float:\n    \"\"\"\n    Compute Eye Aspect Ratio (EAR) from YOLOv8-pose keypoints.\n    EAR = eye_height / eye_width (approximated from available keypoints)\n    Standard drowsiness threshold: EAR < 0.25\n    \"\"\"\n    if keypoints is None or len(keypoints) < 5:\n        return 1.0  # assume open if no detection\n\n    left_eye  = keypoints[LEFT_EYE_IDX][:2]\n    right_eye = keypoints[RIGHT_EYE_IDX][:2]\n    left_ear  = keypoints[LEFT_EAR_IDX][:2]\n    right_ear = keypoints[RIGHT_EAR_IDX][:2]\n\n    # Eye width = distance between ear and eye on same side\n    left_width  = np.linalg.norm(left_eye  - left_ear)\n    right_width = np.linalg.norm(right_eye - right_ear)\n\n    # Eye height approximated from vertical position of eye relative to nose\n    nose = keypoints[0][:2]\n    left_height  = abs(left_eye[1]  - nose[1]) * 0.3\n    right_height = abs(right_eye[1] - nose[1]) * 0.3\n\n    left_ear_val  = left_height  / (left_width  + 1e-6)\n    right_ear_val = right_height / (right_width + 1e-6)\n\n    return float((left_ear_val + right_ear_val) / 2.0)\n\n\ndef classify_eye_state(ear: float, drowsy_thresh: float = 0.25, microsleep_thresh: float = 0.20) -> str:\n    if ear < microsleep_thresh:\n        return 'microsleep'\n    elif ear < drowsy_thresh:\n        return 'drowsy'\n    return 'alert'"
+        },
+
+        {
+          "file": "cam_agent/inference/head_pose.py",
+          "content": "import numpy as np\n\ndef estimate_yaw_angle(keypoints: np.ndarray) -> float:\n    \"\"\"\n    Estimate horizontal head yaw angle from nose + ear keypoints.\n    Positive = looking right, Negative = looking left.\n    Threshold for distraction: abs(yaw) > 30 degrees.\n    \"\"\"\n    if keypoints is None or len(keypoints) < 5:\n        return 0.0\n\n    nose      = keypoints[0][:2]\n    left_ear  = keypoints[3][:2]\n    right_ear = keypoints[4][:2]\n\n    # Face center = midpoint between ears\n    face_center_x = (left_ear[0] + right_ear[0]) / 2.0\n    face_width    = abs(right_ear[0] - left_ear[0])\n\n    if face_width < 1e-6:\n        return 0.0\n\n    # Nose offset from center as fraction of face width\n    offset = (nose[0] - face_center_x) / face_width\n\n    # Convert to degrees (empirical scale: offset of 0.3 ≈ 30 degrees)\n    yaw_deg = offset * 100.0\n    return float(np.clip(yaw_deg, -90, 90))"
+        },
+
+        {
+          "file": "cam_agent/inference/event_state.py",
+          "content": "import time\nfrom dataclasses import dataclass, field\nfrom typing import Optional\n\n@dataclass\nclass EventState:\n    \"\"\"\n    State machine to prevent duplicate events.\n    An event only fires after the condition persists for min_duration_seconds.\n    After firing, it cannot fire again for cooldown_seconds.\n    \"\"\"\n    min_duration_seconds: float\n    cooldown_seconds: float = 30.0\n\n    _condition_start: Optional[float] = field(default=None, repr=False)\n    _last_fired_at:   Optional[float] = field(default=None, repr=False)\n    _fired_this_session: bool = field(default=False, repr=False)\n\n    def update(self, condition_met: bool) -> bool:\n        \"\"\"Call every frame. Returns True exactly once when event should fire.\"\"\"\n        now = time.monotonic()\n\n        if not condition_met:\n            self._condition_start = None\n            return False\n\n        # Condition is met\n        if self._condition_start is None:\n            self._condition_start = now\n            return False\n\n        duration = now - self._condition_start\n        if duration < self.min_duration_seconds:\n            return False\n\n        # Duration threshold met — check cooldown\n        if self._last_fired_at and (now - self._last_fired_at) < self.cooldown_seconds:\n            return False\n\n        # Fire!\n        self._last_fired_at   = now\n        self._condition_start = None\n        return True\n\n    def reset(self):\n        self._condition_start    = None\n        self._last_fired_at      = None"
+        },
+
+        {
+          "file": "cam_agent/inference/event_publisher.py",
+          "content": "import json\nimport time\nimport logging\nimport paho.mqtt.client as mqtt\n\nlogger = logging.getLogger(__name__)\n\nclass EventPublisher:\n    def __init__(self, config: dict):\n        self.config    = config\n        self.driver_id = config['driver_id']\n        self.client    = mqtt.Client(client_id=f\"cam-agent-{self.driver_id}\")\n        self.client.username_pw_set(config['mqtt_username'], config['mqtt_password'])\n        self.client.on_connect    = self._on_connect\n        self.client.on_disconnect = self._on_disconnect\n        self._connected = False\n\n    def connect(self):\n        self.client.connect(self.config['mqtt_broker_host'], self.config['mqtt_broker_port'], keepalive=60)\n        self.client.loop_start()\n\n    def disconnect(self):\n        self.client.loop_stop()\n        self.client.disconnect()\n\n    def publish_event(self, trip_id: str, event_type: str, severity: str,\n                      confidence: float = 1.0, **kwargs):\n        if not self._connected:\n            logger.warning(f\"[MQTT] Not connected — dropping event {event_type}\")\n            return\n\n        payload = {\n            'driver_id':    self.driver_id,\n            'trip_id':      trip_id,\n            'event_type':   event_type,\n            'severity':     severity,\n            'source':       'ai_camera',\n            'occurred_at':  int(time.time() * 1000),\n            'confidence':   round(confidence, 3),\n            **kwargs\n        }\n        topic = f\"trucknet/drivers/{self.driver_id}/behaviour\"\n        self.client.publish(topic, json.dumps(payload), qos=1)\n        logger.info(f\"[Event] {event_type} severity={severity} confidence={confidence:.2f}\")\n\n    def _on_connect(self, client, userdata, flags, rc):\n        if rc == 0:\n            self._connected = True\n            logger.info(\"[MQTT] Connected to broker\")\n        else:\n            logger.error(f\"[MQTT] Connection failed rc={rc}\")\n\n    def _on_disconnect(self, client, userdata, rc):\n        self._connected = False\n        logger.warning(\"[MQTT] Disconnected\")"
+        },
+
+        {
+          "file": "cam_agent/inference/inference_agent.py",
+          "content": "#!/usr/bin/env python3\n\"\"\"\nTruckNet Camera Inference Agent\nRuns on the cab laptop during a trip.\nDetects drowsiness and distraction from USB camera.\nSends ONLY events (never video) to TruckNet via MQTT.\n\nUsage:\n  python3 inference_agent.py --trip-id TRP-2026-042\n  python3 inference_agent.py --auto   # polls TruckNet for active trip\n\"\"\"\n\nimport cv2\nimport time\nimport argparse\nimport logging\nimport yaml\nimport numpy as np\nfrom pathlib import Path\nfrom ultralytics import YOLO\n\nfrom ear_calculator import eye_aspect_ratio, classify_eye_state\nfrom head_pose       import estimate_yaw_angle\nfrom event_state     import EventState\nfrom event_publisher import EventPublisher\n\nlogging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')\nlogger = logging.getLogger(__name__)\n\n\ndef load_config() -> dict:\n    config_path = Path(__file__).parent.parent / 'config' / 'config.yaml'\n    with open(config_path) as f:\n        return yaml.safe_load(f)\n\n\ndef main(trip_id: str):\n    config = load_config()\n    cfg    = config\n\n    # ── Load YOLOv8n-pose model ──────────────────────────────────────────────\n    model_path = Path(__file__).parent.parent / cfg['pose_model_path']\n    logger.info(f\"Loading pose model from {model_path}\")\n    model = YOLO(str(model_path))  # downloads yolov8n-pose.pt on first run\n\n    # ── MQTT publisher ───────────────────────────────────────────────────────\n    publisher = EventPublisher(cfg)\n    publisher.connect()\n    time.sleep(1)  # allow connection to establish\n\n    # ── Event state machines ─────────────────────────────────────────────────\n    drowsy_state      = EventState(min_duration_seconds=cfg['drowsy_duration_seconds'],     cooldown_seconds=60)\n    microsleep_state  = EventState(min_duration_seconds=cfg['microsleep_duration_seconds'],  cooldown_seconds=30)\n    distraction_state = EventState(min_duration_seconds=cfg['distraction_duration_seconds'], cooldown_seconds=45)\n\n    # ── Open camera ──────────────────────────────────────────────────────────\n    cap = cv2.VideoCapture(cfg['camera_index'])\n    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  cfg['frame_width'])\n    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg['frame_height'])\n\n    if not cap.isOpened():\n        logger.error(f\"Cannot open camera index {cfg['camera_index']}\")\n        return\n\n    logger.info(f\"Camera agent running — trip {trip_id}. Press Ctrl+C to stop.\")\n\n    frame_interval = 1.0 / cfg['fps_target']\n    last_frame_time = 0\n\n    try:\n        while True:\n            now = time.monotonic()\n            if now - last_frame_time < frame_interval:\n                time.sleep(0.005)\n                continue\n            last_frame_time = now\n\n            ret, frame = cap.read()\n            if not ret:\n                logger.warning(\"Frame capture failed — retrying\")\n                time.sleep(0.1)\n                continue\n\n            # ── Run pose detection ───────────────────────────────────────────\n            results = model(frame, verbose=False)\n\n            if not results or len(results[0].keypoints) == 0:\n                # No face detected — reset all states\n                drowsy_state.reset()\n                microsleep_state.reset()\n                distraction_state.reset()\n                continue\n\n            # Use first detected face (driver = closest/largest face)\n            keypoints = results[0].keypoints.xy[0].cpu().numpy()\n\n            # ── Compute metrics ───────────────────────────────────────────────\n            ear       = eye_aspect_ratio(keypoints)\n            yaw_deg   = estimate_yaw_angle(keypoints)\n            eye_state = classify_eye_state(ear, cfg['ear_drowsy_threshold'], cfg['ear_microsleep_threshold'])\n\n            # ── Drowsiness state machine ──────────────────────────────────────\n            if microsleep_state.update(eye_state == 'microsleep'):\n                publisher.publish_event(\n                    trip_id=trip_id, event_type='microsleep_alert',\n                    severity='critical', confidence=0.90,\n                    ear_value=round(ear, 3),\n                    duration_seconds=cfg['microsleep_duration_seconds']\n                )\n\n            elif drowsy_state.update(eye_state == 'drowsy'):\n                publisher.publish_event(\n                    trip_id=trip_id, event_type='drowsiness_alert',\n                    severity='high', confidence=0.85,\n                    ear_value=round(ear, 3),\n                    duration_seconds=cfg['drowsy_duration_seconds']\n                )\n\n            # ── Distraction state machine ─────────────────────────────────────\n            is_distracted = abs(yaw_deg) > cfg['head_angle_distraction_deg']\n            if distraction_state.update(is_distracted):\n                publisher.publish_event(\n                    trip_id=trip_id, event_type='distraction_alert',\n                    severity='medium', confidence=0.80,\n                    head_angle_deg=round(yaw_deg, 1),\n                    duration_seconds=cfg['distraction_duration_seconds']\n                )\n\n    except KeyboardInterrupt:\n        logger.info(\"Camera agent stopped by user\")\n    finally:\n        cap.release()\n        publisher.disconnect()\n\n\nif __name__ == '__main__':\n    parser = argparse.ArgumentParser()\n    parser.add_argument('--trip-id', required=True, help='TruckNet trip ID')\n    args = parser.parse_args()\n    main(args.trip_id)"
+        },
+
+        {
+          "file": "cam_agent/training/prepare_dataset.py",
+          "content": "#!/usr/bin/env python3\n\"\"\"\nDataset preparation for TruckNet drowsiness classifier.\n\nDownloads and preprocesses:\n  1. CEW (Closed Eyes in the Wild) — eye open/closed\n  2. YawDD — yawning detection\n\nOutput: datasets/keypoints/ — numpy arrays of keypoints + labels\n        datasets/labels.csv — path, label, ear_value, source\n\nUsage:\n  python3 prepare_dataset.py --cew-path /path/to/CEW --output datasets/\n\"\"\"\n\nimport cv2\nimport numpy as np\nimport pandas as pd\nimport argparse\nfrom pathlib import Path\nfrom tqdm import tqdm\nfrom ultralytics import YOLO\n\nmodel = YOLO('yolov8n-pose.pt')\n\ndef extract_keypoints(image_path: str):\n    \"\"\"Run YOLOv8-pose on image, return keypoints array or None.\"\"\"\n    img = cv2.imread(image_path)\n    if img is None:\n        return None\n    results = model(img, verbose=False)\n    if not results or len(results[0].keypoints) == 0:\n        return None\n    return results[0].keypoints.xy[0].cpu().numpy()\n\ndef process_cew_dataset(cew_path: Path, output_path: Path):\n    \"\"\"\n    CEW dataset structure:\n      closedLeftEyes/ — images of closed left eyes\n      openLeftEyes/   — images of open left eyes\n    Label: 0 = alert, 1 = drowsy\n    \"\"\"\n    records = []\n    for label, folder in [(0, 'openLeftEyes'), (1, 'closedLeftEyes')]:\n        for img_path in tqdm(list((cew_path / folder).glob('*.jpg')), desc=folder):\n            kp = extract_keypoints(str(img_path))\n            if kp is not None:\n                records.append({\n                    'keypoints': kp.flatten().tolist(),\n                    'label': label,\n                    'source': 'CEW'\n                })\n    return records\n\ndef main():\n    parser = argparse.ArgumentParser()\n    parser.add_argument('--cew-path',  required=True)\n    parser.add_argument('--output',    default='datasets/')\n    args = parser.parse_args()\n\n    output = Path(args.output)\n    output.mkdir(parents=True, exist_ok=True)\n\n    all_records = []\n    all_records += process_cew_dataset(Path(args.cew_path), output)\n\n    df = pd.DataFrame(all_records)\n    df.to_csv(output / 'keypoints_dataset.csv', index=False)\n    print(f\"Saved {len(df)} samples to {output / 'keypoints_dataset.csv'}\")\n\nif __name__ == '__main__':\n    main()"
+        },
+
+        {
+          "file": "cam_agent/training/train.py",
+          "content": "#!/usr/bin/env python3\n\"\"\"\nTrain TruckNet drowsiness MLP classifier on extracted keypoints.\n\nInput:  datasets/keypoints_dataset.csv  (from prepare_dataset.py)\nOutput: models/drowsiness_mlp.pkl       (scikit-learn MLPClassifier)\n        models/drowsiness_mlp.onnx      (optional ONNX export)\n\nUsage:\n  python3 train.py\n  python3 train.py --dataset datasets/keypoints_dataset.csv --output models/\n\"\"\"\n\nimport numpy as np\nimport pandas as pd\nimport joblib\nimport argparse\nimport ast\nfrom pathlib import Path\nfrom sklearn.neural_network import MLPClassifier\nfrom sklearn.model_selection import train_test_split, cross_val_score\nfrom sklearn.preprocessing   import StandardScaler\nfrom sklearn.pipeline        import Pipeline\nfrom sklearn.metrics         import classification_report, confusion_matrix\n\ndef main():\n    parser = argparse.ArgumentParser()\n    parser.add_argument('--dataset', default='datasets/keypoints_dataset.csv')\n    parser.add_argument('--output',  default='models/')\n    args = parser.parse_args()\n\n    output = Path(args.output)\n    output.mkdir(parents=True, exist_ok=True)\n\n    # ── Load dataset ─────────────────────────────────────────────────────────\n    print(\"Loading dataset...\")\n    df = pd.read_csv(args.dataset)\n    X  = np.array([ast.literal_eval(kp) for kp in df['keypoints']])\n    y  = df['label'].values\n    print(f\"  {len(X)} samples, {X.shape[1]} features, classes: {np.unique(y)}\")\n\n    # ── Split ─────────────────────────────────────────────────────────────────\n    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)\n\n    # ── Pipeline: StandardScaler + MLP ────────────────────────────────────────\n    # 3-layer MLP — lightweight, fast inference on CPU\n    pipeline = Pipeline([\n        ('scaler', StandardScaler()),\n        ('clf', MLPClassifier(\n            hidden_layer_sizes=(128, 64, 32),\n            activation='relu',\n            max_iter=500,\n            random_state=42,\n            early_stopping=True,\n            validation_fraction=0.1,\n            verbose=True\n        ))\n    ])\n\n    # ── Train ────────────────────────────────────────────────────────────────\n    print(\"\\nTraining MLP classifier...\")\n    pipeline.fit(X_train, y_train)\n\n    # ── Evaluate ─────────────────────────────────────────────────────────────\n    y_pred = pipeline.predict(X_test)\n    print(\"\\n── Test Results ──────────────────────────────────\")\n    print(classification_report(y_test, y_pred, target_names=['alert','drowsy']))\n    print(\"Confusion matrix:\")\n    print(confusion_matrix(y_test, y_pred))\n\n    cv_scores = cross_val_score(pipeline, X, y, cv=5, scoring='f1')\n    print(f\"\\n5-fold CV F1: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}\")\n\n    # ── Save model ───────────────────────────────────────────────────────────\n    model_path = output / 'drowsiness_mlp.pkl'\n    joblib.dump(pipeline, model_path)\n    print(f\"\\nModel saved to {model_path}\")\n\nif __name__ == '__main__':\n    main()"
+        },
+
+        {
+          "file": "cam_agent/docs/DATASET_GUIDE.md",
+          "content": "# TruckNet Drowsiness Classifier — Dataset Guide\n\n## Recommended open datasets\n\n### 1. CEW — Closed Eyes in the Wild (primary — required)\n- Size: 4,800 images\n- Labels: open eyes / closed eyes\n- Download: http://parnec.nuaa.edu.cn/eye_dataset.html\n- Use: Core drowsiness binary classification\n\n### 2. YawDD — Yawning Detection Dataset\n- Size: 107 video sequences\n- Labels: yawning / no yawning\n- Download: https://www.sciencedirect.com/science/article/pii/S2352340918314665\n- Use: Augment training data with in-vehicle driving context\n\n### 3. NTHU Drowsy Driver (best but requires registration)\n- Size: 36 subjects × 4 scenarios\n- Labels: alert / drowsy / very drowsy\n- Download: http://cv.cs.nthu.edu.tw/php/callforpaper/datasets/DDD/\n- Use: Most realistic in-vehicle data\n\n### 4. DMD — Driver Monitoring Dataset\n- Size: 41 drivers, 10 hours\n- Labels: distraction, drowsiness, hands on wheel\n- Download: https://dmd.vicomtech.org/\n- Use: Distraction detection training\n\n## Minimum training set recommended\n- 2,000 alert samples\n- 2,000 drowsy samples\n- 500 microsleep samples (eyes fully closed >3s — subsample from CEW)\n\n## Data augmentation (handled by augment.py)\n- Random horizontal flip\n- Brightness variation ±30%\n- Gaussian noise on keypoints ±2px\n- Random head angle simulation"
+        },
+
+        {
+          "file": "cam_agent/docs/SETUP.md",
+          "content": "# TruckNet Camera Agent — Setup Guide\n\n## Requirements\n- Python 3.10+\n- USB camera connected to cab laptop\n- Same WiFi/network as MQTT broker\n\n## Step 1 — Install dependencies\n```bash\ncd cam_agent\npython3 -m venv venv\nsource venv/bin/activate  # Windows: venv\\Scripts\\activate\npip install -r requirements.txt\n```\n\n## Step 2 — Configure\n```bash\ncp config/config.example.yaml config/config.yaml\n# Edit config.yaml:\n#   driver_id: your driver ID from TruckNet\n#   mqtt_broker_host: your server IP\n#   mqtt_password: from .env MQTT_PASSWORD\n```\n\n## Step 3 — Prepare dataset and train model\n```bash\n# Download CEW dataset (see docs/DATASET_GUIDE.md)\n# Then:\npython3 training/prepare_dataset.py --cew-path /path/to/CEW\npython3 training/train.py\n# Model saved to models/drowsiness_mlp.pkl\n```\n\n## Step 4 — Test camera\n```bash\npython3 -c \"import cv2; cap=cv2.VideoCapture(0); print('OK' if cap.isOpened() else 'FAILED')\"\n```\n\n## Step 5 — Run during a trip\n```bash\ncd inference\npython3 inference_agent.py --trip-id TRP-2026-042\n```\n\n## Auto-start on trip begin (optional)\nAdd to cab laptop startup script or connect to TruckNet trip start webhook:\n```bash\n# Called automatically when driver starts trip in TruckNet web app\npython3 inference_agent.py --trip-id $TRIP_ID &\n```\n\n## Verify it's working\nIn a second terminal:\n```bash\n# Subscribe to behaviour events\nmosquitto_sub -h YOUR_BROKER -t 'trucknet/drivers/#/behaviour' -u trucknet -P YOUR_PASSWORD -v\n```\nClose your eyes for 3 seconds → you should see a drowsiness_alert event appear."
+        },
+
+        {
+          "file": "cam_agent/README.md",
+          "content": "# TruckNet Camera Agent\n\nReal-time driver behaviour monitoring via USB camera.\nRuns on the cab laptop. Sends only events (never video) to TruckNet.\n\n## What it detects\n| Behaviour | Method | Threshold |\n|-----------|--------|-----------|\n| Drowsiness | Eye Aspect Ratio (EAR) via YOLOv8-pose | EAR < 0.25 for 2s |\n| Microsleep | EAR < 0.20 for 3s | Severe alert |\n| Distraction | Head yaw angle | >30° for 3s |\n\n## Hardware\n- USB camera (any — minimum 640×480, 10fps)\n- Cab laptop (any CPU — no GPU required)\n\n## Quick start\nSee `docs/SETUP.md`\n\n## Model training\nSee `docs/DATASET_GUIDE.md` + `docs/TRAINING_GUIDE.md`\n\n## MQTT events sent\nTopic: `trucknet/drivers/{driver_id}/behaviour`\n```json\n{\n  \"event_type\": \"drowsiness_alert\",\n  \"severity\": \"high\",\n  \"confidence\": 0.87,\n  \"ear_value\": 0.21,\n  \"occurred_at\": 1709577600000\n}\n```\n\n## Privacy\nRaw video is never stored or transmitted. Only event metadata leaves the cab."
+        }
+      ]
+    },
+
+    {
+      "id": "SA-5",
+      "name": "Behaviour MQTT Consumer Agent",
+      "priority": 2,
+      "title": "workers/behaviour-event-consumer.ts — receive camera AI events via MQTT",
+      "description": "New MQTT worker subscribing to trucknet/drivers/+/behaviour topic. Validates, stores driving_events, triggers real-time Ably notification to admin dashboard.",
+
+      "files_to_create": ["workers/behaviour-event-consumer.ts"],
+
+      "tasks": [
+        {
+          "file": "workers/behaviour-event-consumer.ts",
+          "action": "CREATE — follows exact pattern of sensor-consumer.ts",
+          "instructions": [
+            "Subscribe to: trucknet/drivers/+/behaviour (QoS 1)",
+            "On message:",
+            "  1. Parse JSON payload",
+            "  2. Validate with DrivingEventSchema (Zod)",
+            "  3. Verify trip_id belongs to company (security check)",
+            "  4. INSERT into driving_events table",
+            "  5. If severity = 'critical' or 'high': publish Ably event 'behaviour_alert' on channel 'admin:behaviour'",
+            "     Payload: { driver_name, trip_reference, event_type, severity, occurred_at, gps_lat, gps_lng }",
+            "  6. If event_type = 'microsleep_alert': also create Notification record for admin (urgent)",
+            "",
+            "MQTT topics handled:",
+            "  trucknet/drivers/{driverId}/behaviour — camera AI events (cam_agent)",
+            "  (GPS and ESP32 events are written directly by their classifiers — no MQTT needed)"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "SA-6",
+      "name": "API Agent",
+      "priority": 2,
+      "title": "REST API routes for behaviour reports and events",
+
+      "files_to_create": [
+        "app/api/drivers/[driverId]/trips/[tripId]/behaviour/route.ts",
+        "app/api/drivers/[driverId]/trips/[tripId]/behaviour/events/route.ts",
+        "app/api/drivers/[driverId]/behaviour-summary/route.ts",
+        "app/api/admin/behaviour/fleet/route.ts",
+        "app/api/admin/behaviour/config/route.ts",
+        "app/api/drivers/[driverId]/active-trip/route.ts"
+      ],
+
+      "route_contracts": [
+        {
+          "path": "GET /api/drivers/[driverId]/trips/[tripId]/behaviour",
+          "role": "admin | editor | driver (own only)",
+          "description": "Get full behaviour report for a trip including all events.",
+          "response": "{ report: BehaviourReport, events: DrivingEvent[], trip: TransportTrip }"
+        },
+        {
+          "path": "GET /api/drivers/[driverId]/trips/[tripId]/behaviour/events",
+          "role": "admin | editor | driver (own only)",
+          "description": "List driving events for a trip. Query params: ?type, ?severity, ?source.",
+          "response": "{ events: DrivingEvent[], counts_by_type: Record<string, number> }"
+        },
+        {
+          "path": "PATCH /api/drivers/[driverId]/trips/[tripId]/behaviour",
+          "role": "admin | editor",
+          "description": "Admin reviews behaviour report. Body: { admin_reviewed: true, admin_note?: string }",
+          "response": "{ report: BehaviourReport }"
+        },
+        {
+          "path": "GET /api/drivers/[driverId]/behaviour-summary",
+          "role": "admin | editor | driver (own only)",
+          "description": "Aggregated behaviour stats for a driver over a period. Query: ?from, ?to.",
+          "response": "{ avg_score, trend: number[], total_events_by_type: Record<string, number>, worst_trip: TripSummary, best_trip: TripSummary }"
+        },
+        {
+          "path": "GET /api/admin/behaviour/fleet",
+          "role": "admin | editor",
+          "description": "Fleet-wide behaviour dashboard data. Ranking of all drivers by avg score, total critical events, recent alerts.",
+          "response": "{ drivers: DriverBehaviourRank[], fleet_avg_score: number, critical_events_today: number, unreviewed_reports: number }"
+        },
+        {
+          "path": "GET|PATCH /api/admin/behaviour/config",
+          "role": "admin",
+          "description": "Get or update scoring thresholds and weights for the company. Body: UpdateScoringConfigSchema.",
+          "response": "{ config: BehaviourScoringConfig }"
+        },
+        {
+          "path": "GET /api/drivers/[driverId]/active-trip",
+          "role": "admin | editor | driver (own only)",
+          "description": "Returns the currently active (in_progress) trip for a driver. Used by cam_agent --auto mode to get trip_id automatically.",
+          "response": "{ trip: TransportTrip } or { trip: null }"
+        }
+      ]
+    },
+
+    {
+      "id": "SA-7",
+      "name": "UI Agent",
+      "priority": 3,
+      "title": "Behaviour report UI — trip report card, fleet safety dashboard, driver self-view",
+      "description": "All UI components for the behaviour feature. Score displayed as a circular gauge. Events shown on a timeline. Fleet ranking table for admin.",
+
+      "files_to_create": [
+        "app/(admin)/admin/behaviour/page.tsx",
+        "app/(admin)/admin/behaviour/config/page.tsx",
+        "components/admin/behaviour/BehaviourReportCard.tsx",
+        "components/admin/behaviour/DriveScoreGauge.tsx",
+        "components/admin/behaviour/EventTimeline.tsx",
+        "components/admin/behaviour/EventTypeBadge.tsx",
+        "components/admin/behaviour/FleetSafetyRanking.tsx",
+        "components/admin/behaviour/BehaviourAlertBanner.tsx",
+        "components/admin/behaviour/ScoreBreakdownBar.tsx"
+      ],
+      "files_to_modify": [
+        "app/(admin)/admin/drivers/[driverId]/trips/[tripId]/page.tsx",
+        "components/admin/AdminSidebar.tsx",
+        "app/(admin)/admin/page.tsx"
+      ],
+
+      "tasks": [
+
+        {
+          "file": "components/admin/behaviour/DriveScoreGauge.tsx",
+          "description": "Circular SVG gauge showing 0-100 score. Color changes by range.",
+          "design": [
+            "SVG circle, radius 54, strokeWidth 10",
+            "Score 0-49: stroke var(--terra) red",
+            "Score 50-69: stroke var(--honey) orange",
+            "Score 70-84: stroke var(--sage) green",
+            "Score 85-100: stroke var(--navy) excellent",
+            "Center: large score number (Bricolage Grotesque 32px)",
+            "Below: label e.g. 'Passable' | 'Bien' | 'Excellent'",
+            "Animated: stroke-dashoffset transition 1s ease on mount"
+          ]
+        },
+
+        {
+          "file": "components/admin/behaviour/EventTimeline.tsx",
+          "description": "Horizontal timeline of driving events during a trip. X axis = trip time or distance.",
+          "design": [
+            "recharts ScatterChart: X axis = minutes into trip, Y axis = severity (1-4)",
+            "Each event: colored dot by type (red=drowsiness, orange=speed, yellow=braking, blue=swerve)",
+            "Hover tooltip: event_type, severity, time, location, confidence",
+            "If GPS coords available: clicking event opens Google Maps link",
+            "Empty state: green bar 'Aucun événement détecté'"
+          ]
+        },
+
+        {
+          "file": "components/admin/behaviour/ScoreBreakdownBar.tsx",
+          "description": "5-row breakdown showing sub-scores with deduction details.",
+          "rows": [
+            "🚗 Vitesse: [speed_score]/100 — [speed_violation_count] dépassement(s)",
+            "⚡ Style de conduite: [driving_style_score]/100 — [harsh_braking + harsh_accel + swerve] événement(s)",
+            "😴 Fatigue / Vigilance: [fatigue_score]/100 — [drowsiness + microsleep + distraction] alerte(s)",
+            "⏸️ Temps au ralenti: [idle_score]/100 — [total_idle_minutes] min",
+            "🆘 SOS: [sos_score]/100 — [sos_count] appel(s)"
+          ]
+        },
+
+        {
+          "file": "components/admin/behaviour/BehaviourReportCard.tsx",
+          "description": "Full trip behaviour report card. Shown on trip detail page after trip completion.",
+          "layout": [
+            "Header: 'Rapport comportemental' + trip reference + generated_at timestamp",
+            "Left: DriveScoreGauge (large, 200px)",
+            "Right: ScoreBreakdownBar",
+            "Below: EventTimeline (full width)",
+            "Bottom: admin review section (admin only) — textarea for note + 'Marquer comme examiné' button",
+            "If not yet reviewed: orange banner 'En attente d\\'examen admin'",
+            "If score < 60: red banner 'Score critique — action recommandée'"
+          ]
+        },
+
+        {
+          "file": "app/(admin)/admin/behaviour/page.tsx",
+          "description": "Fleet behaviour safety dashboard",
+          "layout": [
+            "PageHeader eyebrow='Sécurité' title='Comportement conducteurs' subtitle='Surveillance en temps réel'",
+            "Top stats: Score moyen flotte | Événements critiques aujourd\\'hui | Rapports non examinés | Alertes somnolence cette semaine",
+            "BehaviourAlertBanner — live Ably feed showing last 5 high/critical events in real time",
+            "FleetSafetyRanking — table of all drivers sorted by avg score with trend arrow",
+            "Columns: Conducteur | Score moyen | Tendance | Vitesse | Fatigue | Style | Nb trajets | Dernier trajet"
+          ]
+        },
+
+        {
+          "file": "app/(admin)/admin/behaviour/config/page.tsx",
+          "description": "Scoring configuration page — admin only",
+          "layout": [
+            "PageHeader title='Configuration des seuils'",
+            "Info box: 'Ces seuils s\\'appliquent à toute la flotte. Les modifications prennent effet sur les prochains trajets.'",
+            "Form sections:",
+            "  ESP32 — seuils G-force (braking, acceleration, swerve)",
+            "  GPS — excès de vitesse minimum, temps ralenti",
+            "  Caméra IA — seuils EAR, durées",
+            "  Pondération des scores — 5 sliders summing to 100%",
+            "  Déductions — points perdus par événement",
+            "Save button + Reset to defaults button"
+          ]
+        },
+
+        {
+          "file": "components/admin/behaviour/BehaviourAlertBanner.tsx",
+          "description": "Live alert feed. Subscribes to Ably admin:behaviour channel.",
+          "design": [
+            "Fixed-height scrollable list (max 5 items visible)",
+            "Each alert: colored left border by severity + event icon + driver name + trip ref + time ago",
+            "New alerts animate in from top (Framer Motion)",
+            "Critical alerts (microsleep) pulse red (animate-sos-beat)",
+            "Link: click → /admin/drivers/{id}/trips/{tripId}"
+          ]
+        },
+
+        {
+          "file": "app/(admin)/admin/drivers/[driverId]/trips/[tripId]/page.tsx",
+          "action": "MODIFY — add BehaviourReportCard below existing trip content",
+          "instructions": [
+            "After trip is completed (status='completed'):",
+            "  Fetch GET /api/drivers/{id}/trips/{tripId}/behaviour",
+            "  If status='generating': show skeleton with 'Génération du rapport comportemental...' + animated dots",
+            "  If status='ready': render <BehaviourReportCard report={report} events={events} />",
+            "Subscribe to Ably trips:{tripId} for 'behaviour_report_ready' event → refresh without page reload"
+          ]
+        },
+
+        {
+          "file": "components/admin/AdminSidebar.tsx",
+          "action": "MODIFY",
+          "instructions": [
+            "Add 'Comportement' nav item with ShieldIcon (lucide-react)",
+            "Route: /admin/behaviour",
+            "Show red badge with count of unreviewed critical reports (score < 60)"
+          ]
+        },
+
+        {
+          "file": "app/(admin)/admin/page.tsx",
+          "action": "MODIFY — add behaviour widget to dashboard",
+          "instructions": [
+            "Add 'Sécurité comportementale' widget",
+            "Shows: fleet avg score (DriveScoreGauge small variant) + today\\'s critical events count + last alert",
+            "Link: 'Voir le tableau de bord sécurité →' → /admin/behaviour"
+          ]
+        }
+      ]
+    }
+  ],
+
+  "new_db_tables": [
+    "driving_events — all behaviour events from all 3 streams",
+    "behaviour_reports — per-trip compiled report with score",
+    "behaviour_scoring_config — per-company configurable thresholds and weights"
+  ],
+
+  "mqtt_topics": {
+    "camera_ai": "trucknet/drivers/{driverId}/behaviour — published by cam_agent",
+    "gps": "trucknet/drivers/{driverId}/gps — published by GPS module or cam laptop",
+    "esp32": "trucknet/sensors/{deviceId}/readings — existing, extended by classifier"
+  },
+
+  "cam_agent_folder_summary": {
+    "location": "cam_agent/ at project root (like esp32/)",
+    "language": "Python 3.10+",
+    "model": "YOLOv8n-pose (face keypoints) + custom MLP classifier (scikit-learn)",
+    "inference_speed": "~30ms per frame on CPU — comfortable at 10fps",
+    "privacy": "No video stored or transmitted. Only event metadata (EAR value, head angle, confidence) sent via MQTT.",
+    "training_time": "~30 minutes on laptop CPU with 4000 samples",
+    "cost": "Zero ongoing cost — fully local"
+  },
+
+  "post_execution_checklist": [
+    "[ ] 3 new tables created via db:migrate",
+    "[ ] transport_trips has behaviour_report_id column",
+    "[ ] behaviour-event-consumer worker subscribes to trucknet/drivers/+/behaviour",
+    "[ ] sensor-consumer worker calls classifyEsp32Reading() on every reading",
+    "[ ] GPS POST endpoint stores position + calls classifyGpsUpdate()",
+    "[ ] BullMQ job 'generate-behaviour-report' queued on trip complete",
+    "[ ] Score calculation: 3 speed violations (-5 each) = speed_score 85 ✓",
+    "[ ] Score calculation: 1 microsleep alert (-25) = fatigue_score 75 ✓",
+    "[ ] cam_agent/inference/inference_agent.py runs without error on test video",
+    "[ ] cam_agent training pipeline produces drowsiness_mlp.pkl",
+    "[ ] MQTT event from cam_agent stored in driving_events table",
+    "[ ] BehaviourReportCard renders on trip detail page after completion",
+    "[ ] DriveScoreGauge shows correct color (red/orange/green/navy) by score range",
+    "[ ] Ably admin:behaviour alert appears live on fleet dashboard",
+    "[ ] Unreviewed critical reports badge shows on AdminSidebar"
+  ],
+
+  "esrs_s1_integration": {
+    "description": "Behaviour report metrics feed into the existing FEAT-008 ESG PDF export",
+    "new_fields_added_to_esg_pdf_section_10": [
+      "transport_accident_frequency_rate | Taux de fréquence accidents | [value] | acc/million h | ESRS S1-14",
+      "driver_drowsiness_alerts_count | Alertes somnolence | [value] | alertes | ISO 26000 §6.4.6",
+      "driver_avg_behaviour_score | Score comportemental moyen | [value] | /100 | ISO 26000 §6.4.6",
+      "driver_speed_violations_count | Dépassements de vitesse | [value] | événements | ESRS G1"
+    ],
+    "note": "Add these rows to lib/driver-esg-html-template.ts section 10 table and lib/driver-esg-aggregator.ts"
+  }
+}

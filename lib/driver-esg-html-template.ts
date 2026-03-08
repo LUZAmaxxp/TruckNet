@@ -250,6 +250,23 @@ export function buildDriverEsgHtml(data: EsgDataPackage, language = "fr"): strin
       <thead><tr><th>Réf</th><th>Type</th><th>Valeur</th><th>Seuil</th><th>Statut</th><th>Date</th></tr></thead>
       <tbody>${incRows}</tbody>
     </table>` : ""}
+
+    ${data.behaviourTripCount > 0 ? `
+    <h3 style="margin-top:16px;font-size:11pt">5a. COMPORTEMENT DE CONDUITE — Sécurité routière <span class="ref-badge">ESRS S1-14</span></h3>
+    <div class="kpi-grid">
+      ${kpiCard("Score moyen conduite", data.behaviourAvgScore, "/100")}
+      ${kpiCard("Trajets évalués",      data.behaviourTripCount, "trajets")}
+      ${kpiCard("Événements totaux",    data.behaviourTotalEvents, "événements")}
+      ${kpiCard("Événements critiques", data.behaviourCriticalEvents, "critiques")}
+      ${kpiCard("Score trajet min.",    data.behaviourWorstTripScore, "/100")}
+      ${kpiCard("Score trajet max.",    data.behaviourBestTripScore, "/100")}
+    </div>
+    ${Object.keys(data.behaviourEventsByType).length > 0 ? `
+    <table>
+      <thead><tr><th>Type d'événement</th><th style="text-align:right">Occurrences</th></tr></thead>
+      <tbody>${Object.entries(data.behaviourEventsByType).map(([type, count]) => `<tr><td>${type.replace(/_/g, " ")}</td><td style="text-align:right">${count}</td></tr>`).join("")}</tbody>
+    </table>` : ""}` : `
+    <div class="info-box" style="margin-top:12px">Aucune donnée de comportement de conduite disponible pour cette période.</div>`}
   </div>`;
 
   // ── SECTION 6 — Cargo conditions ──────────────────────────────────────────
@@ -370,6 +387,13 @@ export function buildDriverEsgHtml(data: EsgDataPackage, language = "fr"): strin
     ["employee_gender",                       "Genre",                                   data.diversityGender,              "—",              "ISO 26000 §6.3.10","ESRS S1-12"],
     ["employee_age_group",                    "Groupe d'âge",                            data.diversityAgeGroup,            "—",              "ISO 26000 §6.3.10","ESRS S1-12"],
     ["employee_contract_type",                "Type de contrat",                         data.diversityContractType,        "—",              "ISO 26000 §6.3.10","ESRS S1"],
+    // --- Driver behaviour (ESRS S1-14 — conduct & safe driving) ---
+    ["driving_behaviour_avg_score",           "Score conduite moyen",                    data.behaviourAvgScore,            "/100",           "ISO 26000 §6.4.6", "ESRS S1-14"],
+    ["driving_behaviour_trip_count",          "Trajets évalués",                         data.behaviourTripCount,           "trajets",        "ISO 26000 §6.4.6", "ESRS S1-14"],
+    ["driving_behaviour_total_events",        "Événements de conduite",                  data.behaviourTotalEvents,         "événements",     "ISO 26000 §6.4.6", "ESRS S1-14"],
+    ["driving_behaviour_critical_events",     "Événements critiques",                    data.behaviourCriticalEvents,      "événements",     "ISO 26000 §6.4.6", "ESRS S1-14"],
+    ["driving_behaviour_worst_trip_score",    "Score trajet le plus bas",                data.behaviourWorstTripScore,      "/100",           "ISO 26000 §6.4.6", "ESRS S1-14"],
+    ["driving_behaviour_best_trip_score",     "Score trajet le plus élevé",              data.behaviourBestTripScore,       "/100",           "ISO 26000 §6.4.6", "ESRS S1-14"],
   ] as const;
 
   const ocrTbody = ocrRows.map(([key, label, value, unit, iso, esrs]) => {

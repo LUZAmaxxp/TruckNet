@@ -1,0 +1,9 @@
+config/config.yaml
+models/*.pt
+models/*.onnx
+models/*.pkl
+datasets/
+__pycache__/
+*.pyc
+venv/
+.env

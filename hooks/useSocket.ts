@@ -29,6 +29,9 @@ const FLEET_EVENTS = new Set<EventName>(["driver_location_updated", "driver_rout
 /** Events delivered on the shared "admin:sensors" channel */
 const SENSOR_EVENTS = new Set<EventName>(["sensor_alert", "sensor_alert_acked", "fleet_sensor_update"]);
 
+/** Events delivered on the shared "admin:behaviour" channel */
+const BEHAVIOUR_EVENTS = new Set<EventName>(["behaviour_event", "behaviour_report_ready", "behaviour_report_failed"]);
+
 interface SocketContextValue {
   on:          <E extends EventName>(event: E, handler: ServerToClientEvents[E]) => () => void;
   emit:        <E extends keyof ClientToServerEvents>(event: E, ...args: Parameters<ClientToServerEvents[E]>) => void;
@@ -65,10 +68,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     const realtime = new Ably.Realtime({ authUrl: "/api/auth/ably-token" });
     realtimeRef.current = realtime;
 
-    const userChannel   = realtime.channels.get(`user:${userId}`);
-    const stressChannel = realtime.channels.get("stress:alerts");
-    const fleetChannel  = realtime.channels.get("fleet:locations");
-    const sensorChannel = realtime.channels.get("admin:sensors");
+    const userChannel      = realtime.channels.get(`user:${userId}`);
+    const stressChannel    = realtime.channels.get("stress:alerts");
+    const fleetChannel     = realtime.channels.get("fleet:locations");
+    const sensorChannel    = realtime.channels.get("admin:sensors");
+    const behaviourChannel = realtime.channels.get("admin:behaviour");
 
     // Build one stable dispatcher per event — routes Ably messages into our
     // listener registry. Ably keeps exactly ONE subscription per event.
@@ -90,6 +94,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       "sensor_alert",
       "sensor_alert_acked",
       "fleet_sensor_update",
+      // Behaviour / Safety events
+      "behaviour_event",
+      "behaviour_report_ready",
+      "behaviour_report_failed",
       "error",
     ];
 
@@ -105,6 +113,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         ? fleetChannel
         : SENSOR_EVENTS.has(event)
         ? sensorChannel
+        : BEHAVIOUR_EVENTS.has(event)
+        ? behaviourChannel
         : userChannel;
       void channel.subscribe(event, dispatcher);
     }
@@ -122,6 +132,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       stressChannel.unsubscribe();
       fleetChannel.unsubscribe();
       sensorChannel.unsubscribe();
+      behaviourChannel.unsubscribe();
       realtime.close();
       realtimeRef.current    = null;
       dispatchersRef.current = new Map();

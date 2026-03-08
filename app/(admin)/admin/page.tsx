@@ -9,6 +9,7 @@ const FleetMap = dynamic(
 );
 import { SosPanel } from "@/components/admin/SosPanel";
 import { EsgDashboardWidgets } from "@/components/admin/drivers/EsgDashboardWidgets";
+import { BehaviourDashboardWidget } from "@/components/admin/behaviour/BehaviourDashboardWidget";
 
 export type AdminStats = {
   totalDrivers: number;
@@ -157,6 +158,9 @@ export default function AdminDashboardPage() {
 
       {/* ESG dashboard widgets */}
       <EsgDashboardWidgets />
+
+      {/* Behaviour / Safety widget */}
+      <BehaviourDashboardWidget />
     </div>
   );
 }

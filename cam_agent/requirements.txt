@@ -1,0 +1,24 @@
+# Core inference
+ultralytics>=8.0.0        # YOLOv8n-pose
+opencv-python>=4.9.0
+numpy>=1.26.0
+scikit-learn>=1.4.0       # MLP classifier
+joblib>=1.3.0             # model serialization
+
+# MQTT
+paho-mqtt>=2.0.0
+
+# Config
+pyyaml>=6.0
+
+# Live test visualisation
+pygame>=2.5.0
+
+# Training only
+torch>=2.2.0
+pandas>=2.2.0
+matplotlib>=3.8.0
+tqdm>=4.66.0
+
+# Optional: faster inference on CPU
+onnxruntime>=1.17.0

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Plus, RefreshCw } from "lucide-react";
+import { ArrowLeft, FileBarChart, Plus, RefreshCw } from "lucide-react";
 import { DriverProfileForm } from "@/components/admin/drivers/DriverProfileForm";
 import { ShiftLogForm } from "@/components/admin/drivers/ShiftLogForm";
 import { ShiftLogTable } from "@/components/admin/drivers/ShiftLogTable";
@@ -63,6 +63,8 @@ export default function DriverDetailPage({ params }: { params: { driverId: strin
   const [showAddMaint, setShowAddMaint] = useState(false);
   const [showAddTrain, setShowAddTrain] = useState(false);
   const [showGenModal, setShowGenModal] = useState(false);
+  /** Stores the period dates when the modal is opened from the Trips tab */
+  const [esgPeriodFromTrips, setEsgPeriodFromTrips] = useState<{ start: string; end: string } | null>(null);
   const [activeTab, setActiveTab] = useState<string | null>(
     typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") : null
   );
@@ -233,6 +235,37 @@ export default function DriverDetailPage({ params }: { params: { driverId: strin
               </div>
             )}
             <TripLogTable driverId={driverId} trips={trips as any[]} onDeleted={fetchTrips} />
+            {/* ESG report callout — shown when there are completed trips */}
+            {!loadingTrips && (trips as any[]).filter((t: any) => t.status === "completed").length > 0 && (() => {
+              const completed  = (trips as any[]).filter((t: any) => t.status === "completed");
+              const dates      = completed.map((t: any) => t.startedAt as string).filter(Boolean).sort();
+              const autoStart  = dates[0]?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+              const autoEnd    = dates[dates.length - 1]?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+              return (
+                <div
+                  className="flex items-center justify-between gap-3 rounded-[12px] px-4 py-3"
+                  style={{ background: "var(--navy-lt)", border: "1px solid var(--navy-md)" }}
+                >
+                  <div className="flex items-center gap-2">
+                    <FileBarChart className="h-4 w-4 shrink-0" style={{ color: "var(--navy)" }} />
+                    <p className="text-[12px] font-medium" style={{ color: "var(--navy)" }}>
+                      {completed.length} completed trip{completed.length > 1 ? "s" : ""} · ready for ESG report
+                      <span className="ml-1 font-normal opacity-70">({autoStart} → {autoEnd})</span>
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEsgPeriodFromTrips({ start: autoStart, end: autoEnd });
+                      setShowGenModal(true);
+                    }}
+                    className="shrink-0 rounded-[8px] px-3 py-1.5 text-[11px] font-semibold text-white"
+                    style={{ background: "var(--navy)" }}
+                  >
+                    Generate ESG
+                  </button>
+                </div>
+              );
+            })()}
             {!loadingTrips && trips.length > 0 && (
               <p className="text-[11px]" style={{ color: "var(--muted)" }}>
                 CO₂ = fuel litres × ADEME 2024 factor per fuel type (diesel 2.65, petrol 2.37, LPG 1.63, CNG 2.30 kg CO₂eq/L)
@@ -322,7 +355,10 @@ export default function DriverDetailPage({ params }: { params: { driverId: strin
       {showGenModal && driver && (
         <GenerateEsgReportModal
           drivers={[{ id: driver.id, name: driver.name }]}
-          onClose={() => setShowGenModal(false)}
+          preselectedDriverId={driver.id}
+          initialPeriodStart={esgPeriodFromTrips?.start}
+          initialPeriodEnd={esgPeriodFromTrips?.end}
+          onClose={() => { setShowGenModal(false); setEsgPeriodFromTrips(null); }}
           onCreated={() => { setTab("ESG Reports"); void fetchReports(); }}
         />
       )}

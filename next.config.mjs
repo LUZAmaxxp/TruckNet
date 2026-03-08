@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Required to activate instrumentation.ts (auto-starts behaviour workers)
+  experimental: {
+    instrumentationHook: true,
+  },
   async headers() {
     return [
       {

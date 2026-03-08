@@ -311,4 +311,13 @@ export interface EsgDataPackage {
   fleetAvgVehicleCompliancePct:number | null;
   driverVsFleetGhgPct:         number | null;
   driverVsFleetIncidentPct:    number | null;
+
+  // --- Driver behaviour (ESRS S1-14 — safe driving) ---
+  behaviourAvgScore:        number | null;
+  behaviourTripCount:       number;
+  behaviourTotalEvents:     number;
+  behaviourCriticalEvents:  number;
+  behaviourEventsByType:    Record<string, number>;
+  behaviourWorstTripScore:  number | null;
+  behaviourBestTripScore:   number | null;
 }

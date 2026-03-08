@@ -7,6 +7,7 @@ import { Loader2, Navigation } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSocket } from "@/hooks/useSocket";
 import { DriverCard } from "@/components/drivers/DriverCard";
+import { ActiveTripCard } from "@/components/drivers/ActiveTripCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { NearbyDriverEntry } from "@/sockets/types";
@@ -237,6 +238,9 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Active trip */}
+      <ActiveTripCard />
 
       {/* Nearby drivers */}
       <div>

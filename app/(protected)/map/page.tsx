@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Navigation, Loader2, MessageSquare, X, Users, Flag } from "lucide-react";
+import { Navigation, Loader2, MessageSquare, X, Users, Flag, Truck } from "lucide-react";
 import { useSocket } from "@/hooks/useSocket";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import type { NearbyDriverEntry } from "@/sockets/types";
 import { RouteSetupModal } from "@/components/map/RouteSetupModal";
 import { RouteInfoBar } from "@/components/map/RouteInfoBar";
-import type { ActiveRoute } from "@/schemas/route.schema";
+import type { ActiveRoute, GeocodeResult } from "@/schemas/route.schema";
 
 // ---------------------------------------------------------------------------
 // Dynamically import the Leaflet map — must be ssr:false (Leaflet needs window)
@@ -56,6 +56,19 @@ function MapPageInner() {
   const [activeRoute, setActiveRoute] = useState<ActiveRoute | null>(null);
   const [routeModalOpen, setRouteModalOpen] = useState(false);
 
+  /** Active trip started from the driver dashboard */
+  const [activeTrip, setActiveTrip] = useState<{
+    id: string;
+    vehiclePlate: string;
+    originLabel: string | null;
+    destinationLabel: string | null;
+    cargoWeightKg: number | null;
+    startedAt: string | null;
+  } | null | "loading">("loading");
+  const [routeAutoBuilding, setRouteAutoBuilding] = useState(false);
+  /** Guard so auto-route fires at most once per page load */
+  const autoRouteRef = useRef(false);
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch active route on mount to restore state after page reload
@@ -73,6 +86,90 @@ function MapPageInner() {
     }
     void fetchActiveRoute();
   }, []);
+
+  // Fetch the active trip started from the dashboard
+  useEffect(() => {
+    async function fetchActiveTrip() {
+      try {
+        const res = await fetch("/api/trips");
+        if (res.ok) {
+          const json = await res.json() as { trip: typeof activeTrip | null };
+          setActiveTrip(json.trip ?? null);
+        } else {
+          setActiveTrip(null);
+        }
+      } catch {
+        setActiveTrip(null);
+      }
+    }
+    void fetchActiveTrip();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // When GPS + active trip with destination are available and no OSRM route exists,
+  // auto-geocode the destination and draw the trajectory on the map.
+  useEffect(() => {
+    if (!myLocation) return;
+    if (!activeTrip || activeTrip === "loading") return;
+    if (activeRoute) return;                         // already have a route
+    if (!activeTrip.destinationLabel) return;        // no destination to geocode
+    if (autoRouteRef.current) return;               // already attempted
+
+    autoRouteRef.current = true;
+    setRouteAutoBuilding(true);
+
+    // Capture narrowed values before the async closure so TypeScript
+    // can verify they stay non-null throughout.
+    const trip = activeTrip;
+    const origin = myLocation;
+
+    async function buildRoute() {
+      try {
+        // 1. Geocode the destination label
+        const geoRes = await fetch(
+          `/api/geocode?q=${encodeURIComponent(trip.destinationLabel!)}`
+        );
+        if (!geoRes.ok) { setRouteAutoBuilding(false); return; }
+
+        const geoJson = await geoRes.json() as { results?: GeocodeResult[] };
+        const results = geoJson.results ?? [];
+        if (!results.length) {
+          toast.info("Trip destination not found on map", {
+            description: `"${trip.destinationLabel}" could not be geocoded.`,
+          });
+          setRouteAutoBuilding(false);
+          return;
+        }
+
+        const dest = results[0]!;
+
+        // 2. Create OSRM route from current GPS → destination
+        const routeRes = await fetch("/api/drivers/route", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            originLat:        origin.lat,
+            originLng:        origin.lng,
+            destinationLat:   dest.lat,
+            destinationLng:   dest.lng,
+            destinationLabel: trip.destinationLabel,
+          }),
+        });
+
+        if (routeRes.ok) {
+          const routeJson = await routeRes.json() as { route: ActiveRoute };
+          setActiveRoute(routeJson.route ?? null);
+          toast.success("Route loaded from active trip 🗺️");
+        }
+      } catch (err) {
+        console.error("[map] auto-route build failed:", err);
+      } finally {
+        setRouteAutoBuilding(false);
+      }
+    }
+
+    void buildRoute();
+  }, [myLocation, activeTrip, activeRoute]);
 
   const handleClearRoute = useCallback(async () => {
     try {
@@ -238,6 +335,38 @@ function MapPageInner() {
         className="relative w-full rounded-lg border"
         style={{ height: "calc(100dvh - 180px)", minHeight: "400px", overflow: "clip" }}
       >
+        {/* Active trip indicator pill */}
+        {activeTrip && activeTrip !== "loading" && (
+          <div
+            className="absolute top-3 left-3 z-[1000] flex items-center gap-2 rounded-[10px] px-3 py-2 shadow-lg text-[12px] font-medium max-w-[calc(100%-80px)]"
+            style={{
+              background: "var(--honey-lt)",
+              border:     "1px solid var(--honey)",
+              color:      "var(--honey)",
+            }}
+          >
+            {routeAutoBuilding ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+            ) : (
+              <Truck className="h-3.5 w-3.5 shrink-0" />
+            )}
+            <span className="font-semibold shrink-0">{activeTrip.vehiclePlate}</span>
+            {(activeTrip.originLabel || activeTrip.destinationLabel) && (
+              <>
+                <span className="opacity-50">·</span>
+                <span className="truncate opacity-80">
+                  {[activeTrip.originLabel, activeTrip.destinationLabel]
+                    .filter(Boolean)
+                    .join(" → ")}
+                </span>
+              </>
+            )}
+            {routeAutoBuilding && (
+              <span className="opacity-60 shrink-0">Loading route…</span>
+            )}
+          </div>
+        )}
+
         {/* Real interactive OpenStreetMap */}
         <DriverMap
           currentDriver={myLocation}

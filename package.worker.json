@@ -9,6 +9,10 @@
     "worker:dev:esg": "tsx watch workers/driver-esg-report-worker.ts",
     "worker:esg-scheduler": "tsx workers/esg-report-scheduler.ts",
     "worker:dev:esg-scheduler": "tsx watch workers/esg-report-scheduler.ts",
+    "worker:behaviour": "tsx workers/behaviour-report-worker.ts",
+    "worker:dev:behaviour": "tsx watch workers/behaviour-report-worker.ts",
+    "worker:behaviour-events": "tsx workers/behaviour-event-consumer.ts",
+    "worker:dev:behaviour-events": "tsx watch workers/behaviour-event-consumer.ts",
     "kafka:setup": "tsx scripts/kafka-setup.ts"
   },
   "dependencies": {

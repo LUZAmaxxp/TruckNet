@@ -492,6 +492,8 @@ export const transportTrips = pgTable(
     startedAt:        timestamp("started_at",  { withTimezone: true }),
     completedAt:      timestamp("completed_at", { withTimezone: true }),
     status:           routeStatusEnum("status").notNull().default("active"),
+    /** FK set after behaviour report is generated on trip completion */
+    behaviourReportId: uuid("behaviour_report_id"),
     createdAt:        timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     createdBy:        uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   },
@@ -735,3 +737,207 @@ export const esgReportSchedules = pgTable(
 
 export type EsgReportSchedule    = InferSelectModel<typeof esgReportSchedules>;
 export type NewEsgReportSchedule = InferInsertModel<typeof esgReportSchedules>;
+
+// ===========================================================================
+// FEAT-009 — Driver Behaviour Report
+// ===========================================================================
+
+export const drivingEventTypeEnum = pgEnum("driving_event_type", [
+  "speed_violation",
+  "harsh_braking",
+  "harsh_acceleration",
+  "sudden_swerve",
+  "drowsiness_alert",
+  "microsleep_alert",
+  "distraction_alert",
+  "idle_excess",
+  "sos_triggered",
+]);
+
+export const drivingEventSeverityEnum = pgEnum("driving_event_severity", [
+  "low",
+  "medium",
+  "high",
+  "critical",
+]);
+
+export const eventSourceEnum = pgEnum("event_source", [
+  "gps",
+  "esp32",
+  "ai_camera",
+  "driver",
+]);
+
+// ---------------------------------------------------------------------------
+// driving_events — immutable event log from all 3 streams
+// ---------------------------------------------------------------------------
+
+export const drivingEvents = pgTable(
+  "driving_events",
+  {
+    eventId:             uuid("event_id").primaryKey().defaultRandom(),
+    driverId:            uuid("driver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    tripId:              uuid("trip_id").notNull().references(() => transportTrips.id, { onDelete: "cascade" }),
+    eventType:           drivingEventTypeEnum("event_type").notNull(),
+    severity:            drivingEventSeverityEnum("severity").notNull().default("low"),
+    source:              eventSourceEnum("source").notNull(),
+    occurredAt:          timestamp("occurred_at", { withTimezone: true }).notNull(),
+    durationSeconds:     real("duration_seconds"),
+    gpsLat:              real("gps_lat"),
+    gpsLng:              real("gps_lng"),
+    gpsSpeedKmh:         real("gps_speed_kmh"),
+    speedLimitKmh:       real("speed_limit_kmh"),
+    speedExcessKmh:      real("speed_excess_kmh"),
+    vibrationMagnitude:  real("vibration_magnitude"),
+    accelX:              real("accel_x"),
+    accelY:              real("accel_y"),
+    accelZ:              real("accel_z"),
+    earValue:            real("ear_value"),
+    headAngleDeg:        real("head_angle_deg"),
+    confidence:          real("confidence"),
+    idleDurationMinutes: real("idle_duration_minutes"),
+    metadata:            json("metadata"),
+    createdAt:           timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    driverIdIdx:  index("driving_events_driver_id_idx").on(t.driverId),
+    tripIdIdx:    index("driving_events_trip_id_idx").on(t.tripId),
+    eventTypeIdx: index("driving_events_event_type_idx").on(t.eventType),
+    occurredAtIdx: index("driving_events_occurred_at_idx").on(t.occurredAt),
+    sourceIdx:    index("driving_events_source_idx").on(t.source),
+  })
+);
+
+export type DrivingEvent    = InferSelectModel<typeof drivingEvents>;
+export type NewDrivingEvent = InferInsertModel<typeof drivingEvents>;
+
+// ---------------------------------------------------------------------------
+// behaviour_reports — per-trip compiled report (one per trip)
+// ---------------------------------------------------------------------------
+
+export const behaviourReports = pgTable(
+  "behaviour_reports",
+  {
+    behaviourReportId:     uuid("behaviour_report_id").primaryKey().defaultRandom(),
+    driverId:              uuid("driver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    tripId:                uuid("trip_id").notNull().unique().references(() => transportTrips.id, { onDelete: "cascade" }),
+    // ── Scores ──
+    globalScore:           integer("global_score").notNull(),
+    speedScore:            integer("speed_score").notNull(),
+    drivingStyleScore:     integer("driving_style_score").notNull(),
+    fatigueScore:          integer("fatigue_score").notNull(),
+    idleScore:             integer("idle_score").notNull(),
+    // ── Event counts ──
+    speedViolationCount:   integer("speed_violation_count").notNull().default(0),
+    maxSpeedRecordedKmh:   real("max_speed_recorded_kmh"),
+    maxSpeedExcessKmh:     real("max_speed_excess_kmh"),
+    harshBrakingCount:     integer("harsh_braking_count").notNull().default(0),
+    harshAccelerationCount: integer("harsh_acceleration_count").notNull().default(0),
+    suddenSwerveCount:     integer("sudden_swerve_count").notNull().default(0),
+    drowsinessAlertCount:  integer("drowsiness_alert_count").notNull().default(0),
+    microsleepAlertCount:  integer("microsleep_alert_count").notNull().default(0),
+    distractionAlertCount: integer("distraction_alert_count").notNull().default(0),
+    idleExcessCount:       integer("idle_excess_count").notNull().default(0),
+    totalIdleMinutes:      real("total_idle_minutes").notNull().default(0),
+    sosCount:              integer("sos_count").notNull().default(0),
+    // ── Summary ──
+    totalEvents:           integer("total_events").notNull().default(0),
+    criticalEvents:        integer("critical_events").notNull().default(0),
+    tripDistanceKm:        real("trip_distance_km"),
+    tripDurationHours:     real("trip_duration_hours"),
+    eventsPer100km:        real("events_per_100km"),
+    // ── Status / review ──
+    status:                varchar("status", { length: 20 }).notNull().default("generating"),
+    adminReviewed:         boolean("admin_reviewed").notNull().default(false),
+    adminReviewedBy:       uuid("admin_reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    adminReviewedAt:       timestamp("admin_reviewed_at", { withTimezone: true }),
+    adminNote:             text("admin_note"),
+    generatedAt:           timestamp("generated_at", { withTimezone: true }),
+    createdAt:             timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt:             timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    driverIdIdx:    index("behaviour_reports_driver_id_idx").on(t.driverId),
+    tripIdIdx:      index("behaviour_reports_trip_id_idx").on(t.tripId),
+    globalScoreIdx: index("behaviour_reports_global_score_idx").on(t.globalScore),
+    generatedAtIdx: index("behaviour_reports_generated_at_idx").on(t.generatedAt),
+  })
+);
+
+export type BehaviourReport    = InferSelectModel<typeof behaviourReports>;
+export type NewBehaviourReport = InferInsertModel<typeof behaviourReports>;
+
+// ---------------------------------------------------------------------------
+// behaviour_scoring_config — per-company configurable thresholds & weights
+// (one row per company; if none exists system uses built-in defaults)
+// ---------------------------------------------------------------------------
+
+export const behaviourScoringConfig = pgTable(
+  "behaviour_scoring_config",
+  {
+    configId:                     uuid("config_id").primaryKey().defaultRandom(),
+    // ── ESP32 thresholds ──
+    harshBrakingThresholdG:       real("harsh_braking_threshold_g").notNull().default(0.4),
+    harshAccelerationThresholdG:  real("harsh_acceleration_threshold_g").notNull().default(0.35),
+    swerveThresholdG:             real("swerve_threshold_g").notNull().default(0.3),
+    // ── GPS thresholds ──
+    speedViolationExcessKmh:      real("speed_violation_excess_kmh").notNull().default(10),
+    idleExcessMinutes:            real("idle_excess_minutes").notNull().default(10),
+    // ── Camera AI thresholds ──
+    earDrowsyThreshold:           real("ear_drowsy_threshold").notNull().default(0.25),
+    earMicrosleepThreshold:       real("ear_microsleep_threshold").notNull().default(0.20),
+    drowsyDurationSeconds:        real("drowsy_duration_seconds").notNull().default(2.0),
+    microsleepDurationSeconds:    real("microsleep_duration_seconds").notNull().default(3.0),
+    headAngleDistractionDeg:      real("head_angle_distraction_deg").notNull().default(30),
+    distractionDurationSeconds:   real("distraction_duration_seconds").notNull().default(3.0),
+    // ── Score weights (should sum to 100) ──
+    weightSpeed:                  integer("weight_speed").notNull().default(25),
+    weightDrivingStyle:           integer("weight_driving_style").notNull().default(20),
+    weightFatigue:                integer("weight_fatigue").notNull().default(30),
+    weightIdle:                   integer("weight_idle").notNull().default(10),
+    weightSos:                    integer("weight_sos").notNull().default(15),
+    // ── Deductions ──
+    deductionSpeedMinor:          integer("deduction_speed_minor").notNull().default(5),
+    deductionSpeedMajor:          integer("deduction_speed_major").notNull().default(10),
+    deductionHarshBraking:        integer("deduction_harsh_braking").notNull().default(3),
+    deductionHarshAcceleration:   integer("deduction_harsh_acceleration").notNull().default(3),
+    deductionSwerve:              integer("deduction_swerve").notNull().default(5),
+    deductionDrowsiness:          integer("deduction_drowsiness").notNull().default(15),
+    deductionMicrosleep:          integer("deduction_microsleep").notNull().default(25),
+    deductionDistraction:         integer("deduction_distraction").notNull().default(8),
+    deductionIdlePer10min:        integer("deduction_idle_per_10min").notNull().default(2),
+    deductionSos:                 integer("deduction_sos").notNull().default(20),
+    createdAt:                    timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt:                    timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy:                    uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  }
+);
+
+export type BehaviourScoringConfig    = InferSelectModel<typeof behaviourScoringConfig>;
+export type NewBehaviourScoringConfig = InferInsertModel<typeof behaviourScoringConfig>;
+
+// ---------------------------------------------------------------------------
+// gps_tracks — raw GPS positions per trip (for live map + event geo-context)
+// ---------------------------------------------------------------------------
+
+export const gpsTracks = pgTable(
+  "gps_tracks",
+  {
+    id:         uuid("id").primaryKey().defaultRandom(),
+    tripId:     uuid("trip_id").notNull().references(() => transportTrips.id, { onDelete: "cascade" }),
+    driverId:   uuid("driver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    lat:        real("lat").notNull(),
+    lng:        real("lng").notNull(),
+    speedKmh:   real("speed_kmh"),
+    headingDeg: real("heading_deg"),
+    accuracyM:  real("accuracy_m"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    tripTimeIdx:   index("gps_tracks_trip_time_idx").on(t.tripId, t.recordedAt),
+    driverTimeIdx: index("gps_tracks_driver_time_idx").on(t.driverId, t.recordedAt),
+  })
+);
+
+export type GpsTrack    = InferSelectModel<typeof gpsTracks>;
+export type NewGpsTrack = InferInsertModel<typeof gpsTracks>;

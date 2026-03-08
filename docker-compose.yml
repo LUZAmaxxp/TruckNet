@@ -220,6 +220,55 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@trucknet.local}
 
+  # ── Behaviour Event Consumer (MQTT → DB) ──────────────────────
+  # Subscribes to trucknet/drivers/+/behaviour, validates events,
+  # inserts into driving_events, fans out critical alerts via Ably.
+  behaviour-event-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    command: node_modules/.bin/tsx workers/behaviour-event-consumer.ts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: production
+      ABLY_API_KEY: ${ABLY_API_KEY}
+      MQTT_URL: mqtt://trucknet:${MQTT_PASSWORD}@mosquitto:1883
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_ENABLED: "false"
+
+  # ── Behaviour Report Worker (BullMQ) ───────────────────────────
+  # Processes behaviour-reports queue: calculates driving scores,
+  # inserts behaviour_reports row, notifies admin via Ably.
+  behaviour-report-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    command: node_modules/.bin/tsx workers/behaviour-report-worker.ts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      ABLY_API_KEY: ${ABLY_API_KEY}
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_ENABLED: "false"
+
   # ── Eclipse Mosquitto MQTT Broker ──────────────────────────────
   # Receives sensor readings from ESP32 devices on port 1883.
   # WebSocket listener on 9001 for browser-based debugging tools.

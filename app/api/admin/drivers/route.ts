@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { and, count, eq, gt, ilike, isNull, lte, or } from "drizzle-orm";
+import { and, count, desc, eq, gt, ilike, isNull, lte, or } from "drizzle-orm";
 import { requireAdminSession } from "@/lib/auth-helpers";
 import { db } from "@/db";
 import { driverLocations, users } from "@/db/schema";
@@ -30,6 +30,18 @@ export async function GET(req: NextRequest) {
   const offset = (page - 1) * limit;
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
 
+  // Subquery: latest location row per driver (driver_locations is a history table)
+  const latestLoc = db
+    .selectDistinctOn([driverLocations.userId], {
+      userId:    driverLocations.userId,
+      latitude:  driverLocations.latitude,
+      longitude: driverLocations.longitude,
+      updatedAt: driverLocations.updatedAt,
+    })
+    .from(driverLocations)
+    .orderBy(driverLocations.userId, desc(driverLocations.updatedAt))
+    .as("latest_loc");
+
   // Build WHERE conditions
   const conditions = [eq(users.role, "driver")];
 
@@ -43,12 +55,12 @@ export async function GET(req: NextRequest) {
   }
 
   if (status === "online") {
-    conditions.push(gt(driverLocations.updatedAt, fiveMinutesAgo));
+    conditions.push(gt(latestLoc.updatedAt, fiveMinutesAgo));
   } else if (status === "offline") {
     conditions.push(
       or(
-        isNull(driverLocations.userId),
-        lte(driverLocations.updatedAt, fiveMinutesAgo)
+        isNull(latestLoc.userId),
+        lte(latestLoc.updatedAt, fiveMinutesAgo)
       )!
     );
   }
@@ -59,34 +71,34 @@ export async function GET(req: NextRequest) {
   const [rows, [{ count: total }], [{ count: onlineCount }]] = await Promise.all([
     db
       .select({
-        id: users.id,
-        name: users.name,
-        tag: users.tag,
+        id:              users.id,
+        name:            users.name,
+        tag:             users.tag,
         profileImageUrl: users.profileImageUrl,
-        role: users.role,
-        createdAt: users.createdAt,
-        lastLatitude: driverLocations.latitude,
-        lastLongitude: driverLocations.longitude,
-        lastSeenAt: driverLocations.updatedAt,
+        role:            users.role,
+        createdAt:       users.createdAt,
+        lastLatitude:    latestLoc.latitude,
+        lastLongitude:   latestLoc.longitude,
+        lastSeenAt:      latestLoc.updatedAt,
       })
       .from(users)
-      .leftJoin(driverLocations, eq(driverLocations.userId, users.id))
+      .leftJoin(latestLoc, eq(latestLoc.userId, users.id))
       .where(whereClause)
-      .orderBy(driverLocations.updatedAt)
+      .orderBy(latestLoc.updatedAt)
       .limit(limit)
       .offset(offset),
 
     db
       .select({ count: count() })
       .from(users)
-      .leftJoin(driverLocations, eq(driverLocations.userId, users.id))
+      .leftJoin(latestLoc, eq(latestLoc.userId, users.id))
       .where(whereClause),
 
     db
       .select({ count: count() })
       .from(users)
-      .leftJoin(driverLocations, eq(driverLocations.userId, users.id))
-      .where(and(eq(users.role, "driver"), gt(driverLocations.updatedAt, fiveMinutesAgo))),
+      .leftJoin(latestLoc, eq(latestLoc.userId, users.id))
+      .where(and(eq(users.role, "driver"), gt(latestLoc.updatedAt, fiveMinutesAgo))),
   ]);
 
   const drivers = rows.map((row) => ({

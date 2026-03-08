@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
-import { LayoutDashboard, Users, AlertTriangle, PhoneCall, MessageSquare, LogOut, Cpu, FileBarChart, Calendar } from "lucide-react";
+import { LayoutDashboard, Users, AlertTriangle, PhoneCall, MessageSquare, LogOut, Cpu, FileBarChart, Calendar, ShieldCheck } from "lucide-react";
 import { useSocket } from "@/hooks/useSocket";
 import { cn } from "@/lib/utils";
 import { CertificationAlertBadge } from "@/components/admin/drivers/CertificationAlertBadge";
@@ -23,11 +23,17 @@ const ESG_ITEMS = [
   { href: "/admin/drivers/schedule",    label: "Schedules",    icon: Calendar     },
 ];
 
+const SAFETY_ITEMS = [
+  { href: "/admin/behaviour",        label: "Comportement", icon: ShieldCheck },
+  { href: "/admin/behaviour/config", label: "Config scoring", icon: null       },
+];
+
 export function AdminSidebar() {
   const pathname = usePathname();
   const { on } = useSocket();
-  const [activeSosBadge, setActiveSosBadge] = useState(0);
-  const [sensorAlertBadge, setSensorAlertBadge] = useState(0);
+  const [activeSosBadge,       setActiveSosBadge]       = useState(0);
+  const [sensorAlertBadge,     setSensorAlertBadge]     = useState(0);
+  const [unreviewedBehaviour,  setUnreviewedBehaviour]  = useState(0);
 
   useEffect(() => {
     fetch("/api/admin/stats")
@@ -35,6 +41,13 @@ export function AdminSidebar() {
       .then((d: { activeSosAlerts?: number; sensorAlertCount?: number }) => {
         if (typeof d.activeSosAlerts === "number") setActiveSosBadge(d.activeSosAlerts);
         if (typeof d.sensorAlertCount === "number") setSensorAlertBadge(d.sensorAlertCount);
+      })
+      .catch(() => undefined);
+
+    fetch("/api/admin/behaviour/fleet")
+      .then((r) => r.json())
+      .then((d: { unreviewed_reports?: number }) => {
+        if (typeof d.unreviewed_reports === "number") setUnreviewedBehaviour(d.unreviewed_reports);
       })
       .catch(() => undefined);
   }, []);
@@ -151,6 +164,36 @@ export function AdminSidebar() {
                 <Icon className="h-4 w-4 shrink-0" />
                 {label}
                 {label === "ESG Reports" && <CertificationAlertBadge days={90} />}
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* Safety / Behaviour sub-section */}
+        <div className="pt-2">
+          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--muted)" }}>
+            Sécurité
+          </p>
+          {SAFETY_ITEMS.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href || (href !== "/admin/behaviour" && pathname.startsWith(href));
+            return (
+              <Link key={href} href={href}
+                className={cn(
+                  "relative flex items-center gap-3 rounded-[12px] px-3 py-[9px] text-[13px] font-medium transition-all duration-[0.18s]",
+                  active ? "bg-navy-lt text-navy font-semibold" : "text-[var(--muted)] hover:bg-base hover:text-ink-2"
+                )}>
+                {active && <span className="absolute left-0 top-[6px] bottom-[6px] w-[3px] rounded-full" style={{ background: "var(--navy)" }} />}
+                {Icon && <Icon className="h-4 w-4 shrink-0" />}
+                {!Icon && <span className="h-4 w-4 shrink-0" />}
+                {label}
+                {label === "Comportement" && unreviewedBehaviour > 0 && (
+                  <span
+                    className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full font-mono text-[10px] font-bold px-1"
+                    style={{ background: "var(--terra-lt)", color: "var(--terra)" }}
+                  >
+                    {unreviewedBehaviour > 99 ? "99+" : unreviewedBehaviour}
+                  </span>
+                )}
               </Link>
             );
           })}

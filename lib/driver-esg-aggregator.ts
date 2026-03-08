@@ -19,6 +19,8 @@ import {
   iotDevices,
   sensorReadings,
   sensorAlerts,
+  behaviourReports,
+  drivingEvents,
 } from "@/db/schema";
 import type {
   EsgDataPackage,
@@ -469,6 +471,53 @@ export async function buildEsgDataPackage(
         : null
       : null;
 
+  // ── Behaviour metrics (ESRS S1-14 — safe driving behaviour) ─────────────
+  const driverBhReports = await db
+    .select({
+      globalScore:    behaviourReports.globalScore,
+      totalEvents:    behaviourReports.totalEvents,
+      criticalEvents: behaviourReports.criticalEvents,
+    })
+    .from(behaviourReports)
+    .where(
+      and(
+        eq(behaviourReports.driverId, driverId),
+        eq(behaviourReports.status, "ready"),
+        gte(behaviourReports.generatedAt, startTs),
+        lte(behaviourReports.generatedAt, endTs),
+      )
+    );
+
+  // Event type distribution for the period
+  const bhEventRows = await db
+    .select({
+      eventType: drivingEvents.eventType,
+    })
+    .from(drivingEvents)
+    .innerJoin(transportTrips, eq(drivingEvents.tripId, transportTrips.id))
+    .where(
+      and(
+        eq(transportTrips.driverId, driverId),
+        gte(drivingEvents.occurredAt, startTs),
+        lte(drivingEvents.occurredAt, endTs),
+      )
+    );
+
+  const behaviourEventsByType: Record<string, number> = {};
+  for (const { eventType } of bhEventRows) {
+    behaviourEventsByType[eventType] = (behaviourEventsByType[eventType] ?? 0) + 1;
+  }
+
+  const scores          = driverBhReports.map((r) => r.globalScore);
+  const behaviourAvgScore     = scores.length > 0
+    ? round2(scores.reduce((s, v) => s + v, 0) / scores.length)
+    : null;
+  const behaviourTripCount    = driverBhReports.length;
+  const behaviourTotalEvents  = driverBhReports.reduce((s, r) => s + r.totalEvents, 0);
+  const behaviourCriticalEvents = driverBhReports.reduce((s, r) => s + r.criticalEvents, 0);
+  const behaviourWorstTripScore = scores.length > 0 ? Math.min(...scores) : null;
+  const behaviourBestTripScore  = scores.length > 0 ? Math.max(...scores) : null;
+
   // ── Primary vehicle plate / fuel type from trips ─────────────────────────
   const primaryTrip  = tripSummaries[0];
   const vehiclePlate = primaryTrip?.vehiclePlate ?? null;
@@ -562,5 +611,14 @@ export async function buildEsgDataPackage(
     ...bench,
     driverVsFleetGhgPct,
     driverVsFleetIncidentPct,
+
+    // Driver behaviour (ESRS S1-14)
+    behaviourAvgScore,
+    behaviourTripCount,
+    behaviourTotalEvents,
+    behaviourCriticalEvents,
+    behaviourEventsByType,
+    behaviourWorstTripScore,
+    behaviourBestTripScore,
   };
 }

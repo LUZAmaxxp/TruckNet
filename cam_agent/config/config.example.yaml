@@ -1,0 +1,39 @@
+# TruckNet Camera Agent Configuration
+# Copy to config.yaml and fill in your values
+
+# Driver identification — use the email the driver uses to log into TruckNet
+driver_email: "driver@example.com"
+company_id: "your-company-id"
+
+# Camera
+camera_index: 0          # USB camera index (0 = first USB cam)
+frame_width: 640
+frame_height: 480
+fps_target: 10           # process 10 frames/sec
+
+# MQTT broker (same as ESP32)
+mqtt_broker_host: "192.168.1.100"
+mqtt_broker_port: 1883
+mqtt_username: "trucknet"
+mqtt_password: "YOUR_MQTT_PASSWORD"
+
+# Detection thresholds (match behaviour_scoring_config in TruckNet DB)
+ear_drowsy_threshold: 0.25
+ear_microsleep_threshold: 0.20
+drowsy_duration_seconds: 2.0
+microsleep_duration_seconds: 3.0
+head_angle_distraction_deg: 30.0
+distraction_duration_seconds: 3.0
+
+# Model paths (relative to cam_agent/ root)
+pose_model_path: "models/yolov8n-pose.pt"   # auto-downloaded on first run
+classifier_path: "models/drowsiness_mlp.pkl" # trained with training/train.py
+
+# Logging
+log_level: INFO
+log_file: "cam_agent.log"
+
+# Trip management
+auto_detect_trip: true
+auto_start_url: "http://localhost:3000/api/drivers/{driver_id}/active-trip"
+cam_agent_api_key: "CamAgent-TruckNet-2026-SecretKey"  # must match CAM_AGENT_API_KEY in server .env

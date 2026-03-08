@@ -21,7 +21,7 @@
 import mqtt from "mqtt";
 import Ably from "ably";
 import { db } from "@/db";
-import { iotDevices, sensorReadings, sensorAlerts } from "@/db/schema";
+import { iotDevices, sensorReadings, sensorAlerts, transportTrips } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { SensorReadingSchema } from "@/schemas/sensor.schema";
 import {
@@ -30,6 +30,8 @@ import {
   type AlertConfig,
 } from "@/lib/sensor-thresholds";
 import { DEFAULT_ALERT_CONFIG } from "@/schemas/sensor.schema";
+import { classifyEsp32Reading } from "@/lib/behaviour/esp32-classifier";
+import { loadScoringConfig } from "@/lib/behaviour/score-calculator";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -197,6 +199,43 @@ async function handleReading(deviceId: string, raw: unknown): Promise<void> {
     });
 
     console.warn(`[Alert] ${breach.type} on ${deviceId}: ${breach.value} > ${breach.threshold}`);
+  }
+
+  // ── FEAT-009: classify ESP32 reading for behaviour events ─────────────────
+  // Find the driver's active trip (if any) via the device→driver link
+  const [device] = await db
+    .select({ driverId: iotDevices.driverId })
+    .from(iotDevices)
+    .where(eq(iotDevices.deviceId, deviceId))
+    .limit(1);
+
+  if (device?.driverId) {
+    const [activeTrip] = await db
+      .select({ id: transportTrips.id })
+      .from(transportTrips)
+      .where(
+        and(
+          eq(transportTrips.driverId, device.driverId),
+          eq(transportTrips.status, "active")
+        )
+      )
+      .limit(1);
+
+    if (activeTrip) {
+      const bConfig = await loadScoringConfig();
+      await classifyEsp32Reading(
+        {
+          driverId:           device.driverId,
+          tripId:             activeTrip.id,
+          vibrationMagnitude: data.vibration_magnitude,
+          accelX:             data.accel_x,
+          accelY:             data.accel_y,
+          accelZ:             data.accel_z,
+          timestamp:          data.ts,
+        },
+        bConfig
+      );
+    }
   }
 }
 
