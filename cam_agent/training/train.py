@@ -113,7 +113,7 @@ def augment_keypoints(X: np.ndarray, y: np.ndarray, noise_px: float = 2.0, facto
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default="datasets/keypoints_dataset.csv")
+    parser.add_argument("--dataset", default="training/datasets/keypoints_dataset.csv")
     parser.add_argument("--output",  default="models/")
     parser.add_argument("--augment", action="store_true",
                         help="Augment training data with Gaussian noise (recommended for small datasets)")
@@ -150,7 +150,7 @@ def main():
     candidates = {
         "RandomForest": Pipeline([
             ("clf", RandomForestClassifier(
-                n_estimators=300,
+                n_estimators=100,  # 100 trees reach the accuracy plateau for this 35-feature binary task
                 max_depth=None,
                 min_samples_leaf=2,
                 random_state=42,

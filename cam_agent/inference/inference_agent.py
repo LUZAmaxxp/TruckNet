@@ -23,11 +23,12 @@ import numpy as np
 import urllib.request
 import urllib.error
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Local imports
 from ear_calculator import eye_aspect_ratio, classify_eye_state
-from head_pose       import estimate_yaw_angle
+from head_pose       import estimate_yaw_angle, estimate_pitch_angle
 from event_state     import EventState
 from event_publisher import EventPublisher
 
@@ -131,7 +132,7 @@ def load_config() -> dict:
 
 
 def load_models(cfg: dict):
-    """Load YOLO pose model and optional MLP classifier. Returns (yolo_model, mlp)."""
+    """Load YOLO pose model and MLP classifier in parallel. Returns (yolo_model, mlp)."""
     try:
         from ultralytics import YOLO
     except ImportError:
@@ -139,22 +140,35 @@ def load_models(cfg: dict):
         sys.exit(1)
 
     model_path = Path(__file__).parent.parent / cfg["pose_model_path"]
-    logger.info(f"Loading pose model from {model_path}")
-    yolo = YOLO(str(model_path))
+    mlp_path   = Path(__file__).parent.parent / cfg.get("classifier_path", "models/drowsiness_mlp.pkl")
 
-    mlp = None
-    mlp_path = Path(__file__).parent.parent / cfg.get("classifier_path", "models/drowsiness_mlp.pkl")
-    if mlp_path.exists():
+    def _load_yolo():
+        logger.info(f"Loading pose model from {model_path}")
+        yolo = YOLO(str(model_path))
+        # Warmup: run a dummy inference to compile the operator graph
+        # so the first real camera frame has no extra lag
+        yolo(np.zeros((640, 640, 3), dtype=np.uint8), verbose=False)
+        return yolo
+
+    def _load_mlp():
+        if not mlp_path.exists():
+            logger.warning("drowsiness_mlp.pkl not found — using EAR-only mode")
+            return None
         try:
             import joblib
             mlp = joblib.load(mlp_path)
             logger.info(f"Loaded drowsiness classifier from {mlp_path}")
+            return mlp
         except Exception as e:
             logger.warning(f"Could not load MLP classifier: {e} — using EAR-only mode")
-    else:
-        logger.warning("drowsiness_mlp.pkl not found — using EAR-only mode")
+            return None
 
-    return yolo, mlp
+    logger.info("Loading models in parallel …")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        yolo_future = ex.submit(_load_yolo)
+        mlp_future  = ex.submit(_load_mlp)
+
+    return yolo_future.result(), mlp_future.result()
 
 
 def run_trip(trip_id: str, cfg: dict, yolo, mlp, publisher: EventPublisher):
@@ -214,10 +228,21 @@ def run_trip(trip_id: str, cfg: dict, yolo, mlp, publisher: EventPublisher):
             keypoints = results[0].keypoints.xy[0].cpu().numpy()
             ear       = eye_aspect_ratio(keypoints)
             yaw_deg   = estimate_yaw_angle(keypoints)
-            eye_state = classify_eye_state(
-                ear,
-                cfg["ear_drowsy_threshold"],
-                cfg["ear_microsleep_threshold"],
+            pitch_deg = estimate_pitch_angle(keypoints)
+
+            # Only trust EAR when the head is in a frontal posture.
+            # Tilting up compresses the eye-to-nose distance and causes false alerts.
+            pitch_min = cfg.get("ear_pitch_min_degrees", 8.0)
+            pitch_max = cfg.get("ear_pitch_max_degrees", 60.0)
+            ear_valid = pitch_min <= pitch_deg <= pitch_max
+
+            eye_state = (
+                classify_eye_state(
+                    ear,
+                    cfg["ear_drowsy_threshold"],
+                    cfg["ear_microsleep_threshold"],
+                )
+                if ear_valid else "alert"
             )
 
             # ── MLP confidence score ─────────────────────────────────────────

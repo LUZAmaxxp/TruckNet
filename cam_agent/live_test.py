@@ -40,7 +40,12 @@ import pygame
 # ── local imports ─────────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent / "inference"))
 from ear_calculator import eye_aspect_ratio, classify_eye_state
-from head_pose      import estimate_yaw_angle
+from head_pose      import estimate_yaw_angle, estimate_pitch_angle
+
+# EAR is only reliable when the head is approximately frontal.
+# Outside this pitch range the eye-to-nose geometry is distorted → false alerts.
+EAR_PITCH_MIN = 8.0   # degrees — below this: looking too far up
+EAR_PITCH_MAX = 60.0  # degrees — above this: looking too far down
 
 
 # ── COCO-17 skeleton (YOLOv8 pose) ────────────────────────────────────────────
@@ -77,7 +82,7 @@ FONT         = cv2.FONT_HERSHEY_SIMPLEX
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_yolo():
+def load_yolo(model_path: Path | None = None):
     try:
         from ultralytics import YOLO
     except ImportError:
@@ -85,13 +90,31 @@ def load_yolo():
         print("           Run: pip install -r requirements.txt")
         sys.exit(1)
 
-    model_path = Path(__file__).parent / "models" / "yolov8n-pose.pt"
+    if model_path is None:
+        model_path = _resolve_model_path()
+
     if not model_path.exists():
         print(f"[live_test] ERROR: pose model not found at {model_path}")
         sys.exit(1)
 
     print(f"[live_test] Loading YOLO from {model_path} …")
-    return YOLO(str(model_path))
+    yolo = YOLO(str(model_path))
+    # Warmup: run a dummy inference to compile the operator graph
+    # so the first real camera frame has no extra lag
+    yolo(np.zeros((640, 640, 3), dtype=np.uint8), verbose=False)
+    return yolo
+
+
+def _resolve_model_path() -> Path:
+    """Read pose_model_path from config.yaml, falling back to yolov8n-pose.pt."""
+    import yaml
+    config_path = Path(__file__).parent / "config" / "config.yaml"
+    if config_path.exists():
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f)
+        rel = cfg.get("pose_model_path", "models/yolov8n-pose.pt")
+        return Path(__file__).parent / rel
+    return Path(__file__).parent / "models" / "yolov8n-pose.pt"
 
 
 def load_mlp():
@@ -136,7 +159,8 @@ def state_colour(state: str):
 
 def draw_panel(frame, panel_x: int, ear: float, eye_state: str, yaw_deg: float,
                mlp_prob: float | None, drowsy_thresh: float, micro_thresh: float,
-               fps: float, person_detected: bool):
+               fps: float, person_detected: bool,
+               pitch_deg: float = 25.0, ear_valid: bool = True):
     """Fill the right-side HUD panel."""
     h = frame.shape[0]
     cv2.rectangle(frame, (panel_x, 0), (frame.shape[1], h), C_DARK, -1)
@@ -184,6 +208,12 @@ def draw_panel(frame, panel_x: int, ear: float, eye_state: str, yaw_deg: float,
         cv2.putText(frame, "MLP: not loaded", (x, cy), FONT, 0.44, (120, 120, 120), 1, cv2.LINE_AA)
         cy += 32
 
+    # ── EAR validity warning ────────────────────────────────────────────────
+    if not ear_valid:
+        cv2.putText(frame, "EAR PAUSED (head tilted)", (x, cy), FONT, 0.44,
+                    (0, 200, 255), 1, cv2.LINE_AA)
+        cy += 20
+
     # ── Head yaw ───────────────────────────────────────────────────────────
     cv2.line(frame, (panel_x, cy), (frame.shape[1], cy), (70, 70, 70), 1)
     cy += 12
@@ -203,6 +233,13 @@ def draw_panel(frame, panel_x: int, ear: float, eye_state: str, yaw_deg: float,
     if distracted:
         cv2.putText(frame, "! DISTRACTION RISK", (x, cy), FONT, 0.52, C_DISTRACTED, 2, cv2.LINE_AA)
         cy += 28
+
+    # ── Head pitch ─────────────────────────────────────────────────────────
+    pitch_color = (120, 120, 120) if ear_valid else (0, 200, 255)
+    pitch_dir   = "DOWN" if pitch_deg > 40 else ("UP" if pitch_deg < 8 else "FRONTAL")
+    cv2.putText(frame, f"Pitch {pitch_deg:+.1f}°  {pitch_dir}",
+                (x, cy), FONT, 0.44, pitch_color, 1, cv2.LINE_AA)
+    cy += 20
 
     # ── Thresholds reminder ────────────────────────────────────────────────
     cy = h - 60
@@ -258,9 +295,16 @@ def main():
     parser.add_argument("--height", type=int,  default=540,  help="Frame height (default 540)")
     args = parser.parse_args()
 
-    # Load models
-    yolo = load_yolo()
-    mlp  = load_mlp()
+    # Load models in parallel
+    from concurrent.futures import ThreadPoolExecutor
+    model_path = _resolve_model_path()
+    print(f"[live_test] Using pose model: {model_path.name}")
+    print("[live_test] Loading models in parallel …")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        yolo_future = ex.submit(load_yolo, model_path)
+        mlp_future  = ex.submit(load_mlp)
+    yolo = yolo_future.result()
+    mlp  = mlp_future.result()
 
     # Open camera
     cap = cv2.VideoCapture(args.camera)
@@ -330,6 +374,8 @@ def main():
 
         ear           = 1.0
         yaw_deg       = 0.0
+        pitch_deg     = 25.0
+        ear_valid     = True
         eye_state     = "alert"
         mlp_prob      = None
 
@@ -339,7 +385,15 @@ def main():
 
             ear       = eye_aspect_ratio(keypoints)
             yaw_deg   = estimate_yaw_angle(keypoints)
-            eye_state = classify_eye_state(ear, drowsy_thresh, micro_thresh)
+            pitch_deg = estimate_pitch_angle(keypoints)
+
+            # Only classify eye state when head is frontal — tilting up/down
+            # compresses the eye-to-nose distance and causes false drowsy alerts.
+            ear_valid = EAR_PITCH_MIN <= pitch_deg <= EAR_PITCH_MAX
+            eye_state = (
+                classify_eye_state(ear, drowsy_thresh, micro_thresh)
+                if ear_valid else "alert"
+            )
 
             # MLP inference
             if mlp is not None:
@@ -362,7 +416,8 @@ def main():
 
         # ── Info panel ────────────────────────────────────────────────────
         draw_panel(canvas, cam_w, ear, eye_state, yaw_deg, mlp_prob,
-                   drowsy_thresh, micro_thresh, fps, person_detected)
+                   drowsy_thresh, micro_thresh, fps, person_detected,
+                   pitch_deg=pitch_deg, ear_valid=ear_valid)
 
         # ── Divider line between frame and panel ─────────────────────────
         cv2.line(canvas, (cam_w, 0), (cam_w, win_h), (80, 80, 80), 1)

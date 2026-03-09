@@ -18,15 +18,26 @@ mqtt_username: "trucknet"
 mqtt_password: "YOUR_MQTT_PASSWORD"
 
 # Detection thresholds (match behaviour_scoring_config in TruckNet DB)
-ear_drowsy_threshold: 0.25
-ear_microsleep_threshold: 0.20
+ear_drowsy_threshold: 0.20
+ear_microsleep_threshold: 0.15
 drowsy_duration_seconds: 2.0
 microsleep_duration_seconds: 3.0
 head_angle_distraction_deg: 30.0
 distraction_duration_seconds: 3.0
 
+# Head pitch gate — EAR is only reliable when the head is roughly frontal.
+# Below ear_pitch_min_degrees the driver is tilting too far up (false drowsy).
+# Above ear_pitch_max_degrees the driver is looking too far down.
+# Use live_test.py to see your Pitch value and tune if needed.
+ear_pitch_min_degrees: 8
+ear_pitch_max_degrees: 60
+
 # Model paths (relative to cam_agent/ root)
 pose_model_path: "models/yolov8n-pose.pt"   # auto-downloaded on first run
+# For ~60% faster load + inference on CPU, export to ONNX first:
+#   python training/export_onnx.py
+# Then switch to:
+# pose_model_path: "models/yolov8n-pose.onnx"
 classifier_path: "models/drowsiness_mlp.pkl" # trained with training/train.py
 
 # Logging
