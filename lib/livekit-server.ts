@@ -7,8 +7,9 @@ import { env } from "@/lib/env";
  * Server-side LiveKit helpers.
  * NEVER import this in client components — LIVEKIT_API_SECRET must stay server-only.
  *
- * Token TTL is intentionally short (5 minutes) — enough to connect, not
- * enough to be replayed if intercepted.
+ * Token TTL is 8 hours — covers a full truck shift without mid-call expiry.
+ * Tokens are scoped to a single room and are invalidated server-side when
+ * the call ends, so a long TTL carries no meaningful security risk.
  */
 
 // 8 hours — covers a full truck shift without mid-call token expiry.

@@ -84,7 +84,7 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Ensure uploads directory exists with correct ownership
-RUN mkdir -p ./public/uploads && \
+RUN mkdir -p ./private_uploads && \
     chown -R nextjs:nodejs /app
 
 USER nextjs

@@ -7,6 +7,7 @@ import { transportTrips } from "@/db/schema";
 import { isUUID } from "@/lib/validate-uuid";
 import { z } from "zod";
 import { behaviourReportQueue } from "@/lib/behaviour/behaviour-report-queue";
+import { ablyPublish } from "@/lib/ably-server";
 
 const StatusSchema = z.object({
   status:           z.enum(["completed", "cancelled"]),
@@ -70,6 +71,13 @@ export async function PATCH(
       { delay: 100 } // minimal delay; worker itself waits 30s for late events
     );
   }
+
+  // Notify all connected browser tabs / pages of this driver about the trip change
+  await ablyPublish(`user:${driverId}`, "trip_updated", {
+    tripId: params.tripId,
+    status: d.status,
+    trip:   null, // trip is no longer active
+  });
 
   return successResponse({ trip }, 200);
 }

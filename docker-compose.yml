@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: truckconnect
-      POSTGRES_PASSWORD: truckconnect_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-truckconnect_dev}
       POSTGRES_DB: truckconnect
     ports:
       - "5433:5432"
@@ -33,15 +33,15 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
-      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      DATABASE_URL: postgresql://truckconnect:${POSTGRES_PASSWORD:-truckconnect_dev}@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-local-dev-secret-change-in-production}
       NEXTAUTH_URL: http://localhost:3000
       SOCKET_PORT: "3000"
       NODE_ENV: production
       # LiveKit – internal Docker network address
       LIVEKIT_URL: ws://livekit:7880
-      LIVEKIT_API_KEY: devkey
-      LIVEKIT_API_SECRET: devsecretchangeinproduction32xxx
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecretchangeinproduction32chars}
       # Ably – real-time pub/sub (set your actual key here or via .env file)
       ABLY_API_KEY: ${ABLY_API_KEY}
       # Redis – OSRM route cache
@@ -51,11 +51,11 @@ services:
       KAFKA_ENABLED: "true"
     volumes:
       # Persist uploaded audio files across container restarts
-      - uploads_data:/app/public/uploads
+      - uploads_data:/app/private_uploads
 
   # ── LiveKit WebRTC SFU ───────────────────────────────────────────
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.8.3
     restart: unless-stopped
     ports:
       - "7880:7880"   # HTTP API
@@ -160,13 +160,13 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
-      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      DATABASE_URL: postgresql://truckconnect:${POSTGRES_PASSWORD:-truckconnect_dev}@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-local-dev-secret-change-in-production}
       NEXTAUTH_URL: http://localhost:3000
       NODE_ENV: production
       LIVEKIT_URL: ws://livekit:7880
-      LIVEKIT_API_KEY: devkey
-      LIVEKIT_API_SECRET: devsecretchangeinproduction32xxx
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecretchangeinproduction32chars}
       ABLY_API_KEY: ${ABLY_API_KEY}
       KAFKA_BROKERS: kafka:29092
       KAFKA_ENABLED: "true"
@@ -184,8 +184,8 @@ services:
       mosquitto:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
-      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      DATABASE_URL: postgresql://truckconnect:${POSTGRES_PASSWORD:-truckconnect_dev}@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-local-dev-secret-change-in-production}
       NEXTAUTH_URL: http://localhost:3000
       NODE_ENV: production
       ABLY_API_KEY: ${ABLY_API_KEY}
@@ -208,8 +208,8 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
-      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      DATABASE_URL: postgresql://truckconnect:${POSTGRES_PASSWORD:-truckconnect_dev}@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-local-dev-secret-change-in-production}
       NEXTAUTH_URL: http://localhost:3000
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
@@ -235,8 +235,8 @@ services:
       mosquitto:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
-      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      DATABASE_URL: postgresql://truckconnect:${POSTGRES_PASSWORD:-truckconnect_dev}@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-local-dev-secret-change-in-production}
       NEXTAUTH_URL: http://localhost:3000
       NODE_ENV: production
       ABLY_API_KEY: ${ABLY_API_KEY}
@@ -260,8 +260,8 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://truckconnect:truckconnect_dev@postgres:5432/truckconnect
-      NEXTAUTH_SECRET: local-dev-secret-change-in-production
+      DATABASE_URL: postgresql://truckconnect:${POSTGRES_PASSWORD:-truckconnect_dev}@postgres:5432/truckconnect
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-local-dev-secret-change-in-production}
       NEXTAUTH_URL: http://localhost:3000
       NODE_ENV: production
       REDIS_URL: redis://redis:6379

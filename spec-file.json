@@ -1,8 +1,8 @@
 {
   "project": "TruckNet",
-  "version": "0.1.0",
-  "description": "Full-stack fleet management platform for truck drivers and fleet admins. Covers real-time GPS tracking, driver-to-driver messaging (text + voice), SOS stress signals, LiveKit voice/video calls, IoT container sensor monitoring via ESP32/MQTT, and a full admin operations dashboard.",
-  "lastUpdated": "2026-03-06",
+  "version": "0.2.0",
+  "description": "Full-stack fleet management platform for truck drivers and fleet admins. Covers real-time GPS tracking, driver-to-driver messaging (text + voice), SOS stress signals, LiveKit voice/video calls, IoT container sensor monitoring via ESP32/MQTT, driver behaviour analysis (GPS + ESP32 + AI camera), ESG/CSRD-compliant reporting, driver HR profiles, trip management, and a full admin operations dashboard.",
+  "lastUpdated": "2026-03-13",
 
   "techStack": {
     "framework": "Next.js 14 (App Router)",
@@ -11,15 +11,27 @@
     "database": "PostgreSQL 16 + Drizzle ORM",
     "realtime": "Ably v2 (pub/sub — server REST + client Realtime SDK)",
     "messageQueue": "Apache Kafka (KRaft mode, no ZooKeeper) via KafkaJS",
+    "jobQueue": "BullMQ (Redis-backed — ESG report generation, behaviour report scoring)",
     "iotBroker": "Eclipse Mosquitto 2 (MQTT v5)",
     "webrtc": "LiveKit SFU (livekit-server-sdk + @livekit/components-react)",
     "maps": "Leaflet + react-leaflet",
     "routing": "OSRM public API",
-    "cache": "Redis 7 (OSRM route cache, LRU 128 MB)",
+    "cache": "Redis 7 (OSRM route cache LRU 128 MB + BullMQ job backend)",
     "styling": "Tailwind CSS v3 + CSS variables (design system: navy, sage, terra, honey, base)",
+    "charts": "Recharts",
+    "animation": "Framer Motion",
+    "pdfGeneration": "Puppeteer (headless Chromium)",
+    "email": "Nodemailer (SMTP)",
     "validation": "Zod",
+    "notifications": "Sonner (toast notifications)",
     "testing": "Vitest (unit), Playwright (E2E)",
-    "containerisation": "Docker + docker-compose"
+    "containerisation": "Docker + docker-compose",
+    "aiAgent": {
+      "language": "Python 3.11",
+      "framework": "YOLOv8n-pose (Ultralytics) + RandomForest (scikit-learn)",
+      "transport": "MQTT via paho-mqtt",
+      "purpose": "Real-time driver drowsiness, microsleep, and distraction detection from USB camera"
+    }
   },
 
   "features": [
@@ -56,15 +68,17 @@
       "id": "FEAT-002",
       "name": "User Profile & Avatar Upload",
       "status": "implemented",
-      "description": "View own profile (name, email, unique @tag, avatar). Upload and replace profile photo stored on disk in public/uploads/ (persisted via Docker volume).",
+      "description": "View own profile (name, email, unique @tag, avatar). Upload and replace profile photo stored on disk in public/uploads/ (persisted via Docker volume). Fetch current user identity via /api/users/me.",
       "routes": [
         "GET  /api/profile",
-        "POST /api/profile/upload-avatar"
+        "POST /api/profile/upload-avatar",
+        "GET  /api/users/me"
       ],
       "pages": ["app/(protected)/profile/page.tsx"],
       "keyFiles": [
         "app/api/profile/route.ts",
-        "app/api/profile/upload-avatar/route.ts"
+        "app/api/profile/upload-avatar/route.ts",
+        "app/api/users/me/route.ts"
       ],
       "dbTables": ["users"],
       "storage": "Local disk — public/uploads/ (Docker volume: uploads_data)"
@@ -80,7 +94,7 @@
         "PATCH /api/friends/[id]/accept",
         "PATCH /api/friends/[id]/reject",
         "GET   /api/friends/[id]/location",
-        "GET   /api/users?tag=…"
+        "GET   /api/users/by-tag?tag=…"
       ],
       "pages": ["app/(protected)/friends/page.tsx"],
       "keyFiles": [
@@ -89,7 +103,7 @@
         "app/api/friends/[id]/accept/route.ts",
         "app/api/friends/[id]/reject/route.ts",
         "app/api/friends/[id]/location/route.ts",
-        "app/api/users/route.ts"
+        "app/api/users/by-tag/route.ts"
       ],
       "dbTables": ["friend_requests"],
       "ablyEvents": ["friend_request_received", "friend_request_accepted"]
@@ -98,7 +112,7 @@
       "id": "FEAT-004",
       "name": "Real-Time GPS Tracking & Fleet Map",
       "status": "implemented",
-      "description": "Drivers broadcast GPS coordinates every 20 seconds. Server upserts to DB and pushes a personalised nearby-driver list (within 50 km radius via Haversine) to each driver via Ably. Interactive Leaflet map shows nearby drivers as pins with names, avatars, distances. Clicking a pin opens messaging/call actions. Drivers can plot OSRM routes to a destination (result cached in Redis) and share live ETA as an overlay visible to admin.",
+      "description": "Drivers broadcast GPS coordinates every 20 seconds. Server upserts to DB and pushes a personalised nearby-driver list (within 50 km radius via Haversine) to each driver via Ably. Interactive Leaflet map shows nearby drivers as pins with names, avatars, distances. Clicking a pin opens messaging/call actions. Drivers can plot OSRM routes to a destination (result cached in Redis) and share live ETA as an overlay visible to admin. GPS positions are also ingested by the gps-position-worker for speed-violation and idle-excess event classification.",
       "routes": [
         "POST            /api/drivers/location",
         "GET             /api/drivers/nearby",
@@ -115,7 +129,8 @@
         "components/map/RouteInfoBar.tsx",
         "lib/haversine.ts",
         "lib/osrm.ts",
-        "lib/route-cache.ts"
+        "lib/route-cache.ts",
+        "workers/gps-position-worker.ts"
       ],
       "dbTables": ["driver_locations", "driver_routes"],
       "ablyChannels": {
@@ -127,20 +142,26 @@
       "id": "FEAT-005",
       "name": "Messaging — Text & Voice",
       "status": "implemented",
-      "description": "Real-time 1-on-1 text chat between friends with delivered/read status. Voice messages: record audio in-browser (MediaRecorder), upload to server, deliver URL to recipient with duration display and playback UI. Both trigger Ably notifications for out-of-chat delivery.",
+      "description": "Real-time 1-on-1 text chat between friends with delivered/read status. Voice messages: record audio in-browser (MediaRecorder), upload to server, deliver URL to recipient with duration display and playback UI. Both trigger Ably notifications for out-of-chat delivery. Admins can read and search any conversation thread via the admin messages panel.",
       "routes": [
         "POST  /api/text-messages",
         "GET   /api/text-messages/conversations",
         "PATCH /api/text-messages/[id]/read",
         "POST  /api/voice-messages",
         "PATCH /api/voice-messages/[id]/status",
-        "POST  /api/upload"
+        "POST  /api/upload/audio"
       ],
-      "pages": ["app/(protected)/messages/page.tsx"],
+      "pages": [
+        "app/(protected)/messages/page.tsx",
+        "app/(admin)/admin/messages/page.tsx",
+        "app/(admin)/admin/messages/[driverId]/page.tsx"
+      ],
       "keyFiles": [
         "components/messages/FriendsSidebar.tsx",
         "components/messages/ChatPanel.tsx",
-        "hooks/useVoiceRecorder.ts"
+        "hooks/useVoiceRecorder.ts",
+        "components/admin/AdminConversationList.tsx",
+        "components/admin/AdminConversationThread.tsx"
       ],
       "dbTables": ["text_messages", "voice_messages"],
       "ablyEvents": ["text_message_received", "voice_message_received"],
@@ -241,22 +262,27 @@
       "id": "FEAT-008",
       "name": "Voice & Video Calls (LiveKit)",
       "status": "implemented",
-      "description": "1-on-1 WebRTC voice or video calls between friends using LiveKit SFU. Caller initiates — server creates a LiveKit room, pre-generates JWTs for both parties, notifies callee via Ably call_incoming event. Callee can accept or decline. Call state (ongoing/completed/missed/declined) and duration are persisted. Admins can filter and browse full call history.",
+      "description": "1-on-1 WebRTC voice or video calls between friends using LiveKit SFU. Caller initiates — server creates a LiveKit room, pre-generates JWTs for both parties, notifies callee via Ably call_incoming event. Callee can accept or decline. Call state (ongoing/completed/missed/declined) and duration are persisted. Admins can filter and browse full call history, including per-room detail view.",
       "routes": [
         "POST /api/calls/initiate",
-        "GET  /api/calls/token",
+        "GET  /api/calls/token/[roomName]",
         "GET  /api/calls/[roomName]",
         "POST /api/calls/[roomName]/decline",
         "GET  /api/calls/history",
-        "GET  /api/admin/calls"
+        "GET  /api/admin/calls",
+        "GET  /api/admin/calls/[roomName]"
       ],
       "pages": [
         "app/(protected)/calls/[roomName]/page.tsx",
-        "app/(admin)/admin/calls/page.tsx"
+        "app/(admin)/admin/calls/page.tsx",
+        "app/(admin)/admin/calls/[roomName]/page.tsx"
       ],
       "keyFiles": [
         "lib/livekit-server.ts",
         "components/calls/CallButton.tsx",
+        "components/calls/IncomingCallModal.tsx",
+        "components/calls/VoiceCallRoom.tsx",
+        "components/calls/VideoCallRoom.tsx",
         "livekit.yaml"
       ],
       "dbTables": ["call_history"],
@@ -267,7 +293,7 @@
       "id": "FEAT-009",
       "name": "Admin Dashboard",
       "status": "implemented",
-      "description": "Full fleet operations panel for admin users only. Protected by requireAdminSession(). Includes stats bar (KPI cards: totalDrivers, onlineDrivers, activeSos, ongoingCalls, callsToday, msgsToday, sensorAlerts), live fleet Leaflet map, active SOS panel, paginated drivers/calls/messages tables, IoT sensor monitoring grid, and sensor alert panel. Sidebar shows live badge counts for SOS and sensor alerts.",
+      "description": "Full fleet operations panel for admin users only. Protected by requireAdminSession(). Includes KPI stats bar (totalDrivers, onlineDrivers, activeSos, ongoingCalls, callsToday, msgsToday, sensorAlerts), live fleet Leaflet map, active SOS panel, paginated drivers/calls/messages tables, IoT sensor monitoring grid, sensor alert panel, and driver behaviour safety ranking. Sidebar shows live badge counts for SOS, sensor alerts, and critical driving events.",
       "routes": [
         "GET /api/admin/stats",
         "GET /api/admin/drivers",
@@ -291,8 +317,202 @@
         "components/admin/FleetMap.tsx",
         "components/admin/SosPanel.tsx",
         "components/admin/DriverTable.tsx",
-        "components/admin/CallHistoryTable.tsx"
+        "components/admin/CallHistoryTable.tsx",
+        "components/admin/AdminDriverCard.tsx",
+        "components/admin/RouteInfoPanel.tsx",
+        "components/admin/AdminHeader.tsx"
       ]
+    },
+    {
+      "id": "FEAT-010",
+      "name": "Driver HR Profiles & Fleet Management",
+      "status": "implemented",
+      "description": "Full HR profile per driver: gender, birth year, nationality, contract type, driving license categories. Admin can log and review driver shifts (hours, overtime, night shifts), vehicle maintenance records (oil changes, inspections, fuel fills, regulatory compliance), and training/certification records (eco-driving, ADR, first aid, etc.) with expiry tracking. Admin detail page provides a tabbed view: profile, trips, shifts, maintenance, training, and ESG report. Expiring certification alert badge shown on driver list.",
+      "routes": [
+        "GET|PATCH  /api/drivers/[driverId]/profile",
+        "GET|POST   /api/drivers/[driverId]/shifts",
+        "GET|PATCH  /api/drivers/[driverId]/shifts/[shiftId]",
+        "POST       /api/drivers/[driverId]/shifts/[shiftId]/complete",
+        "GET|POST   /api/drivers/[driverId]/maintenance",
+        "GET|PATCH  /api/drivers/[driverId]/maintenance/[maintenanceId]",
+        "GET|POST   /api/drivers/[driverId]/training",
+        "GET        /api/drivers/[driverId]/training/expiring",
+        "GET|PATCH  /api/drivers/[driverId]/training/[trainingId]"
+      ],
+      "pages": [
+        "app/(admin)/admin/drivers/[driverId]/page.tsx",
+        "app/(admin)/admin/drivers/schedule/page.tsx"
+      ],
+      "components": [
+        "components/admin/drivers/DriverProfileForm.tsx",
+        "components/admin/drivers/ShiftLogForm.tsx",
+        "components/admin/drivers/ShiftLogTable.tsx",
+        "components/admin/drivers/MaintenanceLogForm.tsx",
+        "components/admin/drivers/MaintenanceLogTable.tsx",
+        "components/admin/drivers/TrainingLogForm.tsx",
+        "components/admin/drivers/TrainingLogTable.tsx",
+        "components/admin/drivers/CertificationAlertBadge.tsx"
+      ],
+      "keyFiles": [
+        "app/api/drivers/[driverId]/profile/route.ts",
+        "app/api/drivers/[driverId]/shifts/route.ts",
+        "app/api/drivers/[driverId]/maintenance/route.ts",
+        "app/api/drivers/[driverId]/training/route.ts",
+        "app/api/drivers/[driverId]/training/expiring/route.ts"
+      ],
+      "dbTables": ["driver_profiles", "driver_shifts", "vehicle_maintenance_logs", "driver_training_records"]
+    },
+    {
+      "id": "FEAT-011",
+      "name": "Trip Management",
+      "status": "implemented",
+      "description": "Trip lifecycle tracking per driver. Admin or driver creates a trip (vehicle plate, origin/destination labels, fuel type, cargo weight, load factor). Trip is linked to a driver_route for map display. Active trip shown as a card to the driver. Admin marks trips completed or cancelled. Trip stats aggregated per driver. Each completed trip automatically enqueues a behaviour report generation job.",
+      "routes": [
+        "GET|POST   /api/trips",
+        "PATCH      /api/trips/[tripId]/status",
+        "GET        /api/drivers/[driverId]/trips",
+        "GET        /api/drivers/[driverId]/trips/stats",
+        "GET|PATCH  /api/drivers/[driverId]/trips/[tripId]",
+        "GET        /api/drivers/[driverId]/trips/[tripId]/gps",
+        "GET        /api/drivers/[driverId]/active-trip"
+      ],
+      "pages": [
+        "app/(admin)/admin/drivers/[driverId]/trips/[tripId]/page.tsx"
+      ],
+      "components": [
+        "components/drivers/ActiveTripCard.tsx",
+        "components/drivers/DriverCard.tsx",
+        "components/admin/drivers/TripLogForm.tsx",
+        "components/admin/drivers/TripLogTable.tsx"
+      ],
+      "keyFiles": [
+        "app/api/trips/route.ts",
+        "app/api/trips/[tripId]/status/route.ts",
+        "app/api/drivers/[driverId]/trips/route.ts",
+        "app/api/drivers/[driverId]/active-trip/route.ts"
+      ],
+      "dbTables": ["transport_trips"]
+    },
+    {
+      "id": "FEAT-012",
+      "name": "ESG / CSRD Compliance Reports",
+      "status": "implemented",
+      "description": "Automated ESG reporting aligned to CSRD/ESRS standards (E1, E5, G1, S1-7, S1-12, S1-13). Per-driver periodic reports (weekly/monthly/quarterly/custom) aggregate: GHG emissions (kgCO₂eq), empty-run rate, fuel consumption, distance, driving hours, overtime, night shifts, cargo temperature compliance (from IoT data), maintenance records, training hours, and certifications. Reports are generated as PDF (Puppeteer) and CSV, then emailed to HR via SMTP (Nodemailer). Fleet-wide ESG benchmark chart compares all drivers. Admin can manually trigger generation or configure automated schedules. Generation is queued via BullMQ (driver-esg-reports queue).",
+      "routes": [
+        "GET|POST          /api/drivers/esg-reports",
+        "GET               /api/drivers/esg-reports/[reportId]",
+        "GET               /api/drivers/esg-reports/[reportId]/download",
+        "GET               /api/drivers/fleet-esg-summary",
+        "GET|POST          /api/esg-report-schedules",
+        "GET|PATCH|DELETE  /api/esg-report-schedules/[scheduleId]"
+      ],
+      "pages": [
+        "app/(admin)/admin/drivers/esg-reports/page.tsx"
+      ],
+      "components": [
+        "components/admin/drivers/EsgDashboardWidgets.tsx",
+        "components/admin/drivers/EsgReportKpiGrid.tsx",
+        "components/admin/drivers/EsgReportScheduleForm.tsx",
+        "components/admin/drivers/GenerateEsgReportModal.tsx",
+        "components/admin/drivers/FleetEsgBenchmarkChart.tsx"
+      ],
+      "keyFiles": [
+        "workers/driver-esg-report-worker.ts",
+        "workers/esg-report-scheduler.ts",
+        "lib/driver-esg-aggregator.ts",
+        "lib/driver-esg-csv.ts",
+        "lib/driver-esg-html-template.ts",
+        "lib/driver-esg-pdf.ts",
+        "lib/esg-email.ts",
+        "schemas/driver-esg-report.schema.ts"
+      ],
+      "dbTables": ["driver_esg_reports", "esg_report_schedules"],
+      "bullmqQueues": ["driver-esg-reports"],
+      "reportFormats": ["PDF (Puppeteer)", "CSV", "HTML"],
+      "esrsReferences": ["E1 (GHG emissions)", "E5 (circular economy)", "G1 (anti-corruption)", "S1-7 (working time)", "S1-12 (diversity)", "S1-13 (training & development)"]
+    },
+    {
+      "id": "FEAT-013",
+      "name": "Driver Behaviour Analysis",
+      "status": "implemented",
+      "description": "Multi-source driving behaviour monitoring: GPS positions feed the gps-position-worker (speed violations, idle-excess detection). ESP32 accelerometer events feed the behaviour-event-consumer via MQTT (harsh braking, harsh acceleration, sudden swerve). AI camera events also arrive via the same MQTT consumer (see FEAT-014). All events are persisted to driving_events. On trip completion a BullMQ job scores the trip across 5 dimensions (speed, driving style, fatigue, idle, SOS) using configurable weights and thresholds stored in behaviour_scoring_config. Completed behaviour_reports are viewable per trip and in a fleet-wide safety ranking on the admin behaviour dashboard. Thresholds and score weights are editable by admins.",
+      "routes": [
+        "GET       /api/admin/behaviour/fleet",
+        "GET|PATCH /api/admin/behaviour/config",
+        "GET       /api/drivers/[driverId]/behaviour-summary",
+        "GET       /api/drivers/[driverId]/trips/[tripId]/behaviour",
+        "GET       /api/drivers/[driverId]/trips/[tripId]/behaviour/events"
+      ],
+      "pages": [
+        "app/(admin)/admin/behaviour/page.tsx",
+        "app/(admin)/admin/behaviour/config/page.tsx",
+        "app/(admin)/admin/drivers/[driverId]/trips/[tripId]/page.tsx"
+      ],
+      "components": [
+        "components/admin/behaviour/BehaviourAlertBanner.tsx",
+        "components/admin/behaviour/BehaviourDashboardWidget.tsx",
+        "components/admin/behaviour/BehaviourReportCard.tsx",
+        "components/admin/behaviour/DriveScoreGauge.tsx",
+        "components/admin/behaviour/EventTimeline.tsx",
+        "components/admin/behaviour/EventTypeBadge.tsx",
+        "components/admin/behaviour/FleetSafetyRanking.tsx",
+        "components/admin/behaviour/ScoreBreakdownBar.tsx"
+      ],
+      "keyFiles": [
+        "workers/behaviour-event-consumer.ts",
+        "workers/behaviour-report-worker.ts",
+        "workers/gps-position-worker.ts",
+        "lib/behaviour/behaviour-report-queue.ts",
+        "lib/behaviour/esp32-classifier.ts",
+        "lib/behaviour/gps-classifier.ts",
+        "lib/behaviour/score-calculator.ts",
+        "lib/behaviour/speed-limit-lookup.ts",
+        "schemas/behaviour.schema.ts"
+      ],
+      "dbTables": ["driving_events", "behaviour_reports", "behaviour_scoring_config"],
+      "mqttTopics": [
+        "trucknet/drivers/+/behaviour  (cam_agent + ESP32 behaviour events, QoS 1)"
+      ],
+      "bullmqQueues": ["behaviour-reports"],
+      "eventTypes": ["speed_violation", "harsh_braking", "harsh_acceleration", "sudden_swerve", "drowsiness_alert", "microsleep_alert", "distraction_alert", "idle_excess", "sos_triggered"],
+      "eventSources": ["gps", "esp32", "ai_camera", "driver"],
+      "scoreDimensions": ["speed (25%)", "driving_style (20%)", "fatigue (30%)", "idle (10%)", "sos (15%)"]
+    },
+    {
+      "id": "FEAT-014",
+      "name": "AI Camera Agent (Drowsiness & Distraction Detection)",
+      "status": "implemented",
+      "description": "Python ML agent running on the driver's cab laptop. Captures USB camera feed and runs two-layer detection: YOLOv8n-pose extracts a 17-point COCO skeleton per frame (CPU only, ~30 ms/frame), then EAR (Eye Aspect Ratio) and head-yaw geometry are computed. A trained RandomForest classifier (98% F1) validates geometric heuristics before publishing — suppressing false positives from poor lighting or partial occlusion. Detected events are published via MQTT to trucknet/drivers/{driverId}/behaviour and consumed by the behaviour-event-consumer worker. The TruckNet API issues a short-lived session token for MQTT broker authentication.",
+      "routes": [
+        "POST /api/cam-agent/session"
+      ],
+      "keyFiles": [
+        "cam_agent/inference/",
+        "cam_agent/models/",
+        "cam_agent/training/",
+        "cam_agent/config/",
+        "cam_agent/live_test.py",
+        "cam_agent/requirements.txt",
+        "cam_agent/README.md",
+        "cam_agent/docs/SETUP.md",
+        "cam_agent/docs/DATASET_GUIDE.md"
+      ],
+      "pythonStack": {
+        "poseEstimation": "YOLOv8n-pose (Ultralytics)",
+        "classifier": "RandomForest (scikit-learn) — 98% F1 on drowsiness dataset",
+        "videoCapture": "OpenCV",
+        "mqttClient": "paho-mqtt",
+        "hardware": "Any USB camera — 640×480 minimum, 10 fps; CPU only, no GPU required"
+      },
+      "detectedBehaviours": [
+        "drowsiness_alert  — EAR < 0.25 sustained ≥ 2 s, RandomForest confirm",
+        "microsleep_alert  — EAR < 0.20 sustained ≥ 3 s, RandomForest confirm",
+        "distraction_alert — head yaw > 30° sustained ≥ 3 s"
+      ],
+      "mqttTopics": [
+        "trucknet/drivers/{driverId}/behaviour  (QoS 1 — event JSON)"
+      ],
+      "notes": "Only events are transmitted — no video data ever leaves the cab."
     }
   ],
 
@@ -340,7 +560,7 @@
       },
       {
         "name": "iot_devices",
-        "columns": ["device_id (PK text)", "truck_label", "status (online|offline|unknown)", "driver_id FK→users nullable", "last_seen_at", "firmware_version", "alert_config (JSON)", "created_at"]
+        "columns": ["id", "device_id (unique text)", "truck_label", "status (online|offline|unknown)", "driver_id FK→users nullable", "last_seen_at", "firmware_version", "alert_config (JSON)", "created_at"]
       },
       {
         "name": "sensor_readings",
@@ -350,7 +570,58 @@
       },
       {
         "name": "sensor_alerts",
-        "columns": ["id", "device_id FK→iot_devices", "alert_type (temp_high|temp_low|humidity_high|vibration_high)", "value", "threshold", "status (active|acknowledged|resolved)", "triggered_at", "acked_by FK→users nullable", "acked_at nullable"]
+        "columns": ["id", "device_id FK→iot_devices", "driver_id FK→users nullable", "alert_type (temp_high|temp_low|humidity_high|vibration_high)", "value", "threshold", "status (active|acknowledged)", "triggered_at", "acked_by FK→users nullable", "acked_at nullable"]
+      },
+      {
+        "name": "transport_trips",
+        "columns": ["id", "driver_id FK→users", "route_id FK→driver_routes nullable", "vehicle_plate", "origin_label", "destination_label", "distance_km", "duration_minutes", "fuel_liters", "fuel_type (diesel|petrol|lpg|electric|hydrogen|cng|other)", "cargo_weight_kg", "is_empty_run", "load_factor_pct", "started_at", "completed_at", "status (active|completed|cancelled)", "behaviour_report_id FK→behaviour_reports nullable", "created_at", "created_by FK→users nullable"],
+        "indexes": ["driver_id", "status", "started_at", "(driver_id, status)"],
+        "notes": "Base table for all ESG transport metrics and behaviour scoring"
+      },
+      {
+        "name": "driver_profiles",
+        "columns": ["id", "driver_id FK→users (UNIQUE)", "gender", "birth_year", "nationality", "contract_type (cdi|cdd|interim|apprenticeship|other)", "contract_start_date", "contract_end_date", "weekly_hours_contractual", "driving_license_categories (JSON string[])", "license_obtained_year", "created_at", "updated_at", "created_by FK→users nullable"],
+        "notes": "1-to-1 with users where role=driver"
+      },
+      {
+        "name": "driver_shifts",
+        "columns": ["id", "driver_id FK→users", "trip_id FK→transport_trips nullable", "shift_date", "started_at", "ended_at nullable", "break_minutes", "driving_minutes", "overtime_minutes", "night_shift", "status (active|completed|cancelled)", "driver_notes", "created_at", "updated_at"],
+        "indexes": ["driver_id", "shift_date", "(driver_id, shift_date)"]
+      },
+      {
+        "name": "vehicle_maintenance_logs",
+        "columns": ["id", "driver_id FK→users nullable", "vehicle_plate", "maintenance_type (oil_change|tire_replacement|brake_service|technical_inspection|filter_replacement|battery|bodywork|fuel_fill|other)", "performed_at", "odometer_km", "cost_eur", "fuel_liters", "fuel_type", "provider_name", "next_due_at", "next_due_km", "regulatory_compliant", "notes", "document_url", "created_at", "updated_at"],
+        "indexes": ["driver_id", "vehicle_plate", "performed_at", "maintenance_type"]
+      },
+      {
+        "name": "driver_training_records",
+        "columns": ["id", "driver_id FK→users", "training_type (license_renewal|adr_certification|eco_driving|defensive_driving|first_aid|cargo_handling|digital_tools|other)", "title", "provider", "completed_at", "duration_hours", "cost_eur", "certification_number", "expiry_date", "passed", "notes", "document_url", "created_at", "updated_at"],
+        "indexes": ["driver_id", "completed_at", "training_type", "expiry_date"]
+      },
+      {
+        "name": "driver_esg_reports",
+        "columns": ["id", "driver_id FK→users", "period_type (weekly|monthly|quarterly|custom)", "period_start", "period_end", "total_trips", "empty_run_count", "empty_run_pct", "total_distance_km", "total_driving_hours", "total_shift_hours", "total_overtime_hours", "total_fuel_liters", "total_ghg_kgco2eq", "ghg_intensity_per_km", "ghg_intensity_per_tonne_km", "incident_count", "work_stoppage_count", "cargo_breach_count", "avg_cargo_temp_c", "maintenance_count", "training_hours", "certifications_count", "expiring_certifications_count", "trip_ids (JSON)", "shift_ids (JSON)", "incident_ids (JSON)", "maintenance_ids (JSON)", "training_ids (JSON)", "sensor_reading_count", "status (generating|ready|failed)", "error_message", "generated_at", "generated_by FK→users nullable", "created_at", "updated_at"],
+        "indexes": ["driver_id", "(period_start, period_end)", "status"]
+      },
+      {
+        "name": "esg_report_schedules",
+        "columns": ["id", "period_type", "active", "hr_email", "language", "next_run_at", "last_run_at", "last_run_report_count", "created_at", "updated_at", "created_by FK→users nullable"]
+      },
+      {
+        "name": "driving_events",
+        "columns": ["event_id", "driver_id FK→users", "trip_id FK→transport_trips", "event_type (speed_violation|harsh_braking|harsh_acceleration|sudden_swerve|drowsiness_alert|microsleep_alert|distraction_alert|idle_excess|sos_triggered)", "severity (low|medium|high|critical)", "source (gps|esp32|ai_camera|driver)", "occurred_at", "duration_seconds", "gps_lat", "gps_lng", "gps_speed_kmh", "speed_limit_kmh", "speed_excess_kmh", "vibration_magnitude", "accel_x", "accel_y", "accel_z", "ear_value", "head_angle_deg", "confidence", "idle_duration_minutes", "metadata (JSON)", "created_at"],
+        "indexes": ["driver_id", "trip_id", "event_type", "occurred_at", "source"],
+        "notes": "Immutable event log from GPS worker, ESP32, and AI camera agent"
+      },
+      {
+        "name": "behaviour_reports",
+        "columns": ["behaviour_report_id", "driver_id FK→users", "trip_id FK→transport_trips (UNIQUE)", "global_score", "speed_score", "driving_style_score", "fatigue_score", "idle_score", "speed_violation_count", "max_speed_recorded_kmh", "max_speed_excess_kmh", "harsh_braking_count", "harsh_acceleration_count", "sudden_swerve_count", "drowsiness_alert_count", "microsleep_alert_count", "distraction_alert_count", "idle_excess_count", "total_idle_minutes", "sos_count", "total_events", "critical_events", "trip_distance_km", "trip_duration_hours", "events_per_100km", "status (generating|ready|failed)", "admin_reviewed", "admin_reviewed_by FK→users nullable", "admin_reviewed_at nullable", "admin_note", "generated_at", "created_at", "updated_at"],
+        "indexes": ["driver_id", "trip_id", "global_score", "generated_at"]
+      },
+      {
+        "name": "behaviour_scoring_config",
+        "columns": ["config_id", "harsh_braking_threshold_g", "harsh_acceleration_threshold_g", "swerve_threshold_g", "speed_violation_excess_kmh", "idle_excess_minutes", "ear_drowsy_threshold", "ear_microsleep_threshold", "drowsy_duration_seconds", "microsleep_duration_seconds", "head_angle_distraction_deg", "distraction_duration_seconds", "weight_speed", "weight_driving_style", "weight_fatigue", "weight_idle", "weight_sos", "deduction_speed_minor", "...other score deduction fields"],
+        "notes": "Single-row config table; system defaults used when empty"
       }
     ]
   },
@@ -378,6 +649,10 @@
       "admin:sensors": {
         "direction": "sensor-worker → admin fleet page",
         "events": ["sensor_alert", "sensor_alert_acked", "fleet_sensor_update"]
+      },
+      "admin:behaviour": {
+        "direction": "behaviour-worker → admin behaviour dashboard",
+        "events": ["behaviour_report_ready", "critical_driving_event"]
       }
     }
   },
@@ -400,20 +675,68 @@
       "consumes": ["trucknet/sensors/+/readings", "trucknet/sensors/+/status"],
       "produces": "PostgreSQL (sensor_readings, sensor_alerts, iot_devices) + Ably (sensors:<deviceId>, admin:sensors)",
       "errorHandling": "Zod validation rejects malformed payloads; alert deduplication prevents duplicate active alerts"
+    },
+    {
+      "name": "behaviour-event-consumer",
+      "file": "workers/behaviour-event-consumer.ts",
+      "dockerService": "behaviour-event-worker",
+      "transport": "MQTT (Eclipse Mosquitto)",
+      "consumes": ["trucknet/drivers/+/behaviour"],
+      "produces": "PostgreSQL (driving_events) + Ably (admin:behaviour critical_driving_event)",
+      "errorHandling": "Zod validation; events with unknown trip_id are dropped with a warning"
+    },
+    {
+      "name": "behaviour-report-worker",
+      "file": "workers/behaviour-report-worker.ts",
+      "dockerService": "behaviour-report-worker",
+      "transport": "BullMQ (behaviour-reports queue)",
+      "consumes": ["behaviour-reports queue jobs triggered on trip completion"],
+      "produces": "PostgreSQL (behaviour_reports) + Ably (admin:behaviour behaviour_report_ready)",
+      "errorHandling": "BullMQ retry with exponential backoff; failed reports marked in DB"
+    },
+    {
+      "name": "gps-position-worker",
+      "file": "workers/gps-position-worker.ts",
+      "dockerService": "N/A (runs in main app process)",
+      "transport": "GPS location stream from /api/drivers/location",
+      "consumes": ["GPS coordinates posted by drivers"],
+      "produces": "PostgreSQL (driving_events — speed_violation, idle_excess)",
+      "errorHandling": "Speed limit lookup failures fall back gracefully; all events validated with Zod"
+    },
+    {
+      "name": "driver-esg-report-worker",
+      "file": "workers/driver-esg-report-worker.ts",
+      "dockerService": "esg-worker",
+      "transport": "BullMQ (driver-esg-reports queue)",
+      "consumes": ["driver-esg-reports queue jobs"],
+      "produces": "PostgreSQL (driver_esg_reports) + PDF/CSV files + email to HR via SMTP",
+      "errorHandling": "Report status set to 'failed' with error_message stored; BullMQ retry with backoff"
+    },
+    {
+      "name": "esg-report-scheduler",
+      "file": "workers/esg-report-scheduler.ts",
+      "dockerService": "esg-worker (same process as driver-esg-report-worker)",
+      "transport": "Cron / scheduled timer",
+      "consumes": ["esg_report_schedules table"],
+      "produces": "BullMQ jobs (driver-esg-reports queue) for each driver in the fleet",
+      "notes": "Runs on weekly/monthly/quarterly schedule; updates next_run_at after each execution"
     }
   ],
 
   "dockerServices": [
-    { "name": "postgres",      "image": "postgres:16-alpine",               "ports": ["5433:5432"], "purpose": "Primary database" },
-    { "name": "app",           "image": "custom (Dockerfile)",              "ports": ["3000:3000"], "purpose": "Next.js application" },
-    { "name": "livekit",       "image": "livekit/livekit-server:latest",    "ports": ["7880", "7881", "7882/udp"], "purpose": "WebRTC SFU" },
-    { "name": "redis",         "image": "redis:7-alpine",                   "ports": ["6379:6379"], "purpose": "OSRM route cache (LRU 128 MB)" },
-    { "name": "redisinsight",  "image": "redis/redisinsight:latest",        "ports": ["5540:5540"], "purpose": "Redis browser GUI" },
-    { "name": "kafka",         "image": "confluentinc/cp-kafka:7.4.0",      "ports": ["9092:9092"], "purpose": "Message broker (KRaft, no ZooKeeper)" },
-    { "name": "kafka-ui",      "image": "provectuslabs/kafka-ui:latest",    "ports": ["8080:8080"], "purpose": "Kafka topic / consumer-lag GUI" },
-    { "name": "stress-worker", "image": "custom (Dockerfile.worker)",       "ports": [],           "purpose": "Stress signal Kafka consumer" },
-    { "name": "sensor-worker", "image": "custom (Dockerfile.worker)",       "ports": [],           "purpose": "MQTT IoT sensor consumer + DB writer" },
-    { "name": "mosquitto",     "image": "eclipse-mosquitto:2",              "ports": ["1883:1883", "9001:9001"], "purpose": "MQTT broker for ESP32 devices" }
+    { "name": "postgres",               "image": "postgres:16-alpine",             "ports": ["5433:5432"], "purpose": "Primary database" },
+    { "name": "app",                    "image": "custom (Dockerfile)",            "ports": ["3000:3000"], "purpose": "Next.js application" },
+    { "name": "livekit",                "image": "livekit/livekit-server:latest",  "ports": ["7880", "7881", "7882/udp"], "purpose": "WebRTC SFU" },
+    { "name": "redis",                  "image": "redis:7-alpine",                 "ports": ["6379:6379"], "purpose": "OSRM route cache (LRU 128 MB) + BullMQ job backend" },
+    { "name": "redisinsight",           "image": "redis/redisinsight:latest",      "ports": ["5540:5540"], "purpose": "Redis browser GUI" },
+    { "name": "kafka",                  "image": "confluentinc/cp-kafka:7.4.0",    "ports": ["9092:9092"], "purpose": "Message broker (KRaft, no ZooKeeper)" },
+    { "name": "kafka-ui",               "image": "provectuslabs/kafka-ui:latest",  "ports": ["8080:8080"], "purpose": "Kafka topic / consumer-lag GUI" },
+    { "name": "stress-worker",          "image": "custom (Dockerfile.worker)",     "ports": [],           "purpose": "Stress signal Kafka consumer" },
+    { "name": "sensor-worker",          "image": "custom (Dockerfile.worker)",     "ports": [],           "purpose": "MQTT IoT sensor consumer + DB writer" },
+    { "name": "esg-worker",             "image": "custom (Dockerfile.esg-worker)", "ports": [],           "purpose": "BullMQ ESG report generator + email dispatcher (Puppeteer, Nodemailer)" },
+    { "name": "behaviour-event-worker", "image": "custom (Dockerfile.worker)",     "ports": [],           "purpose": "MQTT cam_agent + ESP32 behaviour event consumer → driving_events" },
+    { "name": "behaviour-report-worker","image": "custom (Dockerfile.worker)",     "ports": [],           "purpose": "BullMQ behaviour report scorer → behaviour_reports" },
+    { "name": "mosquitto",              "image": "eclipse-mosquitto:2",            "ports": ["1883:1883", "9001:9001"], "purpose": "MQTT broker for ESP32 devices and AI camera agent" }
   ],
 
   "environmentVariables": [
@@ -429,8 +752,13 @@
     { "name": "ADMIN_INVITE_CODE",  "required": false, "notes": "Required when registering role=admin, min 8 chars" },
     { "name": "REDIS_URL",          "required": false, "notes": "Redis URL for OSRM route cache" },
     { "name": "MQTT_URL",           "required": false, "notes": "mqtt://user:pass@host:1883 — sensor worker only. @ in password must be %40" },
-    { "name": "MQTT_PASSWORD",      "required": false, "notes": "Plain MQTT password — used by docker-compose healthcheck and sensor worker" },
-    { "name": "SOCKET_PORT",        "required": false, "notes": "Port override for Socket.IO" }
+    { "name": "MQTT_PASSWORD",      "required": false, "notes": "Plain MQTT password — used by docker-compose healthcheck and workers" },
+    { "name": "SOCKET_PORT",        "required": false, "notes": "Port override for Socket.IO" },
+    { "name": "SMTP_HOST",          "required": false, "notes": "SMTP server hostname — required for ESG report email dispatch; skipped when unset" },
+    { "name": "SMTP_PORT",          "required": false, "default": "587", "notes": "SMTP port" },
+    { "name": "SMTP_USER",          "required": false, "notes": "SMTP authentication username" },
+    { "name": "SMTP_PASS",          "required": false, "notes": "SMTP authentication password" },
+    { "name": "SMTP_FROM",          "required": false, "default": "noreply@trucknet.local", "notes": "From address for ESG report emails" }
   ],
 
   "apiRoutes": {
@@ -445,7 +773,8 @@
       "POST   /api/profile/upload-avatar"
     ],
     "users": [
-      "GET    /api/users?tag=…"
+      "GET    /api/users/me",
+      "GET    /api/users/by-tag?tag=…"
     ],
     "friends": [
       "POST   /api/friends/request",
@@ -458,7 +787,32 @@
       "POST            /api/drivers/location",
       "GET             /api/drivers/nearby",
       "GET|POST|DELETE /api/drivers/route",
-      "GET             /api/geocode?q=…"
+      "GET             /api/geocode?q=…",
+      "GET|PATCH       /api/drivers/[driverId]/profile",
+      "GET|POST        /api/drivers/[driverId]/shifts",
+      "GET|PATCH       /api/drivers/[driverId]/shifts/[shiftId]",
+      "POST            /api/drivers/[driverId]/shifts/[shiftId]/complete",
+      "GET|POST        /api/drivers/[driverId]/maintenance",
+      "GET|PATCH       /api/drivers/[driverId]/maintenance/[maintenanceId]",
+      "GET|POST        /api/drivers/[driverId]/training",
+      "GET             /api/drivers/[driverId]/training/expiring",
+      "GET|PATCH       /api/drivers/[driverId]/training/[trainingId]",
+      "GET             /api/drivers/[driverId]/trips",
+      "GET             /api/drivers/[driverId]/trips/stats",
+      "GET|PATCH       /api/drivers/[driverId]/trips/[tripId]",
+      "GET             /api/drivers/[driverId]/trips/[tripId]/gps",
+      "GET             /api/drivers/[driverId]/trips/[tripId]/behaviour",
+      "GET             /api/drivers/[driverId]/trips/[tripId]/behaviour/events",
+      "GET             /api/drivers/[driverId]/active-trip",
+      "GET             /api/drivers/[driverId]/behaviour-summary",
+      "GET             /api/drivers/esg-reports",
+      "GET             /api/drivers/esg-reports/[reportId]",
+      "GET             /api/drivers/esg-reports/[reportId]/download",
+      "GET             /api/drivers/fleet-esg-summary"
+    ],
+    "trips": [
+      "GET|POST   /api/trips",
+      "PATCH      /api/trips/[tripId]/status"
     ],
     "messages": [
       "POST   /api/text-messages",
@@ -466,7 +820,7 @@
       "PATCH  /api/text-messages/[id]/read",
       "POST   /api/voice-messages",
       "PATCH  /api/voice-messages/[id]/status",
-      "POST   /api/upload"
+      "POST   /api/upload/audio"
     ],
     "stress": [
       "POST   /api/stress-signals",
@@ -475,30 +829,39 @@
     ],
     "calls": [
       "POST   /api/calls/initiate",
-      "GET    /api/calls/token",
+      "GET    /api/calls/token/[roomName]",
       "GET    /api/calls/[roomName]",
       "POST   /api/calls/[roomName]/decline",
       "GET    /api/calls/history"
     ],
+    "esgSchedules": [
+      "GET|POST          /api/esg-report-schedules",
+      "GET|PATCH|DELETE  /api/esg-report-schedules/[scheduleId]"
+    ],
     "admin": [
-      "GET    /api/admin/stats",
-      "GET    /api/admin/drivers",
-      "GET    /api/admin/drivers/live",
-      "GET    /api/admin/drivers/[driverId]/route",
-      "GET    /api/admin/routes/active",
-      "GET    /api/admin/sos",
-      "GET    /api/admin/sos/stream  (SSE)",
-      "PATCH  /api/admin/sos/[id]/resolve",
-      "GET    /api/admin/calls",
-      "GET    /api/admin/sensors",
-      "POST   /api/admin/sensors/[deviceId]/register",
-      "GET    /api/admin/sensors/[deviceId]",
-      "PATCH  /api/admin/sensors/[deviceId]",
-      "GET    /api/admin/sensors/[deviceId]/readings",
-      "GET    /api/admin/sensors/[deviceId]/thresholds",
-      "PATCH  /api/admin/sensors/[deviceId]/thresholds",
-      "GET    /api/admin/sensors/alerts",
-      "PATCH  /api/admin/sensors/alerts/[alertId]"
+      "GET       /api/admin/stats",
+      "GET       /api/admin/drivers",
+      "GET       /api/admin/drivers/live",
+      "GET       /api/admin/drivers/[driverId]/route",
+      "GET       /api/admin/routes/active",
+      "GET       /api/admin/sos",
+      "GET       /api/admin/sos/stream  (SSE)",
+      "PATCH     /api/admin/sos/[id]/resolve",
+      "GET       /api/admin/calls",
+      "GET       /api/admin/sensors",
+      "POST      /api/admin/sensors/[deviceId]/register",
+      "GET       /api/admin/sensors/[deviceId]",
+      "PATCH     /api/admin/sensors/[deviceId]",
+      "GET       /api/admin/sensors/[deviceId]/readings",
+      "GET       /api/admin/sensors/[deviceId]/thresholds",
+      "PATCH     /api/admin/sensors/[deviceId]/thresholds",
+      "GET       /api/admin/sensors/alerts",
+      "PATCH     /api/admin/sensors/alerts/[alertId]/acknowledge",
+      "GET       /api/admin/behaviour/fleet",
+      "GET|PATCH /api/admin/behaviour/config"
+    ],
+    "camAgent": [
+      "POST   /api/cam-agent/session"
     ],
     "misc": [
       "GET    /api/health"

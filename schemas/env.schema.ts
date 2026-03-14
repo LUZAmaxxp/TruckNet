@@ -9,7 +9,7 @@ export const EnvSchema = z.object({
   DATABASE_URL: z.string().url({ message: "DATABASE_URL must be a valid URL" }),
   NEXTAUTH_SECRET: z
     .string()
-    .min(10, { message: "NEXTAUTH_SECRET must be at least 10 characters" }),
+    .min(32, { message: "NEXTAUTH_SECRET must be at least 32 characters — generate with: openssl rand -base64 32" }),
   NEXTAUTH_URL: z
     .string()
     .url({ message: "NEXTAUTH_URL must be a valid URL" }),
@@ -27,6 +27,8 @@ export const EnvSchema = z.object({
   KAFKA_ENABLED: z.enum(["true", "false"]).default("false"),
   // Admin invite code — required when role=admin is submitted during registration
   ADMIN_INVITE_CODE: z.string().min(8).optional(),
+  // Static bearer token for cam_agent service-to-service auth (not a browser session)
+  CAM_AGENT_API_KEY: z.string().min(16).optional(),
   // Redis — optional; enables OSRM route result caching for performance.
   // When unset, all route requests go directly to OSRM (correct but slower).
   REDIS_URL: z.string().url().optional(),
@@ -41,6 +43,8 @@ export const EnvSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
+  // Feature flags
+  NEXT_PUBLIC_FEATURE_SPEED_LIMIT_DISPLAY: z.enum(["true", "false"]).default("false"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

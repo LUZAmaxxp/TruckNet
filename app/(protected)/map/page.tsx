@@ -9,10 +9,11 @@ import { useSocket } from "@/hooks/useSocket";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import type { NearbyDriverEntry } from "@/sockets/types";
+import type { NearbyDriverEntry, TripUpdatePayload } from "@/sockets/types";
 import { RouteSetupModal } from "@/components/map/RouteSetupModal";
 import { RouteInfoBar } from "@/components/map/RouteInfoBar";
 import type { ActiveRoute, GeocodeResult } from "@/schemas/route.schema";
+import { SpeedLimitIndicator } from "@/components/drivers/SpeedLimitIndicator";
 
 // ---------------------------------------------------------------------------
 // Dynamically import the Leaflet map — must be ssr:false (Leaflet needs window)
@@ -180,6 +181,25 @@ function MapPageInner() {
     setActiveRoute(null);
   }, []);
 
+  const handleCancelTrip = useCallback(async () => {
+    if (!activeTrip || activeTrip === "loading") return;
+    const tripId = activeTrip.id;
+    setActiveTrip(null);
+    setActiveRoute(null);
+    try {
+      await fetch("/api/drivers/route?reason=cancelled", { method: "DELETE" });
+      const res = await fetch(`/api/trips/${tripId}/status`, {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ status: "cancelled" }),
+      });
+      if (!res.ok) toast.error("Failed to cancel trip");
+      else toast.success("Trip cancelled.");
+    } catch {
+      toast.error("Failed to cancel trip");
+    }
+  }, [activeTrip]);
+
   // ---------------------------------------------------------------------------
   // Core location broadcast + DB fetch (same contract as before)
   // ---------------------------------------------------------------------------
@@ -231,6 +251,21 @@ function MapPageInner() {
       toast.error("🚨 Stress alert from nearby driver!", {
         description: `${signal.latitude.toFixed(4)}, ${signal.longitude.toFixed(4)}`,
       });
+    });
+    return unsub;
+  }, [on]);
+
+  // Real-time trip sync — reacts to start / cancel / complete from any page
+  useEffect(() => {
+    const unsub = on("trip_updated", (payload: TripUpdatePayload) => {
+      if (payload.status === "active" && payload.trip) {
+        setActiveTrip(payload.trip);
+        // reset auto-route guard so a new destination can be drawn
+        autoRouteRef.current = false;
+      } else {
+        setActiveTrip(null);
+        setActiveRoute(null);
+      }
     });
     return unsub;
   }, [on]);
@@ -307,6 +342,17 @@ function MapPageInner() {
           {geoError && (
             <span className="text-xs text-destructive hidden sm:block">{geoError}</span>
           )}
+          {activeRoute && (
+            <Button
+              onClick={handleClearRoute}
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+            >
+              <X className="h-4 w-4 mr-2" />
+              Cancel Destination
+            </Button>
+          )}
           <Button
             onClick={() => setRouteModalOpen(true)}
             variant="outline"
@@ -364,8 +410,21 @@ function MapPageInner() {
             {routeAutoBuilding && (
               <span className="opacity-60 shrink-0">Loading route…</span>
             )}
+            <button
+              onClick={handleCancelTrip}
+              className="ml-1 shrink-0 rounded-full p-0.5 hover:bg-[var(--honey)] hover:text-white transition-colors"
+              title="Cancel trip"
+              aria-label="Cancel trip"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
         )}
+
+        {/* Speed limit badge — top-right corner, above the map tiles */}
+        <div className="absolute top-3 right-3 z-[1000]">
+          <SpeedLimitIndicator />
+        </div>
 
         {/* Real interactive OpenStreetMap */}
         <DriverMap

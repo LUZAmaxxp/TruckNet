@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { requireAuth } from "@/lib/auth-helpers";
 import { errorResponse, successResponse } from "@/lib/api";
 import { db } from "@/db";
@@ -22,7 +23,14 @@ export async function GET(
   // Allow cam_agent to authenticate with a static API key
   const authHeader = req.headers.get("authorization") ?? "";
   const apiKey = process.env.CAM_AGENT_API_KEY;
-  if (apiKey && authHeader === `Bearer ${apiKey}`) {
+  const isValidApiKey = (() => {
+    if (!apiKey) return false;
+    const expected = Buffer.from(`Bearer ${apiKey}`);
+    const received = Buffer.from(authHeader);
+    if (expected.length !== received.length) return false;
+    return timingSafeEqual(expected, received);
+  })();
+  if (isValidApiKey) {
     // API key auth — trusted, no role check needed
   } else {
     const session = await requireAuth();

@@ -98,6 +98,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       "behaviour_event",
       "behaviour_report_ready",
       "behaviour_report_failed",
+      // Speed limit real-time update
+      "speed_limit_update",
+      // Trip lifecycle events
+      "trip_updated",
       "error",
     ];
 

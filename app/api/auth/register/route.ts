@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -57,7 +58,14 @@ export async function POST(req: NextRequest) {
           { status: 403 }
         );
       }
-      if (!data.adminInviteCode || data.adminInviteCode !== env.ADMIN_INVITE_CODE) {
+      const codeMatch = (() => {
+        if (!data.adminInviteCode) return false;
+        const expected = Buffer.from(env.ADMIN_INVITE_CODE);
+        const received = Buffer.from(data.adminInviteCode);
+        if (expected.length !== received.length) return false;
+        return timingSafeEqual(expected, received);
+      })();
+      if (!codeMatch) {
         return NextResponse.json(
           { error: "Invalid admin invite code." },
           { status: 403 }

@@ -25,7 +25,7 @@ import { STRESS_SIGNALS_TOPIC, STRESS_SIGNALS_DLQ } from "@/lib/kafka-topics";
 import { ablyPublish } from "@/lib/ably-server";
 import { db } from "@/db";
 import { driverLocations, users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, gt } from "drizzle-orm";
 import { haversineDistanceKm } from "@/lib/haversine";
 import { z } from "zod";
 
@@ -50,13 +50,15 @@ type StressSignalPayload = z.infer<typeof StressSignalPayloadSchema>;
 
 const CONSUMER_GROUP_ID = "stress-worker";
 const NEARBY_RADIUS_KM = 50;
+const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
 // ---------------------------------------------------------------------------
 // Delivery: fan out to all nearby online drivers via Ably
 // ---------------------------------------------------------------------------
 
 async function deliverToNearbyDrivers(signal: StressSignalPayload): Promise<void> {
-  // Fetch all driver locations with user names in a single JOIN query
+  // Fetch only non-stale driver locations (updated within the last 5 minutes)
+  const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS);
   const allLocations = await db
     .select({
       userId: driverLocations.userId,
@@ -65,12 +67,10 @@ async function deliverToNearbyDrivers(signal: StressSignalPayload): Promise<void
       name: users.name,
     })
     .from(driverLocations)
-    .innerJoin(users, eq(driverLocations.userId, users.id));
+    .innerJoin(users, eq(driverLocations.userId, users.id))
+    .where(gt(driverLocations.updatedAt, staleThreshold));
 
   // Filter to drivers within 50 km, excluding the sender themselves
-  const staleThresholdMs = 5 * 60 * 1000; // 5 minutes
-  const now = Date.now();
-
   const nearby = allLocations.filter(
     (loc) =>
       loc.userId !== signal.userId &&

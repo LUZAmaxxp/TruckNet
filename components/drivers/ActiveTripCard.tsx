@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { CheckCircle, XCircle, Navigation, MapPin } from "lucide-react";
+import { useSocket } from "@/hooks/useSocket";
+import type { TripUpdatePayload } from "@/sockets/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,6 +75,8 @@ export function ActiveTripCard() {
   const [fuelEstimated, setFuelEstimated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  const { on } = useSocket();
+
   // -------------------------------------------------------------------------
   // Data fetching
   // -------------------------------------------------------------------------
@@ -88,6 +92,21 @@ export function ActiveTripCard() {
   }, []);
 
   useEffect(() => { void fetchActiveTrip(); }, [fetchActiveTrip]);
+
+  // Real-time sync — react to trip changes initiated from any other page/tab
+  useEffect(() => {
+    const unsub = on("trip_updated", (payload: TripUpdatePayload) => {
+      if (payload.status === "active" && payload.trip) {
+        // A new trip was started (e.g. from map page in the future)
+        void fetchActiveTrip();
+      } else {
+        // Trip was cancelled or completed remotely
+        setTrip(null);
+        setAction(null);
+      }
+    });
+    return unsub;
+  }, [on, fetchActiveTrip]);
 
   // Auto-estimate fuel when distance changes in the complete form
   useEffect(() => {

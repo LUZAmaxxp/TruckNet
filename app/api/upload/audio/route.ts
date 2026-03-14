@@ -75,15 +75,16 @@ export async function POST(req: NextRequest) {
   const ext = extMap[mimeType] ?? "webm";
   const filename = `${randomUUID()}.${ext}`;
 
-  const uploadsDir = join(process.cwd(), "public", "uploads");
+  // Store outside public/ so files are NOT served by Next.js directly.
+  // Access is gated through the authenticated GET /api/uploads/[filename] route.
+  const uploadsDir = join(process.cwd(), "private_uploads");
   await mkdir(uploadsDir, { recursive: true });
-
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(join(uploadsDir, filename), buffer);
 
-  // Build absolute URL — required so audioUrl passes z.string().url() validation
+  // Return an API-gated URL — not a /public path
   const base = env.NEXTAUTH_URL.replace(/\/$/, "");
-  const audioUrl = `${base}/uploads/${filename}`;
+  const audioUrl = `${base}/api/uploads/${filename}`;
 
   return successResponse({ audioUrl }, 201);
 }

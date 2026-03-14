@@ -9,6 +9,8 @@ import { eq, and } from "drizzle-orm";
 import { setDriverLocation, getAllDriverLocations } from "@/sockets/store/location.store";
 import { haversineDistanceKm } from "@/lib/haversine";
 import { ablyPublish } from "@/lib/ably-server";
+import { getSpeedLimit } from "@/lib/behaviour/speed-limit-lookup";
+import { safeGet, safeSet } from "@/lib/redis";
 
 /** Maximum distance in kilometres considered "nearby". */
 const NEARBY_RADIUS_KM = 50;
@@ -35,7 +37,6 @@ export async function POST(req: NextRequest) {
   const body: unknown = await req.json();
   const { latitude, longitude } = await validateOrThrow(LocationUpdateSchema, body);
 
-  console.log(`[location] POST userId=${userId} lat=${latitude} lon=${longitude}`);
 
   // ── 1. Upsert to DB ─────────────────────────────────────────────────────
   const updated = await db
@@ -80,22 +81,9 @@ export async function POST(req: NextRequest) {
       updatedAt:      d.updatedAt,
       distanceKm:     haversineDistanceKm(latitude, longitude, d.latitude, d.longitude),
     }))
-    .filter((d) => {
-      const keep = d.distanceKm <= NEARBY_RADIUS_KM;
-      console.log(
-        `[location] → candidate ${d.userId} dist=${d.distanceKm.toFixed(2)}km ${
-          keep ? "INCLUDED" : "FILTERED"
-        }`
-      );
-      return keep;
-    })
+    .filter((d) => d.distanceKm <= NEARBY_RADIUS_KM)
     .sort((a, b) => a.distanceKm - b.distanceKm);
 
-  console.log(
-    `[location] publishing nearby_driver_update to user:${userId} — ${
-      nearbyDrivers.length
-    } driver(s) (store total=${allLocations.length})`
-  );
 
   // ── 5. Publish to caller's private Ably channel ──────────────────────────
   try {
@@ -155,6 +143,39 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     // Non-critical — location update still succeeds even if route check fails
     console.error("[location] Auto-arrival check failed:", err);
+  }
+
+  // ── 8. Speed limit update (browser GPS fallback) ────────────────────────────
+  // Only resolve + publish when the driver moves >50 m from the last gate point.
+  // The Redis gate (TTL 60 s) also acts as a debounce so we don’t call Overpass
+  // on every 20-second heartbeat when the driver is stationary.
+  try {
+    const gateKey  = `speed_limit_gate:${userId}`;
+    const gateRaw  = await safeGet(gateKey);
+    let shouldPublish = true;
+
+    if (gateRaw) {
+      const gate = JSON.parse(gateRaw) as { lat: number; lng: number };
+      const movedKm = haversineDistanceKm(latitude, longitude, gate.lat, gate.lng);
+      if (movedKm < 0.05) shouldPublish = false; // < 50 m → skip
+    }
+
+    if (shouldPublish) {
+      const speedLimitKmh = await getSpeedLimit(latitude, longitude);
+      await safeSet(gateKey, JSON.stringify({ lat: latitude, lng: longitude }), 60);
+      await ablyPublish(`user:${userId}`, "speed_limit_update", {
+        speedLimitKmh,
+        currentSpeedKmh: 0,   // browser coords.speed is unreliable; worker provides real speed
+        isOverSpeeding:  false,
+        roadName:        null,
+        lat:             latitude,
+        lng:             longitude,
+        timestamp:       new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    // Non-critical
+    console.error("[location] Speed limit lookup failed:", err);
   }
 
   return successResponse({ latitude, longitude }, 200);

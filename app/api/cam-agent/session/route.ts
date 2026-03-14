@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { errorResponse, successResponse } from "@/lib/api";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -17,7 +18,15 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.CAM_AGENT_API_KEY;
   const authHeader = req.headers.get("authorization") ?? "";
 
-  if (!apiKey || authHeader !== `Bearer ${apiKey}`) {
+  const isAuthorized = (() => {
+    if (!apiKey) return false;
+    const expected = Buffer.from(`Bearer ${apiKey}`);
+    const received = Buffer.from(authHeader);
+    if (expected.length !== received.length) return false;
+    return timingSafeEqual(expected, received);
+  })();
+
+  if (!isAuthorized) {
     return errorResponse("Unauthorized", 401);
   }
 

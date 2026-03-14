@@ -17,6 +17,7 @@ import { transportTrips, gpsTracks } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { classifyGpsUpdate } from "@/lib/behaviour/gps-classifier";
 import { loadScoringConfig } from "@/lib/behaviour/score-calculator";
+import { getSpeedLimit } from "@/lib/behaviour/speed-limit-lookup";
 import { ablyPublish } from "@/lib/ably-server";
 
 const MQTT_URL = process.env.MQTT_URL!;
@@ -74,13 +75,14 @@ mqttClient.on("message", (topic, payloadBuf) => {
 
       // Store track point
       await db.insert(gpsTracks).values({
-        tripId:     d.trip_id,
+        tripId:       d.trip_id,
         driverId,
-        lat:        d.lat,
-        lng:        d.lng,
-        speedKmh:   d.speed_kmh,
-        headingDeg: d.heading_deg ?? null,
-        recordedAt: new Date(d.timestamp),
+        lat:          d.lat,
+        lng:          d.lng,
+        speedKmh:     d.speed_kmh,
+        speedLimitKmh: null, // will be back-filled below after Overpass lookup
+        headingDeg:   d.heading_deg ?? null,
+        recordedAt:   new Date(d.timestamp),
       });
 
       // Classify
@@ -89,6 +91,10 @@ mqttClient.on("message", (topic, payloadBuf) => {
         { driverId, tripId: d.trip_id, lat: d.lat, lng: d.lng, speedKmh: d.speed_kmh, timestamp: d.timestamp },
         config
       );
+
+      // Speed limit lookup — classifyGpsUpdate already called getSpeedLimit, so
+      // this returns instantly from the Redis cache (no extra Overpass request).
+      const speedLimitKmh = await getSpeedLimit(d.lat, d.lng);
 
       // Live map broadcast
       await ablyPublish(`trips:${d.trip_id}`, "gps_update", {
@@ -99,6 +105,17 @@ mqttClient.on("message", (topic, payloadBuf) => {
         speedKmh:  d.speed_kmh,
         heading:   d.heading_deg,
         timestamp: d.timestamp,
+      });
+
+      // Speed limit update — delivered to driver's private channel
+      await ablyPublish(`user:${driverId}`, "speed_limit_update", {
+        speedLimitKmh,
+        currentSpeedKmh: d.speed_kmh,
+        isOverSpeeding:  speedLimitKmh !== null && d.speed_kmh > speedLimitKmh,
+        roadName:        null,
+        lat:             d.lat,
+        lng:             d.lng,
+        timestamp:       new Date(d.timestamp).toISOString(),
       });
     } catch (err) {
       console.error("[GPS Worker] Error processing", topic, err);

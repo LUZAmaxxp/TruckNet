@@ -198,6 +198,40 @@ export interface BehaviourReportFailedPayload {
   reason:   string;
 }
 
+// ── Trip update payload ───────────────────────────────────────────────────────
+
+export interface TripUpdatePayload {
+  tripId:   string;
+  status:   "active" | "completed" | "cancelled";
+  /** Full trip data — present when status is "active", null otherwise */
+  trip: {
+    id:               string;
+    vehiclePlate:     string;
+    originLabel:      string | null;
+    destinationLabel: string | null;
+    cargoWeightKg:    number | null;
+    startedAt:        string | null;
+  } | null;
+}
+
+// ── Speed limit event payload ─────────────────────────────────────────────────
+
+export interface SpeedLimitUpdatePayload {
+  /** Current road speed limit in km/h, or null if unknown */
+  speedLimitKmh:   number | null;
+  /** Driver's current GPS speed in km/h */
+  currentSpeedKmh: number;
+  /** True when driver's speed exceeds speedLimitKmh */
+  isOverSpeeding:  boolean;
+  /** OSM road name, or null when not fetched */
+  roadName:        string | null;
+  lat:             number;
+  lng:             number;
+  timestamp:       string; // ISO-8601
+  /** True when the value is served from a stale/fallback source */
+  stale?:          boolean;
+}
+
 export interface ServerToClientEvents {
   nearby_driver_update: (drivers: NearbyDriverEntry[]) => void;
   voice_message_received: (message: VoiceMessageAlert) => void;
@@ -222,6 +256,10 @@ export interface ServerToClientEvents {
   behaviour_event: (payload: BehaviourEventPayload) => void;
   behaviour_report_ready: (payload: BehaviourReportReadyPayload) => void;
   behaviour_report_failed: (payload: BehaviourReportFailedPayload) => void;
+  // Speed limit real-time update for the driver UI
+  speed_limit_update: (payload: SpeedLimitUpdatePayload) => void;
+  // Trip lifecycle events (start / complete / cancel)
+  trip_updated: (payload: TripUpdatePayload) => void;
   error: (payload: { error: string; details?: ZodIssue[] }) => void;
 }
 

@@ -7,6 +7,16 @@
 
 import nodemailer from "nodemailer";
 
+/** Escape HTML special characters to prevent injection in email templates. */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 interface EsgReportEmailOptions {
   to:          string;
   driverName:  string;
@@ -40,6 +50,11 @@ export async function sendEsgReportEmail(opts: EsgReportEmailOptions): Promise<v
   const from    = process.env.SMTP_FROM ?? "noreply@trucknet.app";
   const subject = `Rapport ESG conducteur — ${opts.driverName} — ${opts.periodStart} / ${opts.periodEnd}`;
 
+  const safeName        = escapeHtml(opts.driverName);
+  const safePeriodStart = escapeHtml(opts.periodStart);
+  const safePeriodEnd   = escapeHtml(opts.periodEnd);
+  const safeDownloadUrl = escapeHtml(opts.downloadUrl);
+
   const html = `
     <div style="font-family:Arial,sans-serif;font-size:14px;color:#1a1a2e;max-width:600px">
       <div style="background:#0f2d5c;color:#fff;padding:24px;border-radius:8px 8px 0 0">
@@ -47,13 +62,13 @@ export async function sendEsgReportEmail(opts: EsgReportEmailOptions): Promise<v
       </div>
       <div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px">
         <p>Bonjour,</p>
-        <p>Le rapport ESG/RSE pour le conducteur <strong>${opts.driverName}</strong> est disponible.</p>
+        <p>Le rapport ESG/RSE pour le conducteur <strong>${safeName}</strong> est disponible.</p>
         <table style="width:100%;border-collapse:collapse;margin:16px 0">
-          <tr><td style="padding:6px;font-weight:600;width:40%">Conducteur</td><td style="padding:6px">${opts.driverName}</td></tr>
-          <tr style="background:#f9fafb"><td style="padding:6px;font-weight:600">Période</td><td style="padding:6px">${opts.periodStart} → ${opts.periodEnd}</td></tr>
+          <tr><td style="padding:6px;font-weight:600;width:40%">Conducteur</td><td style="padding:6px">${safeName}</td></tr>
+          <tr style="background:#f9fafb"><td style="padding:6px;font-weight:600">Période</td><td style="padding:6px">${safePeriodStart} → ${safePeriodEnd}</td></tr>
         </table>
         <p>
-          <a href="${opts.downloadUrl}"
+          <a href="${safeDownloadUrl}"
              style="display:inline-block;background:#0f2d5c;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:700">
             Consulter et télécharger le rapport
           </a>

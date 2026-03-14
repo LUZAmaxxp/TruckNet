@@ -3,8 +3,9 @@ import { and, desc, eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-helpers";
 import { errorResponse, successResponse } from "@/lib/api";
 import { db } from "@/db";
-import { transportTrips } from "@/db/schema";
+import { transportTrips, fuelTypeEnum } from "@/db/schema";
 import { z } from "zod";
+import { ablyPublish } from "@/lib/ably-server";
 
 const StartTripSchema = z.object({
   vehicle_plate:     z.string().min(1).max(20),
@@ -66,12 +67,28 @@ export async function POST(req: NextRequest) {
       originLabel:      d.origin_label,
       destinationLabel: d.destination_label,
       cargoWeightKg:    d.cargo_weight_kg,
-      fuelType:         d.fuel_type as any,
+      fuelType:         d.fuel_type as typeof fuelTypeEnum.enumValues[number] | undefined,
       startedAt:        new Date(),
       status:           "active",
       createdBy:        driverId,
     })
     .returning();
+
+  // Notify all connected browser tabs / pages of this driver about the new trip
+  if (trip) {
+    await ablyPublish(`user:${driverId}`, "trip_updated", {
+      tripId: trip.id,
+      status: "active",
+      trip: {
+        id:               trip.id,
+        vehiclePlate:     trip.vehiclePlate,
+        originLabel:      trip.originLabel ?? null,
+        destinationLabel: trip.destinationLabel ?? null,
+        cargoWeightKg:    trip.cargoWeightKg ?? null,
+        startedAt:        trip.startedAt?.toISOString() ?? null,
+      },
+    });
+  }
 
   return successResponse({ trip }, 201);
 }

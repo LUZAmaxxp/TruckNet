@@ -1,0 +1,115 @@
+{
+  "feature": "speed_limit_display",
+  "target_module": "TruckNet",
+  "target_user": "driver",
+  "prompt": {
+    "role": "system",
+    "content": "You are a senior full-stack engineer working on TruckNet (v0.2.0), a fleet management platform built with Next.js 14, PostgreSQL, Kafka, BullMQ, MQTT/ESP32, and a React dashboard. The driver-facing mobile interface currently shows GPS position, SOS button, messaging, and IoT sensor data in real time via Ably WebSocket. Your task is to implement a new feature: real-time speed limit display for the driver."
+  },
+  "task": {
+    "title": "Real-Time Speed Limit Display for Driver Interface",
+    "description": "Add a persistent, always-visible speed limit indicator to the driver mobile UI. At any moment, the driver must see the legal speed limit of the road they are currently on. The indicator must update automatically as the vehicle moves between road segments with different speed limits.",
+    "acceptance_criteria": [
+      "Driver sees current road speed limit (e.g. 60, 80, 100, 120 km/h) at all times on their mobile screen",
+      "Speed limit updates within 3 seconds of entering a new road segment",
+      "Works offline or in low-connectivity zones using a cached tile fallback",
+      "Visual warning state activates when driver's current GPS speed exceeds the speed limit",
+      "Speed limit data is stored per GPS point in the trip log for RSE/safety reporting"
+    ]
+  },
+  "technical_context": {
+    "existing_stack": {
+      "frontend_driver": "React Native or Next.js PWA (mobile), receives real-time position via MQTT from ESP32 device",
+      "backend": "Node.js, Kafka for event streaming, BullMQ for job queues, PostgreSQL for persistence",
+      "realtime": "Ably WebSocket for pushing data to driver UI",
+      "gps_source": "ESP32 hardware device publishing lat/lng over MQTT topic: trucknet/vehicle/{vehicleId}/gps",
+      "existing_trip_schema": "PostgreSQL table: trip_points (id, trip_id, lat, lng, speed_kmh, timestamp)"
+    },
+    "data_source_for_speed_limits": {
+      "primary": "Overpass API (OpenStreetMap) — query maxspeed tag on way elements using current lat/lng",
+      "fallback": "HERE Maps Speed Limits API or TomTom Speed Profiles API (requires API key)",
+      "offline_fallback": "Cache last known speed limit per road segment locally on device; use PostGIS road network cache updated nightly"
+    }
+  },
+  "implementation_steps": [
+    {
+      "step": 1,
+      "title": "Speed Limit Resolver Service",
+      "description": "Create a new Node.js microservice (or BullMQ worker) called SpeedLimitResolver. It subscribes to the Kafka topic trucknet.gps.events. For each GPS event, it queries the Overpass API with the current lat/lng to retrieve the maxspeed tag of the nearest OSM road way. It then publishes the resolved speed limit to a new Kafka topic: trucknet.speed_limit.resolved with payload: { vehicleId, lat, lng, speedLimit, roadName, timestamp }.",
+      "files_to_create": [
+        "services/speed-limit-resolver/index.js",
+        "services/speed-limit-resolver/overpassClient.js",
+        "services/speed-limit-resolver/cache.js"
+      ],
+      "notes": "Rate-limit Overpass queries: only re-query when vehicle has moved more than 50 meters from last resolved point. Cache results in Redis with TTL 24h keyed by geohash (precision 7)."
+    },
+    {
+      "step": 2,
+      "title": "Database Schema Update",
+      "description": "Add speed_limit_kmh integer column to the trip_points table. On each new GPS point insert, populate speed_limit_kmh from the resolved value. Add a new table road_speed_cache (geohash TEXT PRIMARY KEY, speed_limit INTEGER, road_name TEXT, updated_at TIMESTAMP) for offline fallback.",
+      "migration_file": "migrations/add_speed_limit_to_trip_points.sql",
+      "notes": "Use PostGIS if available for spatial indexing. If not, geohash-based lookup is sufficient for Morocco road network density."
+    },
+    {
+      "step": 3,
+      "title": "Ably Push to Driver UI",
+      "description": "Extend the existing Ably publisher to push speed limit updates to the driver channel. Channel name pattern: trucknet:driver:{driverId}:speed_limit. Message schema: { speedLimit: 80, unit: 'km/h', roadName: 'N1 Casablanca-Rabat', isOverSpeed: true, currentSpeed: 95, timestamp: ISO8601 }. The isOverSpeed boolean is computed server-side by comparing currentSpeed (from ESP32 GPS) with speedLimit.",
+      "files_to_modify": [
+        "services/ably-publisher/driverChannel.js"
+      ]
+    },
+    {
+      "step": 4,
+      "title": "Driver UI Component — SpeedLimitIndicator",
+      "description": "Create a SpeedLimitIndicator React component displayed permanently on the driver mobile dashboard. It shows a circular road-sign-style badge with the speed limit number. Normal state: white background, red border, black number (standard European road sign style). Warning state (isOverSpeed = true): badge pulses red, number turns white on red background, haptic feedback triggered. Component subscribes to the Ably channel trucknet:driver:{driverId}:speed_limit and updates in real time.",
+      "files_to_create": [
+        "components/driver/SpeedLimitIndicator.jsx",
+        "hooks/useSpeedLimit.js"
+      ],
+      "ui_specs": {
+        "badge_size": "80x80px",
+        "position": "top-right corner of driver screen, always visible above other UI elements (z-index high)",
+        "normal_style": "white fill, 4px red border, black bold number, font-size 28px",
+        "warning_style": "red fill, white number, pulse animation 1s ease-in-out infinite",
+        "unknown_state": "grey badge with '?' when speed limit cannot be resolved"
+      }
+    },
+    {
+      "step": 5,
+      "title": "Offline Cache Strategy",
+      "description": "On the ESP32 or mobile client, store the last 20 resolved speed limits keyed by geohash. If the Ably connection drops or SpeedLimitResolver is unreachable, display the cached value with a small offline indicator icon. Sync the road_speed_cache PostGIS table nightly via a BullMQ cron job that pre-fetches speed limits along the fleet's most common routes.",
+      "files_to_create": [
+        "jobs/speedLimitCacheRefresh.js"
+      ]
+    },
+    {
+      "step": 6,
+      "title": "Safety Reporting Integration",
+      "description": "Add a new KPI to the TruckNet driver behavior analysis module: overspeed_events (count of GPS points where speed_kmh > speed_limit_kmh). This feeds into: (1) the driver score displayed to the fleet manager, (2) the SafeDetect incident feed, (3) the ESG Platform FR-HSE indicator (taux de frequence des accidents de la route). No extra work needed for ESG integration — it reads from trip_points.speed_limit_kmh automatically."
+    }
+  ],
+  "api_reference": {
+    "overpass_query_example": "https://overpass-api.de/api/interpreter?data=[out:json];way(around:30,{lat},{lng})[maxspeed];out tags;",
+    "response_field": "tags.maxspeed — value examples: '50', '80', '130', 'FR:urban', 'MA:urban' (Morocco uses MA: prefix)",
+    "morocco_defaults": {
+      "urban": 50,
+      "rural": 100,
+      "highway": 120,
+      "note": "If maxspeed tag is absent, apply Moroccan highway code defaults based on road type (highway:primary, secondary, motorway)"
+    }
+  },
+  "out_of_scope": [
+    "Speed limit sign recognition via camera (SafeDetect module — separate roadmap item)",
+    "Automatic speed governor or vehicle throttle control",
+    "Speed limit enforcement reporting to authorities"
+  ],
+  "definition_of_done": [
+    "SpeedLimitIndicator renders correctly on mobile screen in both normal and warning states",
+    "Speed limit resolves within 3 seconds on Casablanca N1 route (tested with mocked GPS trace)",
+    "trip_points.speed_limit_kmh is populated for 100% of points on a full trip replay",
+    "overspeed_events KPI appears in driver score dashboard",
+    "Offline fallback shows cached value with visual indicator when disconnected",
+    "Unit tests cover: overpassClient parsing (including MA: prefixes), isOverSpeed computation, cache miss/hit",
+    "Feature flag: FEATURE_SPEED_LIMIT_DISPLAY=true in .env — disabled by default until QA complete"
+  ]
+}

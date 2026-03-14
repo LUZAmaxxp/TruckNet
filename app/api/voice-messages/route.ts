@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth-helpers";
 import { successResponse, errorResponse } from "@/lib/api";
+import { env } from "@/lib/env";
 import { db } from "@/db";
 import { voiceMessages, users } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
@@ -28,6 +29,12 @@ const VoiceMessageHTTPInputSchema = z
     message: "Either tag or receiverId is required",
   });
 
+/** Validates that an audioUrl points to our own uploads endpoint (prevents SSRF/exfiltration). */
+function isOwnAudioUrl(url: string): boolean {
+  const base = env.NEXTAUTH_URL.replace(/\/$/, "");
+  return url.startsWith(`${base}/api/uploads/`);
+}
+
 /**
  * POST /api/voice-messages
  *
@@ -50,6 +57,12 @@ export async function POST(req: NextRequest) {
   }
 
   const { tag, audioUrl, durationSeconds } = parsed.data;
+
+  // Reject audioUrls that don't point to our own upload endpoint
+  if (!isOwnAudioUrl(audioUrl)) {
+    return errorResponse("audioUrl must point to the application's own upload endpoint", 400);
+  }
+
   let receiverUUID: string;
 
   if (tag) {

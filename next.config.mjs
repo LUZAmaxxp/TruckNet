@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const isDev = process.env.NODE_ENV !== "production";
+
 const nextConfig = {
   reactStrictMode: true,
   // Required to activate instrumentation.ts (auto-starts behaviour workers)
@@ -38,7 +40,8 @@ const nextConfig = {
               // Next.js requires unsafe-inline for styles in dev, hash-based in prod
               "style-src 'self' 'unsafe-inline'",
               // Next.js inline scripts + Socket.io client
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              // unsafe-eval is only permitted in development (hot-reload); stripped in production
+              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
               // Allow connections to same origin (API, WS), Ably, and LiveKit WSS
               "connect-src 'self' ws://localhost:* wss://localhost:* ws: wss: https://*.ably.io wss://*.ably.io https://*.ably-realtime.com wss://*.ably-realtime.com https://*.ably.net wss://*.ably.net https://main.realtime.ably.net wss://*.livekit.cloud https://*.livekit.cloud",
               // Allow audio blobs for voice message playback

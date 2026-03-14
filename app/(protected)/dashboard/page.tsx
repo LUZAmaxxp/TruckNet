@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useSocket } from "@/hooks/useSocket";
 import { DriverCard } from "@/components/drivers/DriverCard";
 import { ActiveTripCard } from "@/components/drivers/ActiveTripCard";
+import { SpeedLimitIndicator } from "@/components/drivers/SpeedLimitIndicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { NearbyDriverEntry } from "@/sockets/types";
@@ -167,6 +168,8 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {/* Speed limit badge */}
+          <SpeedLimitIndicator />
           {/* Connection status */}
           <span
             className="inline-flex items-center gap-[6px] rounded-[20px] px-[10px] py-[4px] text-[11px] font-semibold"

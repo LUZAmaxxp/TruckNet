@@ -1,0 +1,1 @@
+ALTER TABLE "gps_tracks" ADD COLUMN "speed_limit_kmh" real;
