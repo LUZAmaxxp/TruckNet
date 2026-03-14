@@ -22,7 +22,7 @@ function estimateFuel(distanceKm: number, cargoKg: number, truckTareKg: number):
   const cargoTonnes = cargoKg / 1000;
   const tareTonnes  = truckTareKg / 1000;
   // Only cargo weight drives the variable part; tare just sets minimum base
-  const totalFactor = BASE_L_PER_100KM + LADEN_L_PER_TONNE * (cargoTonnes + tareTonnes * 0);
+  const _totalFactor = BASE_L_PER_100KM + LADEN_L_PER_TONNE * (cargoTonnes + tareTonnes * 0);
   return Math.round((distanceKm / 100) * (BASE_L_PER_100KM + LADEN_L_PER_TONNE * cargoTonnes) * 10) / 10;
 }
 

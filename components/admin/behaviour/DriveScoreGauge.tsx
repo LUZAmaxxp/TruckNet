@@ -38,7 +38,6 @@ export function DriveScoreGauge({
 
   const safeScore = score ?? 0;
   const filled    = arcLen * (safeScore / 100);
-  const offset    = arcLen - filled;
 
   const color     = scoreColor(safeScore);
   const trackGray = "var(--hairline-2, #e5e7eb)";

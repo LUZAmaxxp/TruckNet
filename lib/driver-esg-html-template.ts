@@ -91,7 +91,7 @@ function idRow(label: string, value: string | null | undefined): string {
   return `<tr><td style="font-weight:600;width:46%">${label}</td><td>${value || "—"}</td></tr>`;
 }
 
-export function buildDriverEsgHtml(data: EsgDataPackage, language = "fr"): string {
+export function buildDriverEsgHtml(data: EsgDataPackage, _language = "fr"): string {
   const ghgFactor = GHG_FACTORS_KG_CO2_PER_LITER[data.fuelType ?? "diesel"] ?? 2.65;
 
   // ── COVER PAGE ────────────────────────────────────────────────────────────
@@ -396,7 +396,7 @@ export function buildDriverEsgHtml(data: EsgDataPackage, language = "fr"): strin
     ["driving_behaviour_best_trip_score",     "Score trajet le plus élevé",              data.behaviourBestTripScore,       "/100",           "ISO 26000 §6.4.6", "ESRS S1-14"],
   ] as const;
 
-  const ocrTbody = ocrRows.map(([key, label, value, unit, iso, esrs]) => {
+  const ocrTbody = ocrRows.map(([key, label, value, unit, _iso, esrs]) => {
     const display = value === null || value === undefined ? "" : typeof value === "number" ? fmt(value, 3) : String(value);
     return `<tr><td>${key}</td><td>${label}</td><td style="text-align:right">${display}</td><td>${unit}</td><td>${esrs}</td><td>${`${fmtDate(data.periodStart)} – ${fmtDate(data.periodEnd)}`}</td></tr>`;
   }).join("");

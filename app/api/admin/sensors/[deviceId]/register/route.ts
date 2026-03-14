@@ -19,7 +19,7 @@ import { DEFAULT_ALERT_CONFIG } from "@/schemas/sensor.schema";
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { deviceId: string } }
+  _context: { params: { deviceId: string } }
 ) {
   await requireAdminSession();
 

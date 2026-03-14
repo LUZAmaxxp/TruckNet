@@ -57,6 +57,7 @@ export async function PATCH(
     if (d.fuel_liters      !== undefined) updates.fuelLiters      = d.fuel_liters;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [trip] = await db
     .update(transportTrips)
     .set(updates as any)

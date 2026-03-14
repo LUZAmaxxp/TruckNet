@@ -38,6 +38,7 @@ export async function GET(
   const conditions = [eq(transportTrips.driverId, params.driverId)];
   if (from)   conditions.push(gte(transportTrips.startedAt, new Date(from)));
   if (to)     conditions.push(lte(transportTrips.startedAt, new Date(to + "T23:59:59Z")));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (status) conditions.push(eq(transportTrips.status, status as any));
 
   const records = await db

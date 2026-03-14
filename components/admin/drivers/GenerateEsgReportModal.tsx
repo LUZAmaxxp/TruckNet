@@ -154,7 +154,7 @@ export function GenerateEsgReportModal({
           Generate ESG Report
         </h2>
         <p className="mb-4 text-[12px]" style={{ color: "var(--muted)" }}>
-          Report is built from the driver's logged trips, shifts, maintenance and training records.
+          Report is built from the driver&apos;s logged trips, shifts, maintenance and training records.
         </p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

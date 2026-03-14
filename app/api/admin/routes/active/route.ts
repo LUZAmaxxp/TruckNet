@@ -2,7 +2,7 @@ import { requireAdminSession } from "@/lib/auth-helpers";
 import { successResponse } from "@/lib/api";
 import { db } from "@/db";
 import { driverRoutes, users } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 /**
  * GET /api/admin/routes/active

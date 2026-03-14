@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { count, eq, gt, sql } from "drizzle-orm";
+import { count, eq, gt } from "drizzle-orm";
 import { requireAdminSession } from "@/lib/auth-helpers";
 import { db } from "@/db";
 import { users, driverLocations, stressSignals, callHistory, textMessages, sensorAlerts } from "@/db/schema";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion }  from "framer-motion";
 import { AlertTriangle, X }        from "lucide-react";
 import { useSocket }               from "@/hooks/useSocket";

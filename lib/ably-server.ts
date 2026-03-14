@@ -17,6 +17,9 @@ let _ablyRest: Ably.Rest | null = null;
 
 export function getAblyRest(): Ably.Rest {
   if (!_ablyRest) {
+    if (!env.ABLY_API_KEY) {
+      throw new Error("[ably-server] ABLY_API_KEY is not configured — real-time publish skipped");
+    }
     _ablyRest = new Ably.Rest({ key: env.ABLY_API_KEY });
   }
   return _ablyRest;

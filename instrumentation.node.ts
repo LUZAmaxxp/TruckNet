@@ -37,7 +37,7 @@ if (!process.env.__BEHAVIOUR_WORKERS_STARTED) {
     },
   ];
 
-  function spawnWorker(name: string, script: string) {
+  const spawnWorker = (name: string, script: string) => {
     const scriptPath = path.join(process.cwd(), script);
 
     // `shell: true` is required on Windows so Node can execute the

@@ -63,11 +63,6 @@ function row(
 
 export function generateDriverEsgCsv(data: EsgDataPackage): string {
   const rows: string[] = [];
-  const p = data.periodStart;
-  const e = data.periodEnd;
-  const n = data.driverName;
-  const _ = "TruckNet";
-  const src = "TruckNet ESG Module";
 
   const r = (key: string, label: string, value: unknown, unit: string, type: "number"|"string"|"percent", iso: string, esrs: string) =>
     row(key, label, value, unit, type, iso, esrs, data);

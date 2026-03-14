@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth-helpers";
 import { errorResponse, successResponse } from "@/lib/api";
 import { db } from "@/db";
 import { behaviourReports, users } from "@/db/schema";
-import { desc, eq, and, lt, count, gte, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 /**
  * GET /api/admin/behaviour/fleet

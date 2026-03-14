@@ -12,6 +12,7 @@ export interface BehaviourReportJobData {
   driverId: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const connection = {
   url: process.env.REDIS_URL ?? "redis://localhost:6379",
 } as any;

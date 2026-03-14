@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { and, count, desc, eq } from "drizzle-orm";
+import { count, desc, eq } from "drizzle-orm";
 import { requireAdminSession } from "@/lib/auth-helpers";
 import { db } from "@/db";
 import { stressSignals, users } from "@/db/schema";

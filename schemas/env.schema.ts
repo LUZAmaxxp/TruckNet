@@ -14,7 +14,9 @@ export const EnvSchema = z.object({
     .string()
     .url({ message: "NEXTAUTH_URL must be a valid URL" }),
   SOCKET_PORT: z.string({ required_error: "SOCKET_PORT is required" }).optional(),
-  ABLY_API_KEY: z.string().min(1, { message: "ABLY_API_KEY is required" }),
+  // Ably – real-time pub/sub. Optional: when unset real-time pushes are skipped
+  // but all HTTP features (auth, trips, maps, etc.) continue to work.
+  ABLY_API_KEY: z.string().min(1, { message: "ABLY_API_KEY is required" }).optional(),
   // LiveKit – WebRTC SFU for voice/video calls (Next.js app only, not required by workers)
   LIVEKIT_URL: z.string().url({ message: "LIVEKIT_URL must be a valid URL (e.g. wss://livekit.yourdomain.com)" }).optional(),
   LIVEKIT_API_KEY: z.string().min(1, { message: "LIVEKIT_API_KEY is required" }).optional(),

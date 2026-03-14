@@ -20,6 +20,7 @@ export async function GET(
   const to   = searchParams.get("to");
 
   const conditions = [eq(vehicleMaintenanceLogs.driverId, params.driverId)];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (type) conditions.push(eq(vehicleMaintenanceLogs.maintenanceType, type as any));
   if (from) conditions.push(gte(vehicleMaintenanceLogs.performedAt, from));
   if (to)   conditions.push(lte(vehicleMaintenanceLogs.performedAt, to));
@@ -62,6 +63,7 @@ export async function POST(
       odometerKm:          d.odometer_km,
       costEur:             d.cost_eur,
       fuelLiters:          d.fuel_liters,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       fuelType:            d.fuel_type as any,
       providerName:        d.provider_name,
       nextDueAt:           d.next_due_at,

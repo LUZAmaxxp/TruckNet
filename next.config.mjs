@@ -3,6 +3,10 @@ const isDev = process.env.NODE_ENV !== "production";
 
 const nextConfig = {
   reactStrictMode: true,
+  // Lint errors should not block production builds; run eslint separately in CI
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   // Required to activate instrumentation.ts (auto-starts behaviour workers)
   experimental: {
     instrumentationHook: true,

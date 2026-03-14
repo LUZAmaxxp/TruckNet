@@ -3,7 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-helpers";
 import { errorResponse, successResponse } from "@/lib/api";
 import { db } from "@/db";
-import { transportTrips, fuelTypeEnum } from "@/db/schema";
+import { transportTrips, type fuelTypeEnum } from "@/db/schema";
 import { z } from "zod";
 import { ablyPublish } from "@/lib/ably-server";
 

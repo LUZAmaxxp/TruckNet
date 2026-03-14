@@ -9,12 +9,11 @@ import { db } from "@/db";
 import {
   drivingEvents,
   behaviourScoringConfig,
-  behaviourReports,
   transportTrips,
   stressSignals,
   type BehaviourScoringConfig,
 } from "@/db/schema";
-import { eq, and, count, max, sum } from "drizzle-orm";
+import { eq, and, count } from "drizzle-orm";
 import { DEFAULT_SCORING_CONFIG } from "./gps-classifier";
 
 export interface BehaviourReportData {
@@ -115,7 +114,7 @@ export async function calculateBehaviourScore(
   const criticalEvents = events.filter((e) => e.severity === "critical").length;
 
   // ── SOS count from stressSignals ────────────────────────────────────────
-  const [{ sosCount: sosCountRaw }] = await db
+  const [{ sosCount: _sosCountRaw }] = await db
     .select({ sosCount: count() })
     .from(stressSignals)
     .where(
@@ -135,7 +134,7 @@ export async function calculateBehaviourScore(
         .from(stressSignals)
         .where(eq(stressSignals.userId, driverId))
         .then((rows) =>
-          rows.filter((r) => {
+          rows.filter((_r) => {
             // We cannot filter by time without extra col — count as proxy
             return true;
           }).length

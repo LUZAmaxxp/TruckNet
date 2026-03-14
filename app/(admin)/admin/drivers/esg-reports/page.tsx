@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { FileBarChart, Loader2, Download } from "lucide-react";
+import { Loader2, Download } from "lucide-react";
 
 interface EsgReport {
   id: string;

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Phone, PhoneOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCallState } from "@/hooks/useCallState";
-import { cn, toDate } from "@/lib/utils";
+import { toDate } from "@/lib/utils";
 
 /**
  * ActiveCallBadge

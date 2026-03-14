@@ -38,8 +38,9 @@ COPY . .
 # Validate env schema at build time via dummy values so `next build` succeeds.
 # Real secrets are injected at runtime.
 ENV DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder \
-    NEXTAUTH_SECRET=build-time-placeholder-secret \
+    NEXTAUTH_SECRET=build-time-placeholder-secret-xxxxxxxx \
     NEXTAUTH_URL=http://localhost:3000 \
+    ABLY_API_KEY=build-time-placeholder \
     SOCKET_PORT=3000 \
     NODE_ENV=production
 

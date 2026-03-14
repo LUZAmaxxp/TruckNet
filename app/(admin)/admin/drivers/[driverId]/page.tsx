@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -145,7 +146,6 @@ export default function DriverDetailPage({ params }: { params: { driverId: strin
 
   const currentDriverFleet = (fleetSummary as Array<{ driverId: string }>).find((d) => d.driverId === driverId);
   const otherFleet = (fleetSummary as Array<{ driverId: string }>).filter((d) => d.driverId !== driverId);
-  const latestReport = (reports as Array<{ status: string }>).find((r) => r.status === "ready");
 
   return (
     <div className="flex flex-col gap-4">

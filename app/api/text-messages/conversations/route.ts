@@ -3,7 +3,6 @@ import { desc, eq, inArray, or } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-helpers";
 import { db } from "@/db";
 import { textMessages, users } from "@/db/schema";
-import { errorResponse } from "@/lib/api";
 
 /**
  * GET /api/text-messages/conversations

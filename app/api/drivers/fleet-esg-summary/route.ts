@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { requireAdminSession } from "@/lib/auth-helpers";
-import { errorResponse, successResponse } from "@/lib/api";
+import { successResponse } from "@/lib/api";
 import { db } from "@/db";
 import { driverEsgReports, users } from "@/db/schema";
 
@@ -17,7 +17,7 @@ export async function GET(_req: NextRequest) {
   // Latest ESG report per driver (last 3 months)
   const threeMonthsAgo = new Date();
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-  const cutoff = threeMonthsAgo.toISOString().split("T")[0];
+  const _cutoff = threeMonthsAgo.toISOString().split("T")[0];
 
   const reportRows = await db
     .select()

@@ -1,4 +1,4 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { desc, eq, count, and } from "drizzle-orm";
 import { requireAdminSession } from "@/lib/auth-helpers";
 import { db } from "@/db";

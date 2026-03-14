@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth-helpers";
 import { errorResponse, successResponse } from "@/lib/api";
 import { db } from "@/db";
 import { behaviourReports, transportTrips } from "@/db/schema";
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { isUUID } from "@/lib/validate-uuid";
 
 /**

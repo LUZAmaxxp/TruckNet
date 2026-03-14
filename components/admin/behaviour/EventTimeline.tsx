@@ -67,7 +67,7 @@ function CustomTooltip({ active, payload }: any) {
   );
 }
 
-export function EventTimeline({ events, tripStart, className }: EventTimelineProps) {
+export function EventTimeline({ events, tripStart: _tripStart, className }: EventTimelineProps) {
   if (!events.length) {
     return (
       <p className="text-center text-[13px] py-8" style={{ color: "var(--ink-secondary)" }}>

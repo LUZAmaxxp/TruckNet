@@ -67,6 +67,7 @@ export async function PATCH(
   if (d.completed_at      !== undefined) updates.completedAt      = new Date(d.completed_at);
   if (d.status            !== undefined) updates.status           = d.status;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [record] = await db
     .update(transportTrips)
     .set(updates as any)

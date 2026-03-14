@@ -126,11 +126,11 @@ async function buildFleetBenchmarks(
   const startTs = new Date(periodStart);
   const endTs   = new Date(periodEnd + "T23:59:59.999Z");
 
-  let ghgIntensities: number[]       = [];
-  let incidentRates: number[]        = [];
-  let trainingHoursList: number[]    = [];
-  let cargoComplianceList: number[]  = [];
-  let vehicleComplianceList: number[]= [];
+  const ghgIntensities: number[]       = [];
+  const incidentRates: number[]        = [];
+  const trainingHoursList: number[]    = [];
+  const cargoComplianceList: number[]  = [];
+  const vehicleComplianceList: number[]= [];
 
   for (const { id } of allDrivers) {
     // GHG intensity
