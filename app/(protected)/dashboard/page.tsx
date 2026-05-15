@@ -9,6 +9,7 @@ import { useSocket } from "@/hooks/useSocket";
 import { DriverCard } from "@/components/drivers/DriverCard";
 import { ActiveTripCard } from "@/components/drivers/ActiveTripCard";
 import { SpeedLimitIndicator } from "@/components/drivers/SpeedLimitIndicator";
+import { DriverAlertBanner } from "@/components/drivers/DriverAlertBanner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { NearbyDriverEntry } from "@/sockets/types";
@@ -190,6 +191,9 @@ export default function DashboardPage() {
           </Button>
         </div>
       </div>
+
+      {/* Sensor alert banner — shown when truck device has active alerts */}
+      <DriverAlertBanner />
 
       {/* Location card */}
       <div

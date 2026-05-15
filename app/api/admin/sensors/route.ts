@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { desc, eq, count, and } from "drizzle-orm";
+
+export const dynamic = "force-dynamic";
 import { requireAdminSession } from "@/lib/auth-helpers";
 import { db } from "@/db";
 import { iotDevices, sensorReadings, sensorAlerts } from "@/db/schema";

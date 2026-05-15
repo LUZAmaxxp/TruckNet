@@ -47,6 +47,9 @@ export default function SensorsPage() {
 
   useEffect(() => {
     void fetchDevices();
+    // Periodic refresh every 30s as a safety net if Ably misses an update
+    const interval = setInterval(() => void fetchDevices(), 30_000);
+    return () => clearInterval(interval);
   }, [fetchDevices]);
 
   // Merge fleet summary updates from Ably

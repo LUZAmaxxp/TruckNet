@@ -19,6 +19,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "worker:sensor": "node --env-file=.env.local --import=tsx workers/sensor-consumer.ts",
+    "worker:dev:sensor": "node --env-file=.env.local --import=tsx --watch workers/sensor-consumer.ts",
     "worker:stress": "tsx workers/stress-signal-consumer.ts",
     "worker:dev:stress": "tsx watch workers/stress-signal-consumer.ts",
     "kafka:setup": "tsx scripts/kafka-setup.ts",

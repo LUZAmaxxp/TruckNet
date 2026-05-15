@@ -52,9 +52,9 @@ export function SensorGauge({
 
   return (
     <svg
-      viewBox="0 0 120 74"
+      viewBox="0 0 120 82"
       width={size}
-      height={size * (74 / 120)}
+      height={size * (82 / 120)}
       aria-label={`${label}: ${displayVal} ${unit}`}
     >
       {/* Background arc */}
@@ -95,7 +95,7 @@ export function SensorGauge({
       {/* Unit text */}
       <text
         x={CX}
-        y={65}
+        y={69}
         textAnchor="middle"
         dominantBaseline="middle"
         fontFamily="'Instrument Sans', sans-serif"
@@ -108,7 +108,7 @@ export function SensorGauge({
       {/* Label text */}
       <text
         x={CX}
-        y={74}
+        y={77}
         textAnchor="middle"
         dominantBaseline="middle"
         fontFamily="'Instrument Sans', sans-serif"

@@ -140,11 +140,14 @@ export function SensorDeviceCard({ device, onClick }: SensorDeviceCardProps) {
             </div>
           </>
         ) : (
-          <>
-            <SkeletonRow />
-            <SkeletonRow />
-            <SkeletonRow />
-          </>
+          <div
+            className="flex items-center justify-center rounded-[8px] py-3"
+            style={{ background: "var(--base)" }}
+          >
+            <span className="font-body text-[11px]" style={{ color: "var(--subtle)" }}>
+              No readings yet
+            </span>
+          </div>
         )}
       </div>
 

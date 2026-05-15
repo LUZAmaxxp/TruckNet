@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut, useSession } from "next-auth/react";
-import { Map, MessageSquare, AlertTriangle, LayoutDashboard, LogOut, Users } from "lucide-react";
+import { Map, MessageSquare, AlertTriangle, LayoutDashboard, LogOut, Users, Cpu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { LiveConnectionBadge } from "@/components/layout/LiveConnectionBadge";
@@ -16,6 +16,7 @@ const navLinks = [
   { href: "/messages",  label: "Messages",  icon: MessageSquare },
   { href: "/friends",   label: "Friends",   icon: Users },
   { href: "/stress",    label: "Stress",    icon: AlertTriangle },
+  { href: "/profile",   label: "My Truck",  icon: Cpu },
 ];
 
 export function Navbar() {

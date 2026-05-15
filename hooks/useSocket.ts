@@ -29,6 +29,9 @@ const FLEET_EVENTS = new Set<EventName>(["driver_location_updated", "driver_rout
 /** Events delivered on the shared "admin:sensors" channel */
 const SENSOR_EVENTS = new Set<EventName>(["sensor_alert", "sensor_alert_acked", "fleet_sensor_update"]);
 
+/** Events delivered on the driver's private user:{id} channel — sensor alerts pushed to the driver */
+const DRIVER_SENSOR_EVENTS = new Set<EventName>(["sensor_alert_driver"]);
+
 /** Events delivered on the shared "admin:behaviour" channel */
 const BEHAVIOUR_EVENTS = new Set<EventName>(["behaviour_event", "behaviour_report_ready", "behaviour_report_failed"]);
 
@@ -93,6 +96,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       // IoT sensor fleet events
       "sensor_alert",
       "sensor_alert_acked",
+      "sensor_alert_driver",
       "fleet_sensor_update",
       // Behaviour / Safety events
       "behaviour_event",
@@ -119,6 +123,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         ? sensorChannel
         : BEHAVIOUR_EVENTS.has(event)
         ? behaviourChannel
+        : DRIVER_SENSOR_EVENTS.has(event)
+        ? userChannel
         : userChannel;
       void channel.subscribe(event, dispatcher);
     }

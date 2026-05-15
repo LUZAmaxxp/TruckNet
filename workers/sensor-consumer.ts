@@ -22,7 +22,7 @@ import mqtt from "mqtt";
 import Ably from "ably";
 import { db } from "@/db";
 import { iotDevices, sensorReadings, sensorAlerts, transportTrips } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc, count } from "drizzle-orm";
 import { SensorReadingSchema } from "@/schemas/sensor.schema";
 import {
   loadDeviceConfigs,
@@ -47,6 +47,10 @@ const FLEET_SUMMARY_INTERVAL_MS = 10 * 1_000;         // broadcast fleet summary
 // ---------------------------------------------------------------------------
 
 let deviceConfigs = new Map<string, AlertConfig>();
+
+// Track last Ably publish time per alert id to throttle re-broadcasts
+const alertLastPublished = new Map<string, number>();
+const ALERT_REPUBLISH_INTERVAL_MS = 5 * 60 * 1_000; // re-publish every 5 min
 
 // ---------------------------------------------------------------------------
 // Ably REST client
@@ -122,6 +126,8 @@ async function handleReading(deviceId: string, raw: unknown): Promise<void> {
   }
   const data = parsed.data;
 
+  console.log(`[Reading] ${deviceId} T:${data.temperature_c}°C H:${data.humidity_pct}% V:${data.vibration_magnitude}G`);
+
   // 2. Persist reading
   await db.insert(sensorReadings).values({
     deviceId,
@@ -144,9 +150,9 @@ async function handleReading(deviceId: string, raw: unknown): Promise<void> {
   await ablyPublish(`sensors:${deviceId}`, "sensor_reading", {
     deviceId,
     recordedAt:          new Date(data.ts).toISOString(),
-    temperature_c:       data.temperature_c,
-    humidity_pct:        data.humidity_pct,
-    vibration_magnitude: data.vibration_magnitude,
+    temperatureC:        data.temperature_c,
+    humidityPct:         data.humidity_pct,
+    vibrationMagnitude:  data.vibration_magnitude,
   });
 
   // 5. Evaluate thresholds
@@ -155,8 +161,15 @@ async function handleReading(deviceId: string, raw: unknown): Promise<void> {
 
   // 6. Insert alerts with deduplication — prevent alert storms
   for (const breach of breaches) {
+    // Fetch device info once per breach (needed for both new and existing paths)
+    const [device] = await db
+      .select({ truckLabel: iotDevices.truckLabel, driverId: iotDevices.driverId })
+      .from(iotDevices)
+      .where(eq(iotDevices.deviceId, deviceId))
+      .limit(1);
+
     const existing = await db
-      .select({ id: sensorAlerts.id })
+      .select({ id: sensorAlerts.id, driverId: sensorAlerts.driverId, triggeredAt: sensorAlerts.triggeredAt })
       .from(sensorAlerts)
       .where(
         and(
@@ -167,14 +180,57 @@ async function handleReading(deviceId: string, raw: unknown): Promise<void> {
       )
       .limit(1);
 
-    if (existing.length > 0) continue; // already alerting — skip
+    if (existing.length > 0) {
+      const existingAlert = existing[0]!;
 
-    // Fetch device info for alert payload
-    const [device] = await db
-      .select({ truckLabel: iotDevices.truckLabel, driverId: iotDevices.driverId })
-      .from(iotDevices)
-      .where(eq(iotDevices.deviceId, deviceId))
-      .limit(1);
+      // Update stored value so the admin panel shows current severity
+      const updates: Record<string, unknown> = { value: breach.value };
+
+      // If a driver was linked AFTER this alert was created, backfill driverId
+      const driverJustLinked = device?.driverId && existingAlert.driverId === null;
+      if (driverJustLinked) updates.driverId = device!.driverId;
+
+      await db
+        .update(sensorAlerts)
+        .set(updates)
+        .where(eq(sensorAlerts.id, existingAlert.id));
+
+      // Re-publish every 5 min so the driver keeps seeing the alert
+      const lastPublished = alertLastPublished.get(existingAlert.id) ?? 0;
+      const msSinceLast   = Date.now() - lastPublished;
+      const shouldRepublish = driverJustLinked || msSinceLast >= ALERT_REPUBLISH_INTERVAL_MS;
+
+      console.log(`[Dedup] ${breach.type} on ${deviceId}: lastPublished=${lastPublished === 0 ? "never" : Math.round(msSinceLast / 1000) + "s ago"} shouldRepublish=${shouldRepublish}`);
+
+      if (shouldRepublish) {
+        alertLastPublished.set(existingAlert.id, Date.now());
+        console.warn(`[Republish] ${breach.type} on ${deviceId}: ${breach.value} > ${breach.threshold}`);
+
+        await ablyPublish("admin:sensors", "sensor_alert", {
+          alertId:     existingAlert.id,
+          deviceId,
+          truckLabel:  device?.truckLabel ?? deviceId,
+          alertType:   breach.type,
+          value:       breach.value,
+          threshold:   breach.threshold,
+          triggeredAt: existingAlert.triggeredAt.toISOString(),
+        });
+
+        if (device?.driverId) {
+          await ablyPublish(`user:${device.driverId}`, "sensor_alert_driver", {
+            alertId:     existingAlert.id,
+            deviceId,
+            truckLabel:  device.truckLabel ?? deviceId,
+            alertType:   breach.type,
+            value:       breach.value,
+            threshold:   breach.threshold,
+            triggeredAt: existingAlert.triggeredAt.toISOString(),
+          });
+        }
+      }
+
+      continue; // already alerting — skip inserting a new row
+    }
 
     const [newAlert] = await db
       .insert(sensorAlerts)
@@ -197,6 +253,20 @@ async function handleReading(deviceId: string, raw: unknown): Promise<void> {
       threshold:   breach.threshold,
       triggeredAt: newAlert.triggeredAt.toISOString(),
     });
+
+    // Fan-out the same alert to the driver's personal channel so the
+    // driver app can show an in-cab warning toast / notification.
+    if (device?.driverId) {
+      await ablyPublish(`user:${device.driverId}`, "sensor_alert_driver", {
+        alertId:     newAlert.id,
+        deviceId,
+        truckLabel:  device.truckLabel ?? deviceId,
+        alertType:   breach.type,
+        value:       breach.value,
+        threshold:   breach.threshold,
+        triggeredAt: newAlert.triggeredAt.toISOString(),
+      });
+    }
 
     console.warn(`[Alert] ${breach.type} on ${deviceId}: ${breach.value} > ${breach.threshold}`);
   }
@@ -271,14 +341,60 @@ async function broadcastFleetSummary(): Promise<void> {
   try {
     const devices = await db
       .select({
-        deviceId:   iotDevices.deviceId,
-        truckLabel: iotDevices.truckLabel,
-        status:     iotDevices.status,
-        lastSeenAt: iotDevices.lastSeenAt,
+        deviceId:        iotDevices.deviceId,
+        truckLabel:      iotDevices.truckLabel,
+        status:          iotDevices.status,
+        lastSeenAt:      iotDevices.lastSeenAt,
+        firmwareVersion: iotDevices.firmwareVersion,
       })
       .from(iotDevices);
 
-    await ablyPublish("admin:sensors", "fleet_sensor_update", devices);
+    // Enrich each device with its latest reading and active alert count
+    const enriched = await Promise.all(
+      devices.map(async (device) => {
+        const [latestReading] = await db
+          .select({
+            temperatureC:       sensorReadings.temperatureC,
+            humidityPct:        sensorReadings.humidityPct,
+            vibrationMagnitude: sensorReadings.vibrationMagnitude,
+            recordedAt:         sensorReadings.recordedAt,
+          })
+          .from(sensorReadings)
+          .where(eq(sensorReadings.deviceId, device.deviceId))
+          .orderBy(desc(sensorReadings.recordedAt))
+          .limit(1);
+
+        const [alertRow] = await db
+          .select({ count: count() })
+          .from(sensorAlerts)
+          .where(
+            and(
+              eq(sensorAlerts.deviceId, device.deviceId),
+              eq(sensorAlerts.status, "active")
+            )
+          );
+
+        return {
+          deviceId:        device.deviceId,
+          truckLabel:      device.truckLabel,
+          status:          device.status,
+          lastSeenAt:      device.lastSeenAt ? device.lastSeenAt.toISOString() : null,
+          firmwareVersion: device.firmwareVersion ?? null,
+          activeAlertCount: alertRow?.count ?? 0,
+          latestReading: latestReading
+            ? {
+                temperatureC:       latestReading.temperatureC,
+                humidityPct:        latestReading.humidityPct,
+                vibrationMagnitude: latestReading.vibrationMagnitude,
+                recordedAt:         latestReading.recordedAt.toISOString(),
+              }
+            : null,
+        };
+      })
+    );
+
+    // Wrap in { devices } to match FleetSensorUpdatePayload type
+    await ablyPublish("admin:sensors", "fleet_sensor_update", { devices: enriched });
   } catch (err) {
     console.error("[Worker] Fleet summary error:", err);
   }

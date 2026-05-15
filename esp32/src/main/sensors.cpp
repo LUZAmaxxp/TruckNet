@@ -13,7 +13,7 @@ static bool            mpuReady = false;
 bool initSensors() {
   Serial.println("[Sensors] Initializing...");
   dht.begin();
-  Serial.println("[Sensors] DHT22 ready on GPIO" + String(DHT_PIN));
+  Serial.println("[Sensors] DHT11 ready on GPIO" + String(DHT_PIN));
 
   Wire.begin(MPU_SDA_PIN, MPU_SCL_PIN);
   if (!mpu.begin()) {
@@ -62,7 +62,10 @@ MPU6050Reading readMPU6050() {
 }
 
 float computeVibrationMagnitude(float ax, float ay, float az) {
-  return sqrt(ax*ax + ay*ay + az*az);
+  // Total acceleration magnitude, then subtract 1G (static gravity) so a
+  // stationary device reads 0 and the threshold measures *dynamic* vibration only.
+  float total = sqrt(ax*ax + ay*ay + az*az);
+  return fmaxf(0.0f, total - 1.0f);
 }
 
 SensorBundle readAll() {

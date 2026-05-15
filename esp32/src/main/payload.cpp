@@ -1,5 +1,6 @@
 #include "payload.h"
 #include "config.h"
+#include "watchdog.h"
 #include <ArduinoJson.h>
 #include <time.h>
 
@@ -12,7 +13,7 @@ void syncNTP() {
   configTime(0, 0, "pool.ntp.org", "time.google.com");
   struct tm ti;
   int retries = 0;
-  while (!getLocalTime(&ti) && retries < 20) { delay(500); Serial.print("."); retries++; }
+  while (!getLocalTime(&ti) && retries < 20) { delay(500); Serial.print("."); retries++; feedWatchdog(); }
   if (retries < 20) {
     bootEpoch = time(nullptr); bootMs = millis(); ntpSynced = true;
     Serial.println(" OK: " + String((long)bootEpoch));

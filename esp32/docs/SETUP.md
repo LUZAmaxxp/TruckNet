@@ -2,6 +2,31 @@
 
 ---
 
+## Automated Setup (recommended)
+
+A single script handles Part A and Part B automatically:
+
+```bash
+# Full setup (server + one device)
+bash scripts/setup.sh
+
+# Per-device only (server already configured)
+bash scripts/setup.sh --device
+```
+
+Run from the **project root** in **Git Bash**. It will prompt for passwords and
+WiFi credentials, patch the ESP32 config files, and register the device in the DB.
+
+After the script finishes, skip straight to **Step 8** (Arduino IDE) below.
+
+---
+
+## Manual Setup
+
+Follow these steps if you prefer to configure things by hand.
+
+---
+
 ## Part A — Server-side setup (do this once)
 
 ### Step 1 — Generate the Mosquitto passwd file

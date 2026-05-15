@@ -1,7 +1,7 @@
 #pragma once
 
 // credentials.h is gitignored — copy from credentials.example.h
-#include "../config/credentials.h"
+#include "credentials.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  TruckNet ESP32 — Central Configuration
@@ -17,7 +17,7 @@
 // ── BROKER (change to your server IP or domain) ───────────────────────────────
 // Docker internal: use service name 'mosquitto' inside compose network
 // External access: your server's public IP or domain, e.g. "mqtt.mydomain.com"
-#define MQTT_BROKER_HOST        "192.168.1.100"
+#define MQTT_BROKER_HOST        "192.168.100.14"
 #define MQTT_BROKER_PORT        1883
 #define MQTT_QOS                1
 #define MQTT_KEEPALIVE_SECONDS  60
@@ -30,7 +30,7 @@
 
 // ── PINS ─────────────────────────────────────────────────────────────────────
 #define DHT_PIN             4      // DHT22 data → GPIO4 (with 10kΩ pull-up to 3.3V)
-#define DHT_TYPE            DHT22
+#define DHT_TYPE            DHT11
 #define MPU_SDA_PIN         21     // MPU6050 SDA → GPIO21
 #define MPU_SCL_PIN         22     // MPU6050 SCL → GPIO22
 #define LED_PIN             2      // onboard LED — most ESP32 DevKit V1 boards

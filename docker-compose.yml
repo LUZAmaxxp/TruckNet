@@ -177,6 +177,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    command: node_modules/.bin/tsx workers/sensor-consumer.ts
     restart: unless-stopped
     depends_on:
       postgres:
@@ -184,7 +185,7 @@ services:
       mosquitto:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://truckconnect:${POSTGRES_PASSWORD:-truckconnect_dev}@postgres:5432/truckconnect
+      DATABASE_URL: postgresql://Ayman:mypassword@host.docker.internal:5432/truckNET
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-local-dev-secret-change-in-production}
       NEXTAUTH_URL: http://localhost:3000
       NODE_ENV: production
@@ -277,8 +278,8 @@ services:
     container_name: trucknet-mosquitto
     restart: unless-stopped
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "0.0.0.0:1883:1883"
+      - "0.0.0.0:9001:9001"
     volumes:
       - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./docker/mosquitto/passwd:/mosquitto/config/passwd:ro

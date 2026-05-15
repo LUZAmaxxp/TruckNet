@@ -24,6 +24,8 @@ export async function GET() {
       "drivers:locations": ["subscribe", "publish", "presence"],
       // Shared broadcast channels
       "stress:alerts": ["subscribe", "publish"],
+      // Sensor device channels — admin dashboard live readings
+      "sensors:*": ["subscribe"],
     },
   });
 

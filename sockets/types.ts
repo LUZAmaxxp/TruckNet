@@ -147,6 +147,17 @@ export interface SensorAlertAckedPayload {
   ackedBy: string;
 }
 
+/** Sent to the driver's personal user:{driverId} channel */
+export interface SensorAlertDriverPayload {
+  alertId:     string;
+  deviceId:    string;
+  truckLabel:  string;
+  alertType:   "temp_high" | "temp_low" | "humidity_high" | "vibration_high";
+  value:       number;
+  threshold:   number;
+  triggeredAt: string;
+}
+
 export interface DeviceStatusPayload {
   deviceId: string;
   status: "online" | "offline" | "unknown";
@@ -250,6 +261,7 @@ export interface ServerToClientEvents {
   sensor_reading: (payload: SensorReadingPayload) => void;
   sensor_alert: (payload: SensorAlertPayload) => void;
   sensor_alert_acked: (payload: SensorAlertAckedPayload) => void;
+  sensor_alert_driver: (payload: SensorAlertDriverPayload) => void;
   device_status: (payload: DeviceStatusPayload) => void;
   fleet_sensor_update: (payload: FleetSensorUpdatePayload) => void;
   // Behaviour / Safety events

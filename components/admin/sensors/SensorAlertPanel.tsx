@@ -24,14 +24,19 @@ export function SensorAlertPanel({ deviceId }: SensorAlertPanelProps) {
       if (res.ok) {
         const data = await res.json() as { alerts?: SensorAlertRow[] };
         setAlerts(data.alerts ?? []);
+      } else {
+        console.error("[SensorAlertPanel] fetchAlerts failed:", res.status, res.statusText);
       }
-    } catch {
-      // silent
+    } catch (err) {
+      console.error("[SensorAlertPanel] fetchAlerts error:", err);
     }
   }, [deviceId]);
 
   useEffect(() => {
     void fetchAlerts();
+    // Poll every 30 s so the panel self-corrects even if an Ably event was missed
+    const intervalId = setInterval(() => void fetchAlerts(), 30_000);
+    return () => clearInterval(intervalId);
   }, [fetchAlerts]);
 
   // Ably real-time subscriptions
